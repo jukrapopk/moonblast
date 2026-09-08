@@ -85,6 +85,7 @@ function AppTile({
   path,
   customIcon,
   bust,
+  focused,
   onLaunch,
   onRemove,
   onContextMenu,
@@ -94,6 +95,7 @@ function AppTile({
   path: string;
   customIcon: string | null;
   bust: number;
+  focused: boolean;
   onLaunch: () => void;
   onRemove?: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
@@ -108,7 +110,7 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
-      className="group relative"
+      className={`group relative rounded-2xl ${focused ? "ring-2 ring-(--color-accent)" : ""}`}
       onContextMenu={onContextMenu}
     >
       <button
@@ -267,6 +269,56 @@ export function AppsView() {
   const [bust, setBust] = useState(0);
   const ctx = useContextMenu();
 
+  // Keyboard / gamepad grid navigation.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [focusIdx, setFocusIdx] = useState(-1);
+  const COLS = 6;
+
+  useEffect(() => {
+    gridRef.current?.focus();
+  }, [query, shortcuts.length]);
+
+  useEffect(() => {
+    if (focusIdx >= 0 && gridRef.current) {
+      (gridRef.current.children[focusIdx] as HTMLElement | undefined)?.scrollIntoView({
+        block: "nearest",
+      });
+    }
+  }, [focusIdx]);
+
+  function onGridKey(e: React.KeyboardEvent) {
+    const n = filtered.length;
+    if (n === 0) return;
+    let idx = focusIdx < 0 ? 0 : focusIdx;
+    let moved = true;
+    switch (e.key) {
+      case "ArrowRight":
+        idx = Math.min(n - 1, idx + 1);
+        break;
+      case "ArrowLeft":
+        idx = Math.max(0, idx - 1);
+        break;
+      case "ArrowDown":
+        idx = Math.min(n - 1, idx + COLS);
+        break;
+      case "ArrowUp":
+        idx = Math.max(0, idx - COLS);
+        break;
+      case "Enter":
+      case " ": {
+        const a = filtered[idx];
+        if (a) launch(a);
+        return;
+      }
+      default:
+        moved = false;
+    }
+    if (moved) {
+      e.preventDefault();
+      setFocusIdx(idx);
+    }
+  }
+
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; category?: string }) {
@@ -354,17 +406,23 @@ export function AppsView() {
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-(--color-muted)">No apps match “{query}”.</div>
         ) : (
-          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            <AnimatePresence>
-              {filtered.map((a) => (
-                <AppTile
-                  key={a.path}
-                  name={a.name}
-                  category={a.category}
-                  path={a.path}
-                  customIcon={a.custom_icon}
-                  bust={bust}
-                  onLaunch={() => launch(a)}
+          <div
+          ref={gridRef}
+          tabIndex={-1}
+          onKeyDown={onGridKey}
+          className="grid grid-cols-3 gap-4 outline-none sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+        >
+          <AnimatePresence>
+            {filtered.map((a, i) => (
+              <AppTile
+                key={a.path}
+                name={a.name}
+                category={a.category}
+                path={a.path}
+                customIcon={a.custom_icon}
+                bust={bust}
+                focused={i === focusIdx}
+                onLaunch={() => launch(a)}
                   onRemove={() => removeShortcut(a.path)}
                   onContextMenu={(e) =>
                     ctx.open(e, [

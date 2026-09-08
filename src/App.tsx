@@ -7,6 +7,7 @@ import { AppsView } from "./components/AppsView";
 import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView } from "./components/SettingsView";
 import { useSettings } from "./settings/SettingsContext";
+import { useGamepad } from "./hooks/useGamepad";
 
 export default function App() {
   const { settings, update } = useSettings();
@@ -20,6 +21,24 @@ export default function App() {
   const moonlightEnabled = settings.integrations.moonlight_enabled;
   const moonlightDir = settings.integrations.moonlight_folder;
   const appsEnabled = settings.integrations.apps_enabled;
+
+  useGamepad();
+
+  // Tab / Shift+Tab switches the top-level view (keyboard + gamepad LB/RB).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const order: View[] = ["apps", "moonlight", "settings"];
+        let i = order.indexOf(view);
+        if (e.shiftKey) i = (i - 1 + order.length) % order.length;
+        else i = (i + 1) % order.length;
+        setView(order[i]);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view]);
 
   // If apps are disabled, fall back to another view so we don't stay stuck.
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "@phosphor-icons/react";
 
@@ -13,6 +13,16 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, subtitle, children, width = "max-w-md" }: ModalProps) {
+  // Escape closes the modal (also reached via gamepad B).
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   return (
     <AnimatePresence>
       {open && (
