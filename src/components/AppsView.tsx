@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import { apps } from "../data";
+import { PageShell } from "./PageShell";
 
 function AppTile({
   name,
@@ -44,21 +45,11 @@ export function AppsView() {
   );
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22 }}
-      className="mx-auto max-w-6xl space-y-8"
-    >
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Apps</h1>
-          <p className="text-sm text-(--color-muted)">
-            Launch Windows apps. Curate and customize your own collection.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <PageShell
+      title="Apps"
+      subtitle="Launch Windows apps. Curate and customize your own collection."
+      actions={
+        <>
           <div className="relative">
             <MagnifyingGlass size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)" />
             <input
@@ -72,9 +63,9 @@ export function AppsView() {
             <Plus size={16} weight="bold" />
             Add
           </button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         <AnimatePresence>
           {filtered.map((a, i) => (
@@ -87,6 +78,6 @@ export function AppsView() {
           </div>
         )}
       </div>
-    </motion.div>
+    </PageShell>
   );
 }

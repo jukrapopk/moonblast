@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Plus, Play, LockKey, Monitor } from "@phosphor-icons/react";
 import { machines, type Machine } from "../data";
 import { MoonlightSettings } from "./MoonlightSettings";
+import { PageShell } from "./PageShell";
+import { SegmentedTabs } from "./SegmentedTabs";
 
 type Step = "address" | "pin";
 
@@ -231,83 +233,64 @@ export function MoonlightView() {
     showToast(`Launching ${machine.name}…`);
   }
 
-  const tabs: { id: "machines" | "settings"; label: string }[] = [
-    { id: "machines", label: "Machines" },
-    { id: "settings", label: "Settings" },
-  ];
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22 }}
-      className="mx-auto max-w-4xl"
-    >
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Moonlight</h1>
-          <p className="text-base text-(--color-muted)">Your streaming hosts.</p>
-        </div>
-        {sub === "machines" && (
-          <button
-            onClick={() => setModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-medium text-white transition hover:brightness-110"
-          >
-            <Plus size={16} weight="bold" />
-            Add machine
-          </button>
-        )}
-      </div>
-
-      <div className="mb-6 inline-flex items-center gap-1 rounded-full bg-(--color-surface) p-1 ring-1 ring-(--color-border)">
-        {tabs.map((t) => {
-          const active = sub === t.id;
-          return (
+    <>
+      <PageShell
+        title="Moonlight"
+        subtitle="Your streaming hosts."
+        actions={
+          sub === "machines" ? (
             <button
-              key={t.id}
-              onClick={() => setSub(t.id)}
-              className={`rounded-full px-5 py-1.5 text-base font-medium transition-colors ${
-                active
-                  ? "bg-(--color-accent) text-white"
-                  : "text-(--color-muted) hover:text-(--color-text)"
-              }`}
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-medium text-white transition hover:brightness-110"
             >
-              {t.label}
+              <Plus size={16} weight="bold" />
+              Add machine
             </button>
-          );
-        })}
-      </div>
-
-      <AnimatePresence mode="wait">
-        {sub === "machines" ? (
-          <motion.div
-            key="machines"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            <div className="space-y-3">
-              {machines.map((m) => (
-                <MachineCard key={m.id} machine={m} onPair={handlePair} onPlay={handlePlay} />
-              ))}
-            </div>
-            <div className="mt-6 rounded-2xl border border-dashed border-(--color-border) p-5 text-center text-sm text-(--color-muted)">
-              Pairing & host discovery (real network functionality) will replace this UI in Step 2.
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="settings"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            <MoonlightSettings />
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ) : undefined
+        }
+        tabs={
+          <SegmentedTabs
+            value={sub}
+            onChange={setSub}
+            options={[
+              { id: "machines", label: "Machines" },
+              { id: "settings", label: "Settings" },
+            ]}
+          />
+        }
+      >
+        <AnimatePresence mode="wait">
+          {sub === "machines" ? (
+            <motion.div
+              key="machines"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="space-y-3">
+                {machines.map((m) => (
+                  <MachineCard key={m.id} machine={m} onPair={handlePair} onPlay={handlePlay} />
+                ))}
+              </div>
+              <div className="mt-6 rounded-2xl border border-dashed border-(--color-border) p-5 text-center text-sm text-(--color-muted)">
+                Pairing & host discovery (real network functionality) will replace this UI in Step 2.
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="settings"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <MoonlightSettings />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </PageShell>
 
       <AnimatePresence>
         {modalOpen && <AddMachineModal onClose={() => setModalOpen(false)} />}
@@ -325,6 +308,6 @@ export function MoonlightView() {
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </>
   );
 }

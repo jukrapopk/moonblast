@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { PageShell } from "./PageShell";
 
 function Toggle({
   label,
@@ -48,17 +48,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function SettingsView() {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className="max-w-2xl space-y-6"
-    >
-      <div className="mb-6">
-        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-base text-(--color-muted)">App-level settings.</p>
-      </div>
-
+    <PageShell title="Settings" subtitle="App-level settings.">
       <Section title="General">
         <Toggle
           label="Start with Windows"
@@ -85,6 +75,6 @@ export function SettingsView() {
           Moonlight streaming settings live on the Moonlight page.
         </div>
       </Section>
-    </motion.div>
+    </PageShell>
   );
 }
