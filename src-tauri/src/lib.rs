@@ -534,6 +534,12 @@ pub fn run() {
         .setup(|app| {
             app.manage(settings::SettingsState::load(app.handle()));
             app.manage(StreamState::default());
+            // Apply the bundled app icon to the main window (taskbar/alt-tab).
+            if let Some(icon) = app.default_window_icon() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_icon(icon.clone());
+                }
+            }
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())

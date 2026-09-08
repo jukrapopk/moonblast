@@ -33,7 +33,13 @@ export function TitleBar() {
         data-tauri-drag-region
         className="flex min-w-0 flex-1 cursor-default items-center gap-2 px-3 text-sm font-medium text-(--color-muted)"
       >
-        <span className="truncate">Moonblast</span>
+        <img
+          src="/moonblast.svg"
+          alt="Moonblast"
+          draggable={false}
+          className="h-[18px] w-[18px] shrink-0"
+        />
+        <span className="truncate text-[13px]">Moonblast</span>
       </div>
 
       {/* Window controls */}
