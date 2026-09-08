@@ -8,6 +8,7 @@ import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView } from "./components/SettingsView";
 import { useSettings } from "./settings/SettingsContext";
 import { useGamepad } from "./hooks/useGamepad";
+import { useContextMenu } from "./components/ui/ContextMenu";
 
 export default function App() {
   const { settings, update } = useSettings();
@@ -23,6 +24,28 @@ export default function App() {
   const appsEnabled = settings.integrations.apps_enabled;
 
   useGamepad();
+
+  // Kill the WebView's native context menu and provide our own "Back/Refresh" menu
+  // for any right-click not handled by a more specific menu.
+  const pageCtx = useContextMenu();
+  useEffect(() => {
+    function onCapture(e: Event) {
+      e.preventDefault();
+    }
+    function onBubble(e: Event) {
+      const me = e as MouseEvent;
+      pageCtx.openAt(me.clientX, me.clientY, [
+        { label: "Back", disabled: history.length <= 1, onClick: () => window.history.back() },
+        { label: "Refresh", onClick: () => window.location.reload() },
+      ]);
+    }
+    document.addEventListener("contextmenu", onCapture, true);
+    document.addEventListener("contextmenu", onBubble);
+    return () => {
+      document.removeEventListener("contextmenu", onCapture, true);
+      document.removeEventListener("contextmenu", onBubble);
+    };
+  }, []);
 
   // Tab / Shift+Tab switches the top-level view (keyboard + gamepad LB/RB).
   useEffect(() => {
@@ -130,6 +153,7 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+      {pageCtx.render}
     </div>
   );
 }

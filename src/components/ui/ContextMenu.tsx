@@ -4,10 +4,11 @@ export interface CtxAction {
   label: string;
   icon?: ReactNode;
   danger?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }
 
-interface MenuState {
+export interface MenuState {
   x: number;
   y: number;
   items: CtxAction[];
@@ -63,12 +64,18 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
         <button
           key={i}
           role="menuitem"
+          disabled={it.disabled}
           onClick={() => {
+            if (it.disabled) return;
             it.onClick();
             onClose();
           }}
-          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-(--color-surface) ${
-            it.danger ? "text-(--color-danger)" : "text-(--color-text)"
+          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            it.disabled
+              ? "cursor-default opacity-40"
+              : it.danger
+                ? "text-(--color-danger) hover:bg-(--color-surface)"
+                : "text-(--color-text) hover:bg-(--color-surface)"
           }`}
         >
           {it.icon}
@@ -85,9 +92,14 @@ export function useContextMenu() {
 
   function open(e: ReactMouseEvent, items: CtxAction[]) {
     e.preventDefault();
+    e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, items });
   }
 
+  function openAt(x: number, y: number, items: CtxAction[]) {
+    setMenu({ x, y, items });
+  }
+
   const render = <ContextMenu state={menu} onClose={() => setMenu(null)} />;
-  return { open, render, setMenu };
+  return { open, openAt, render, setMenu };
 }
