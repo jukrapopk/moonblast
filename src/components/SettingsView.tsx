@@ -153,23 +153,10 @@ export function SettingsView({
 }) {
   return (
     <PageShell title="Settings" subtitle="App-level settings.">
-      <Section title="Integrations">
-        <TailscaleRow />
-        <MoonlightRow
-          enabled={moonlightEnabled}
-          onToggle={onToggleMoonlight}
-          dir={moonlightDir}
-          onSelect={onSelectMoonlight}
-        />
-      </Section>
-
       <Section title="General">
         <Row label="Start with Windows" description="Launch Moonblast when you sign in to Windows.">
           <Toggle />
         </Row>
-      </Section>
-
-      <Section title="Fullscreen Mode">
         <Row
           label="Suppress Explorer & background processes"
           description="Similar to Fullscreen Xbox Mode. Planned for v2."
@@ -179,6 +166,16 @@ export function SettingsView({
         <Row label="Hide taskbar & auto-fullscreen" description="Enter a clean fullscreen shell on launch.">
           <Toggle disabled />
         </Row>
+      </Section>
+
+      <Section title="Integrations">
+        <TailscaleRow />
+        <MoonlightRow
+          enabled={moonlightEnabled}
+          onToggle={onToggleMoonlight}
+          dir={moonlightDir}
+          onSelect={onSelectMoonlight}
+        />
       </Section>
 
       <Section title="About">
