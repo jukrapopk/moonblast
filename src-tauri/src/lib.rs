@@ -209,6 +209,166 @@ fn moonlight_pair(
     Ok(())
 }
 
+/// Resolve the leading integer from a value like "60 Hz" -> 60.
+fn parse_fps(s: &str) -> Option<u32> {
+    s.chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+/// Detect the client's current display resolution and refresh rate (Windows).
+fn client_display_raw() -> Option<(u32, u32, Option<u32>)> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+    };
+    let mut dm: DEVMODEW = unsafe { std::mem::zeroed() };
+    dm.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+    let ok = unsafe { EnumDisplaySettingsW(std::ptr::null(), ENUM_CURRENT_SETTINGS, &mut dm) };
+    if ok == 0 {
+        return None;
+    }
+    let freq = if dm.dmDisplayFrequency > 0 {
+        Some(dm.dmDisplayFrequency)
+    } else {
+        None
+    };
+    Some((dm.dmPelsWidth, dm.dmPelsHeight, freq))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientDisplay {
+    width: u32,
+    height: u32,
+    refresh_rate: Option<u32>,
+}
+
+/// Report the client machine's native display resolution and refresh rate.
+#[tauri::command]
+fn client_display() -> Result<ClientDisplay, String> {
+    match client_display_raw() {
+        Some((width, height, refresh_rate)) => Ok(ClientDisplay {
+            width,
+            height,
+            refresh_rate,
+        }),
+        None => Err("Could not read display info".to_string()),
+    }
+}
+
+/// Build the `moonlight stream` CLI flags from the stored streaming prefs.
+fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+
+    // Resolution: normalize legacy "1920×1080" unicode x; "auto" = detected.
+    let resolution = if prefs.resolution.trim().is_empty()
+        || prefs.resolution.eq_ignore_ascii_case("auto")
+    {
+        client_display_raw()
+            .map(|(w, h, _)| format!("{w}x{h}"))
+            .unwrap_or_default()
+    } else {
+        prefs.resolution.replace('×', "x")
+    };
+    if !resolution.is_empty() {
+        v.push("--resolution".to_string());
+        v.push(resolution);
+    }
+
+    // FPS derived from refresh_rate; "auto" = detected refresh.
+    let fps = if prefs.refresh_rate.trim().is_empty()
+        || prefs.refresh_rate.eq_ignore_ascii_case("auto")
+    {
+        client_display_raw().and_then(|(_, _, f)| f)
+    } else {
+        parse_fps(&prefs.refresh_rate)
+    };
+    if let Some(fps) = fps {
+        v.push("--fps".to_string());
+        v.push(fps.to_string());
+    }
+
+    // Bitrate in Mbps -> Kbps (Moonlight expects Kbps).
+    if prefs.bitrate > 0.0 {
+        v.push("--bitrate".to_string());
+        v.push((prefs.bitrate * 1000.0).to_string());
+    }
+
+    // Choice options.
+    let mut push_choice = |arg: &str, value: &str| {
+        v.push(arg.to_string());
+        v.push(value.to_string());
+    };
+    match prefs.codec.to_lowercase().as_str() {
+        "h.264" => push_choice("--video-codec", "H.264"),
+        "hevc" => push_choice("--video-codec", "HEVC"),
+        "av1" => push_choice("--video-codec", "AV1"),
+        _ => {}
+    }
+    match prefs.video_decoder.to_lowercase().as_str() {
+        "software" => push_choice("--video-decoder", "software"),
+        "hardware" => push_choice("--video-decoder", "hardware"),
+        _ => {}
+    }
+    let mode = prefs.display_mode.to_lowercase();
+    if !mode.is_empty() {
+        match mode.as_str() {
+            "windowed" => push_choice("--display-mode", "windowed"),
+            "borderless" => push_choice("--display-mode", "borderless"),
+            _ => push_choice("--display-mode", "fullscreen"),
+        }
+    }
+    let audio = prefs.audio_config.to_lowercase();
+    if !audio.is_empty() {
+        match audio.as_str() {
+            "5.1-surround" => push_choice("--audio-config", "5.1-surround"),
+            "7.1-surround" => push_choice("--audio-config", "7.1-surround"),
+            _ => push_choice("--audio-config", "stereo"),
+        }
+    }
+    match prefs.capture_system_keys.to_lowercase().as_str() {
+        "fullscreen" => push_choice("--capture-system-keys", "fullscreen"),
+        "always" => push_choice("--capture-system-keys", "always"),
+        _ => {}
+    }
+
+    // Boolean toggles: always pass --name / --no-name (the last one wins).
+    let push_toggle = |v: &mut Vec<String>, name: &str, enabled: bool| {
+        if enabled {
+            v.push(format!("--{name}"));
+        } else {
+            v.push(format!("--no-{name}"));
+        }
+    };
+    push_toggle(&mut v, "vsync", prefs.vsync);
+    push_toggle(&mut v, "hdr", prefs.hdr);
+    push_toggle(&mut v, "yuv444", prefs.yuv444);
+    push_toggle(&mut v, "frame-pacing", prefs.frame_pacing);
+    push_toggle(&mut v, "keep-awake", prefs.keep_awake);
+    push_toggle(&mut v, "quit-after", prefs.quit_after);
+    push_toggle(&mut v, "game-optimization", prefs.game_optimization);
+    push_toggle(&mut v, "audio-on-host", prefs.audio_on_host);
+    push_toggle(&mut v, "mute-on-focus-loss", prefs.mute_on_focus_loss);
+    push_toggle(&mut v, "multi-controller", prefs.multi_controller);
+    push_toggle(&mut v, "background-gamepad", prefs.background_gamepad);
+    push_toggle(&mut v, "swap-gamepad-buttons", prefs.swap_gamepad_buttons);
+    push_toggle(&mut v, "absolute-mouse", prefs.absolute_mouse);
+    push_toggle(&mut v, "mouse-buttons-swap", prefs.mouse_buttons_swap);
+    push_toggle(&mut v, "reverse-scroll-direction", prefs.reverse_scroll_direction);
+    // fps_overlay maps to Moonlight's performance overlay.
+    push_toggle(&mut v, "performance-overlay", prefs.fps_overlay);
+
+    // Optional packet size.
+    if let Some(p) = prefs.packet_size {
+        v.push("--packet-size".to_string());
+        v.push(p.to_string());
+    }
+
+    v
+}
+
 /// Launch a stream for a host + app via `moonlight stream <host> <app>`.
 /// Returns `true` if a new stream was launched, or `false` if one for this
 /// host+app is already running (no duplicate window).
@@ -220,6 +380,7 @@ fn moonlight_stream(
     streams: State<'_, StreamState>,
 ) -> Result<bool, String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
+    let prefs = state.0.lock().unwrap().moonlight.clone();
     let key = format!("{host}\u{1f}{app}");
     let mut map = streams.0.lock().unwrap();
     // Reap any process that has already exited, and detect a still-running one.
@@ -238,8 +399,11 @@ fn moonlight_stream(
         return Ok(false);
     }
 
+    let mut args = vec!["stream".to_string(), host.clone(), app.clone()];
+    args.extend(moonlight_flags(&prefs));
+
     let child = Command::new(&exe)
-        .args(["stream", &host, &app])
+        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -391,7 +555,8 @@ pub fn run() {
             moonlight_pair,
             moonlight_stream,
             moonlight_quit,
-            discover_hosts
+            discover_hosts,
+            client_display
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

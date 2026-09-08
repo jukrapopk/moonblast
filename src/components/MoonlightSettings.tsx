@@ -1,16 +1,174 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { PencilSimple } from "@phosphor-icons/react";
+import { invoke } from "@tauri-apps/api/core";
 import { Section } from "./ui/Section";
 import { Row } from "./ui/Row";
 import { Toggle } from "./ui/Toggle";
-import { Select } from "./ui/Select";
+import { Select, type SelectOptionInput } from "./ui/Select";
 import { Segmented } from "./ui/Segmented";
+import { Modal } from "./ui/Modal";
+import { useSettings, type Settings } from "../settings/SettingsContext";
+
+const RATIOS = ["16:9", "16:10", "21:9", "32:9", "4:3", "5:4"];
+
+const RES_BY_RATIO: Record<string, string[]> = {
+  "16:9": ["640x360", "1280x720", "1920x1080", "2560x1440", "3840x2160", "7680x4320"],
+  "16:10": ["1280x800", "1920x1200", "2560x1600", "3840x2400"],
+  "21:9": ["2560x1080", "3440x1440", "3840x1600", "5120x2160"],
+  "32:9": ["3840x1080", "5120x1440", "7680x2160"],
+  "4:3": ["1024x768", "1280x960", "1600x1200", "2048x1536"],
+  "5:4": ["1280x1024", "2560x2048"],
+};
+
+const FPS_COMMON = ["30", "60", "120"];
+
+const norm = (s: string) => s.replace(/\s+/g, "").replace(/×/g, "x").toLowerCase();
+const normRes = (s: string) =>
+  /^\d+x\d+$/.test(s.replace(/×/g, "x").toLowerCase()) ? s.replace(/×/g, "x").toLowerCase() : null;
+const fpsOf = (s: string) => {
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+};
+
+function PencilButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--color-border) bg-(--color-surface) text-(--color-muted) transition hover:text-(--color-text)"
+    >
+      <PencilSimple size={15} weight="bold" />
+    </button>
+  );
+}
+
+function PromptModal({
+  open,
+  onClose,
+  title,
+  subtitle,
+  initial,
+  placeholder,
+  hint,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle?: string;
+  initial: string;
+  placeholder?: string;
+  hint?: string;
+  onSubmit: (value: string) => void;
+}) {
+  const [val, setVal] = useState(initial);
+  useEffect(() => {
+    if (open) setVal(initial);
+  }, [open, initial]);
+
+  function submit() {
+    const v = val.trim();
+    if (!v) return;
+    onSubmit(v);
+    onClose();
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={title} subtitle={subtitle} width="max-w-sm">
+      <input
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.currentTarget.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        placeholder={placeholder}
+        className="h-11 w-full rounded-xl border border-(--color-border) bg-(--color-surface) px-4 text-sm text-(--color-text) outline-none transition placeholder:text-(--color-muted) focus:border-(--color-accent)"
+      />
+      {hint && <p className="mt-2 text-xs text-(--color-muted)">{hint}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button
+          onClick={onClose}
+          className="rounded-full px-4 py-2 text-sm text-(--color-muted) transition hover:text-(--color-text)"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={submit}
+          disabled={!val.trim()}
+          className="rounded-full bg-(--color-accent) px-5 py-2 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
+        >
+          Apply
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+interface ClientDisplay {
+  width: number;
+  height: number;
+  refresh_rate: number | null;
+}
 
 export function MoonlightSettings() {
-  const [resolution, setResolution] = useState("1920×1080");
-  const [refresh, setRefresh] = useState("60 Hz");
-  const [bitrate, setBitrate] = useState(40);
-  const [codec, setCodec] = useState("Auto");
+  const { settings, update } = useSettings();
+  const m = settings.moonlight;
+
+  function set<K extends keyof Settings["moonlight"]>(key: K, value: Settings["moonlight"][K]) {
+    update((s) => ({ ...s, moonlight: { ...s.moonlight, [key]: value } }));
+  }
+
+  const [detected, setDetected] = useState<ClientDisplay | null>(null);
+  useEffect(() => {
+    invoke<ClientDisplay>("client_display").then(setDetected).catch(() => {});
+  }, []);
+
+  // Custom-input modals.
+  const [resOpen, setResOpen] = useState(false);
+  const [fpsOpen, setFpsOpen] = useState(false);
+  const [bitrateOpen, setBitrateOpen] = useState(false);
+
+  // ---- Resolution ----
+  const detectedRes = detected ? `${detected.width}x${detected.height}` : null;
+  const storedRes = norm(m.resolution);
+  const resAuto = storedRes === "" || storedRes === "auto";
+  const effectiveRes = resAuto ? (detectedRes ?? storedRes) : storedRes;
+
+  const commonRes = RES_BY_RATIO[m.aspect_ratio] ?? RES_BY_RATIO["16:9"];
+  const resOptions: SelectOptionInput[] = [];
+  if (detectedRes) resOptions.push({ label: `Detected · ${detectedRes}`, value: detectedRes });
+  for (const r of commonRes) {
+    if (!resOptions.some((o) => (typeof o === "string" ? o : o.value) === r)) resOptions.push(r);
+  }
+  if (!resAuto && !commonRes.includes(effectiveRes)) {
+    resOptions.push({ label: `Custom · ${effectiveRes}`, value: effectiveRes });
+  }
+
+  // ---- Refresh rate ----
+  const storedFps = fpsOf(m.refresh_rate);
+  const fpsAuto = norm(m.refresh_rate) === "" || norm(m.refresh_rate) === "auto";
+  const detectedFps = detected?.refresh_rate ?? null;
+  const effectiveFps = fpsAuto ? detectedFps : storedFps;
+
+  const fpsOptions = [
+    { id: "detected", label: detectedFps ? `Detected · ${detectedFps}` : "Detected" },
+    { id: "30", label: "30" },
+    { id: "60", label: "60" },
+    { id: "120", label: "120" },
+    { id: "custom", label: "Custom" },
+  ];
+  const fpsVal = fpsAuto
+    ? "detected"
+    : storedFps !== null && FPS_COMMON.includes(String(storedFps))
+      ? String(storedFps)
+      : "custom";
+
+  function onFpsChange(id: string) {
+    if (id === "detected") set("refresh_rate", "auto");
+    else if (id === "custom") setFpsOpen(true);
+    else set("refresh_rate", id);
+  }
 
   return (
     <motion.div
@@ -19,61 +177,208 @@ export function MoonlightSettings() {
       transition={{ duration: 0.2 }}
       className="space-y-6"
     >
-      <Section title="Streaming">
-        <Row label="Resolution" description="Streaming output resolution">
-          <Select
-            options={["1280×720", "1920×1080", "2560×1440", "3840×2160"]}
-            value={resolution}
-            onChange={setResolution}
-          />
+      <Section title="Video">
+        <Row label="Aspect ratio" description="Filters the available resolution presets">
+          <Select options={RATIOS} value={m.aspect_ratio} onChange={(v) => set("aspect_ratio", v)} />
         </Row>
-        <Row label="Refresh rate" description="Frames per second">
-          <Segmented
-            variant="value"
-            options={[
-              { id: "60 Hz", label: "60 Hz" },
-              { id: "120 Hz", label: "120 Hz" },
-              { id: "144 Hz", label: "144 Hz" },
-            ]}
-            value={refresh}
-            onChange={setRefresh}
-          />
+        <Row
+          label="Resolution"
+          description={effectiveRes ? `Using ${effectiveRes}` + (resAuto ? " · native" : "") : "Detecting display…"}
+        >
+          <div className="flex shrink-0 items-center gap-2">
+            <Select
+              options={resOptions}
+              value={effectiveRes}
+              onChange={(v) => set("resolution", v === detectedRes ? "auto" : v)}
+            />
+            <PencilButton onClick={() => setResOpen(true)} label="Custom resolution" />
+          </div>
         </Row>
-        <Row label="Bitrate" description={`${bitrate} Mbps`}>
-          <div className="flex w-48 shrink-0 items-center gap-3">
+        <Row
+          label="Refresh rate"
+          description={effectiveFps ? `${effectiveFps} Hz` : "Detecting display…"}
+        >
+          <div className="flex shrink-0 items-center gap-2">
+            <Segmented variant="value" value={fpsVal} onChange={onFpsChange} options={fpsOptions} />
+            <PencilButton onClick={() => setFpsOpen(true)} label="Custom refresh rate" />
+          </div>
+        </Row>
+        <Row label="Bitrate" description={`${m.bitrate} Mbps`}>
+          <div className="flex shrink-0 items-center gap-3">
             <input
               type="range"
-              min={5}
-              max={150}
-              step={5}
-              value={bitrate}
-              onChange={(e) => setBitrate(Number(e.currentTarget.value))}
-              className="w-full accent-(--color-accent)"
+              min={1}
+              max={100}
+              step={1}
+              value={Math.min(100, Math.max(1, m.bitrate))}
+              onChange={(e) => set("bitrate", Number(e.currentTarget.value))}
+              className="w-44 accent-(--color-accent)"
             />
+            <span className="w-9 text-right text-sm tabular-nums text-(--color-muted)">{m.bitrate}</span>
+            <PencilButton onClick={() => setBitrateOpen(true)} label="Custom bitrate" />
           </div>
         </Row>
         <Row label="Video codec">
-          <Select options={["Auto", "H.264", "HEVC", "AV1"]} value={codec} onChange={setCodec} />
+          <Select
+            options={["Auto", "H.264", "HEVC", "AV1"]}
+            value={m.codec}
+            onChange={(v) => set("codec", v)}
+          />
         </Row>
-        <Row label="Fullscreen" description="Launch streaming in fullscreen">
-          <Toggle defaultOn />
+        <Row label="Video decoder">
+          <Segmented
+            variant="value"
+            options={[
+              { id: "auto", label: "Auto" },
+              { id: "hardware", label: "Hardware" },
+              { id: "software", label: "Software" },
+            ]}
+            value={m.video_decoder}
+            onChange={(v) => set("video_decoder", v)}
+          />
         </Row>
-        <Row label="Show FPS overlay">
-          <Toggle />
+        <Row label="Display mode">
+          <Segmented
+            variant="value"
+            options={[
+              { id: "fullscreen", label: "Fullscreen" },
+              { id: "windowed", label: "Windowed" },
+              { id: "borderless", label: "Borderless" },
+            ]}
+            value={m.display_mode}
+            onChange={(v) => set("display_mode", v)}
+          />
+        </Row>
+        <Row label="V-Sync" description="Sync frames to the display refresh">
+          <Toggle checked={m.vsync} onChange={(v) => set("vsync", v)} />
+        </Row>
+        <Row label="HDR" description="High dynamic range streaming">
+          <Toggle checked={m.hdr} onChange={(v) => set("hdr", v)} />
+        </Row>
+        <Row label="YUV 4:4:4" description="Lossless color sampling, if supported">
+          <Toggle checked={m.yuv444} onChange={(v) => set("yuv444", v)} />
+        </Row>
+        <Row label="Frame pacing" description="Smoothed frame delivery">
+          <Toggle checked={m.frame_pacing} onChange={(v) => set("frame_pacing", v)} />
+        </Row>
+        <Row label="Show FPS overlay" description="On-screen performance stats">
+          <Toggle checked={m.fps_overlay} onChange={(v) => set("fps_overlay", v)} />
+        </Row>
+        <Row label="Packet size" description="Video packet size (bytes)">
+          <Select
+            options={["Default", "1024", "1200", "1400", "1500"]}
+            value={m.packet_size == null ? "Default" : String(m.packet_size)}
+            onChange={(v) => set("packet_size", v === "Default" ? null : Number(v))}
+          />
+        </Row>
+      </Section>
+
+      <Section title="Audio">
+        <Row label="Audio config">
+          <Select
+            options={["stereo", "5.1-surround", "7.1-surround"]}
+            value={m.audio_config}
+            onChange={(v) => set("audio_config", v)}
+          />
+        </Row>
+        <Row label="Audio on host" description="Play audio on the host PC too">
+          <Toggle checked={m.audio_on_host} onChange={(v) => set("audio_on_host", v)} />
+        </Row>
+        <Row label="Mute on focus loss" description="Silence audio when the window is unfocused">
+          <Toggle checked={m.mute_on_focus_loss} onChange={(v) => set("mute_on_focus_loss", v)} />
         </Row>
       </Section>
 
       <Section title="Input">
-        <Row label="Gamepad support" description="Use controllers during streaming">
-          <Toggle defaultOn />
+        <Row label="Multiple controllers">
+          <Toggle checked={m.multi_controller} onChange={(v) => set("multi_controller", v)} />
         </Row>
-        <Row label="Mouse smoothing">
-          <Toggle />
+        <Row label="Background gamepad" description="Use the gamepad when the window is unfocused">
+          <Toggle checked={m.background_gamepad} onChange={(v) => set("background_gamepad", v)} />
+        </Row>
+        <Row label="Swap gamepad buttons" description="Nintendo-style A/B and X/Y">
+          <Toggle checked={m.swap_gamepad_buttons} onChange={(v) => set("swap_gamepad_buttons", v)} />
+        </Row>
+        <Row label="Absolute mouse" description="Remote-desktop optimized mouse control">
+          <Toggle checked={m.absolute_mouse} onChange={(v) => set("absolute_mouse", v)} />
+        </Row>
+        <Row label="Swap mouse buttons" description="Swap left and right">
+          <Toggle checked={m.mouse_buttons_swap} onChange={(v) => set("mouse_buttons_swap", v)} />
+        </Row>
+        <Row label="Reverse scroll direction">
+          <Toggle
+            checked={m.reverse_scroll_direction}
+            onChange={(v) => set("reverse_scroll_direction", v)}
+          />
+        </Row>
+        <Row label="Capture system keys" description="Pass Alt+Tab &amp; friends to the host">
+          <Segmented
+            variant="value"
+            options={[
+              { id: "never", label: "Never" },
+              { id: "fullscreen", label: "Fullscreen" },
+              { id: "always", label: "Always" },
+            ]}
+            value={m.capture_system_keys}
+            onChange={(v) => set("capture_system_keys", v)}
+          />
         </Row>
       </Section>
 
+      <Section title="Session">
+        <Row label="Keep display awake" description="Prevent the display from sleeping while streaming">
+          <Toggle checked={m.keep_awake} onChange={(v) => set("keep_awake", v)} />
+        </Row>
+        <Row label="Quit app after session">
+          <Toggle checked={m.quit_after} onChange={(v) => set("quit_after", v)} />
+        </Row>
+        <Row label="Game optimizations">
+          <Toggle checked={m.game_optimization} onChange={(v) => set("game_optimization", v)} />
+        </Row>
+      </Section>
+
+      <PromptModal
+        open={resOpen}
+        onClose={() => setResOpen(false)}
+        title="Custom resolution"
+        subtitle="Enter width × height"
+        initial={effectiveRes || detectedRes || ""}
+        placeholder="e.g. 1920x1080"
+        hint="Custom resolutions are used for the stream."
+        onSubmit={(v) => {
+          const r = normRes(v);
+          if (r) set("resolution", r);
+        }}
+      />
+      <PromptModal
+        open={fpsOpen}
+        onClose={() => setFpsOpen(false)}
+        title="Custom refresh rate"
+        subtitle="Frames per second (10 – 480)"
+        initial={effectiveFps ? String(effectiveFps) : ""}
+        placeholder="e.g. 90"
+        hint="Custom FPS is applied to the stream."
+        onSubmit={(v) => {
+          const n = fpsOf(v);
+          if (n !== null && n >= 10 && n <= 480) set("refresh_rate", String(n));
+        }}
+      />
+      <PromptModal
+        open={bitrateOpen}
+        onClose={() => setBitrateOpen(false)}
+        title="Custom bitrate"
+        subtitle="Megabits per second (0.5 – 500)"
+        initial={String(m.bitrate)}
+        placeholder="e.g. 100"
+        onSubmit={(v) => {
+          const n = parseFloat(v);
+          if (Number.isFinite(n) && n >= 0.5 && n <= 500) set("bitrate", n);
+        }}
+      />
+
       <p className="px-1 text-xs text-(--color-muted)">
-        Placeholder UI — these controls will bind to your Moonlight config in a later step.
+        Resolution and refresh rate default to your display. These controls are saved and applied when you start a
+        stream.
       </p>
     </motion.div>
   );

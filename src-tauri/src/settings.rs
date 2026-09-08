@@ -40,15 +40,80 @@ pub struct Integrations {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MoonlightStreaming {
-    pub resolution: String,
-    pub refresh_rate: String,
-    pub bitrate: u32,
-    pub codec: String,
-    pub fullscreen: bool,
-    pub fps_overlay: bool,
-    pub gamepad: bool,
-    pub mouse_smoothing: bool,
+    // Retained / legacy fields (kept so existing settings.json loads cleanly).
+    pub resolution: String, // "WxH", or "auto" = detect client display
+    pub refresh_rate: String, // "60 Hz", or "auto" = detect client display
+    pub bitrate: f64, // Mbps (0.5–500) — slider 1–100, modal for outside
+    pub codec: String, // "Auto" | "H.264" | "HEVC" | "AV1"
+    pub fullscreen: bool, // legacy
+    pub fps_overlay: bool, // maps to --performance-overlay
+    pub gamepad: bool, // legacy
+    pub mouse_smoothing: bool, // legacy
+
+    // Video / display
+    pub aspect_ratio: String, // "16:9" | "16:10" | "21:9" | "32:9" | "4:3" | "5:4"
+    pub display_mode: String, // "fullscreen" | "windowed" | "borderless"
+    pub video_decoder: String, // "auto" | "software" | "hardware"
+    pub vsync: bool,
+    pub hdr: bool,
+    pub yuv444: bool,
+    pub frame_pacing: bool,
+    pub packet_size: Option<u32>, // bytes (>1024)
+    pub keep_awake: bool,
+    pub quit_after: bool,
+    pub game_optimization: bool,
+
+    // Audio
+    pub audio_config: String, // "stereo" | "5.1-surround" | "7.1-surround"
+    pub audio_on_host: bool,
+    pub mute_on_focus_loss: bool,
+
+    // Input
+    pub multi_controller: bool,
+    pub background_gamepad: bool,
+    pub swap_gamepad_buttons: bool,
+    pub absolute_mouse: bool,
+    pub mouse_buttons_swap: bool,
+    pub reverse_scroll_direction: bool,
+    pub capture_system_keys: String, // "never" | "fullscreen" | "always"
+}
+
+impl Default for MoonlightStreaming {
+    fn default() -> Self {
+        Self {
+            resolution: "auto".to_string(),
+            refresh_rate: "auto".to_string(),
+            bitrate: 40.0,
+            codec: "Auto".to_string(),
+            fullscreen: true,
+            fps_overlay: false,
+            gamepad: true,
+            mouse_smoothing: false,
+            aspect_ratio: "16:9".to_string(),
+            display_mode: "fullscreen".to_string(),
+            video_decoder: "auto".to_string(),
+            vsync: true,
+            hdr: false,
+            yuv444: false,
+            frame_pacing: true,
+            packet_size: None,
+            keep_awake: true,
+            quit_after: false,
+            game_optimization: true,
+            audio_config: "stereo".to_string(),
+            audio_on_host: false,
+            mute_on_focus_loss: true,
+            multi_controller: true,
+            background_gamepad: false,
+            swap_gamepad_buttons: false,
+            absolute_mouse: false,
+            mouse_buttons_swap: false,
+            reverse_scroll_direction: false,
+            capture_system_keys: "never".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,16 +134,7 @@ impl Default for Settings {
                 moonlight_folder: None,
                 moonlight_enabled: false,
             },
-            moonlight: MoonlightStreaming {
-                resolution: "1920×1080".to_string(),
-                refresh_rate: "60 Hz".to_string(),
-                bitrate: 40,
-                codec: "Auto".to_string(),
-                fullscreen: true,
-                fps_overlay: false,
-                gamepad: true,
-                mouse_smoothing: false,
-            },
+            moonlight: MoonlightStreaming::default(),
             fullscreen: Fullscreen {
                 suppress_explorer: false,
                 auto_fullscreen: false,

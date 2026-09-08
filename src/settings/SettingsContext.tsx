@@ -26,6 +26,27 @@ export interface Settings {
     fps_overlay: boolean;
     gamepad: boolean;
     mouse_smoothing: boolean;
+    aspect_ratio: string;
+    display_mode: string;
+    video_decoder: string;
+    vsync: boolean;
+    hdr: boolean;
+    yuv444: boolean;
+    frame_pacing: boolean;
+    packet_size: number | null;
+    keep_awake: boolean;
+    quit_after: boolean;
+    game_optimization: boolean;
+    audio_config: string;
+    audio_on_host: boolean;
+    mute_on_focus_loss: boolean;
+    multi_controller: boolean;
+    background_gamepad: boolean;
+    swap_gamepad_buttons: boolean;
+    absolute_mouse: boolean;
+    mouse_buttons_swap: boolean;
+    reverse_scroll_direction: boolean;
+    capture_system_keys: string;
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean };
   machines: { name: string; address: string }[];
@@ -39,14 +60,35 @@ export const DEFAULT_SETTINGS: Settings = {
     moonlight_enabled: false,
   },
   moonlight: {
-    resolution: "1920×1080",
-    refresh_rate: "60 Hz",
+    resolution: "auto",
+    refresh_rate: "auto",
     bitrate: 40,
     codec: "Auto",
     fullscreen: true,
     fps_overlay: false,
     gamepad: true,
     mouse_smoothing: false,
+    aspect_ratio: "16:9",
+    display_mode: "fullscreen",
+    video_decoder: "auto",
+    vsync: true,
+    hdr: false,
+    yuv444: false,
+    frame_pacing: true,
+    packet_size: null,
+    keep_awake: true,
+    quit_after: false,
+    game_optimization: true,
+    audio_config: "stereo",
+    audio_on_host: false,
+    mute_on_focus_loss: true,
+    multi_controller: true,
+    background_gamepad: false,
+    swap_gamepad_buttons: false,
+    absolute_mouse: false,
+    mouse_buttons_swap: false,
+    reverse_scroll_direction: false,
+    capture_system_keys: "never",
   },
   fullscreen: { suppress_explorer: false, auto_fullscreen: false },
   machines: [],
