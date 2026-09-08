@@ -24,11 +24,12 @@ export function Modal({ open, onClose, title, subtitle, children, width = "max-w
           className="fixed inset-0 z-50 flex items-center justify-center bg-(--color-overlay) p-6 backdrop-blur-sm"
         >
           <motion.div
-            initial={{ scale: 0.96, y: 8 }}
-            animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0.96, y: 8 }}
+            initial={{ scale: 0.96, y: 8, opacity: 0 }}
+            animate={{ scale: 1, y: 0, opacity: 1 }}
+            exit={{ scale: 0.96, y: 8, opacity: 0 }}
+            transition={{ duration: 0.16 }}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full ${width} rounded-2xl border border-(--color-border) bg-(--color-surface-2) p-6`}
+            className={`w-full ${width} rounded-2xl border border-(--color-border) bg-(--color-surface-2) p-5`}
           >
             {(title || subtitle) && (
               <div className="mb-5 flex items-start justify-between">

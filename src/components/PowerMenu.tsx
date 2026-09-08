@@ -5,7 +5,6 @@ import {
   Power,
   Moon,
   ArrowClockwise,
-  Prohibit,
 } from "@phosphor-icons/react";
 import { Modal } from "./ui/Modal";
 
@@ -20,7 +19,7 @@ function MenuItem({
   danger,
   onClick,
 }: {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   label: string;
   danger?: boolean;
   onClick: () => void;
@@ -34,7 +33,11 @@ function MenuItem({
           : "text-(--color-text) hover:bg-(--color-surface)"
       }`}
     >
-      <span className="text-current">{icon}</span>
+      {icon && (
+        <span className="flex w-5 shrink-0 items-center justify-center text-current">
+          {icon}
+        </span>
+      )}
       {label}
     </button>
   );
@@ -55,7 +58,7 @@ export function PowerMenu({ open, onClose }: PowerMenuProps) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Power" width="max-w-xs">
+    <Modal open={open} onClose={onClose} title="Power">
       <div className="space-y-1">
         <MenuItem
           icon={<ArrowsOut size={18} weight="bold" />}
@@ -85,14 +88,6 @@ export function PowerMenu({ open, onClose }: PowerMenuProps) {
           label="Shutdown"
           danger
           onClick={() => run("system_power", { action: "shutdown" })}
-        />
-
-        <Divider />
-
-        <MenuItem
-          icon={<Prohibit size={18} weight="bold" />}
-          label="Cancel"
-          onClick={onClose}
         />
       </div>
     </Modal>
