@@ -516,10 +516,15 @@ export function MoonlightView() {
   async function startStream(host: Host, app: string) {
     setSessionBusy(true);
     try {
-      await invoke("moonlight_stream", { host: host.address, app });
-      setSession({ host, app, startedAt: Date.now() });
-      setNow(Date.now());
-      showToast(`Streaming ${app}…`);
+      const launched = await invoke<boolean>("moonlight_stream", { host: host.address, app });
+      if (launched) {
+        setSession({ host, app, startedAt: Date.now() });
+        setNow(Date.now());
+        showToast(`Streaming ${app}…`);
+      } else {
+        // A stream for this host+app is already open — don't reset the session.
+        showToast(`Already streaming ${app} on ${host.name}`);
+      }
     } catch (err) {
       showToast(String(err));
     } finally {

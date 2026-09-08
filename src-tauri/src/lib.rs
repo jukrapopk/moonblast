@@ -2,7 +2,19 @@ use tauri::AppHandle;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
-use std::process::Command;
+use std::collections::HashMap;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
+
+/// Tracks live Moonlight stream child processes so we never spawn a duplicate
+/// window for the same host+app while one is already running.
+pub struct StreamState(Mutex<HashMap<String, Child>>);
+
+impl Default for StreamState {
+    fn default() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+}
 
 mod settings;
 
@@ -198,18 +210,43 @@ fn moonlight_pair(
 }
 
 /// Launch a stream for a host + app via `moonlight stream <host> <app>`.
+/// Returns `true` if a new stream was launched, or `false` if one for this
+/// host+app is already running (no duplicate window).
 #[tauri::command]
 fn moonlight_stream(
     host: String,
     app: String,
     state: State<'_, settings::SettingsState>,
-) -> Result<(), String> {
+    streams: State<'_, StreamState>,
+) -> Result<bool, String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    Command::new(&exe)
+    let key = format!("{host}\u{1f}{app}");
+    let mut map = streams.0.lock().unwrap();
+    // Reap any process that has already exited, and detect a still-running one.
+    let already_running = match map.get_mut(&key) {
+        Some(child) => match child.try_wait() {
+            Ok(None) => true, // still streaming
+            Ok(Some(_)) => {
+                map.remove(&key);
+                false
+            } // finished — spawn a fresh one next
+            Err(_) => false,
+        },
+        None => false,
+    };
+    if already_running {
+        return Ok(false);
+    }
+
+    let child = Command::new(&exe)
         .args(["stream", &host, &app])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
-    Ok(())
+    map.insert(key, child);
+    Ok(true)
 }
 
 /// Ask the running stream on a host to quit.
@@ -332,6 +369,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(settings::SettingsState::load(app.handle()));
+            app.manage(StreamState::default());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
