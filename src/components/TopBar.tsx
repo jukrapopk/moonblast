@@ -29,20 +29,25 @@ export function TopBar({
   onNavigate,
   fullscreen,
   onToggleFullscreen,
+  showMoonlight,
 }: {
   view: View;
   onNavigate: (v: View) => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
+  showMoonlight: boolean;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
+  const visibleLeft = !showMoonlight
+    ? leftItems.filter((i) => i.id !== "moonlight")
+    : leftItems;
   const rightItems = items.filter((i) => i.nav === "right");
   const [powerOpen, setPowerOpen] = useState(false);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       <nav className="flex items-center gap-1">
-        {leftItems.map((item) => (
+        {visibleLeft.map((item) => (
           <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
         ))}
       </nav>

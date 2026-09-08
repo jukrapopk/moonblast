@@ -10,6 +10,8 @@ import { SettingsView } from "./components/SettingsView";
 export default function App() {
   const [view, setView] = useState<View>("apps");
   const [fullscreen, setFullscreen] = useState(false);
+  const [moonlightEnabled, setMoonlightEnabled] = useState(false);
+  const [moonlightDir, setMoonlightDir] = useState<string | null>(null);
 
   // Sync the initial fullscreen state.
   useEffect(() => {
@@ -45,6 +47,7 @@ export default function App() {
         onNavigate={setView}
         fullscreen={fullscreen}
         onToggleFullscreen={toggleFullscreen}
+        showMoonlight={moonlightEnabled && moonlightDir !== null}
       />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
@@ -60,7 +63,12 @@ export default function App() {
           )}
           {view === "settings" && (
             <motion.div key="settings" className="p-8">
-              <SettingsView />
+              <SettingsView
+                moonlightEnabled={moonlightEnabled}
+                onToggleMoonlight={setMoonlightEnabled}
+                moonlightDir={moonlightDir}
+                onSelectMoonlight={setMoonlightDir}
+              />
             </motion.div>
           )}
         </AnimatePresence>
