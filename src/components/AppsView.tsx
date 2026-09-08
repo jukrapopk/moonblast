@@ -37,15 +37,6 @@ function AppTile({
   );
 }
 
-function AddTile() {
-  return (
-    <button className="flex aspect-[4/5] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-(--color-border) text-(--color-muted) transition-colors hover:border-(--color-accent) hover:text-(--color-accent)">
-      <Plus size={28} weight="fill" data-phosphor-icon />
-      <span className="text-sm">Add app</span>
-    </button>
-  );
-}
-
 export function AppsView() {
   const [query, setQuery] = useState("");
   const filtered = apps.filter((a) =>
@@ -90,7 +81,6 @@ export function AppsView() {
             <AppTile key={a.id} name={a.name} category={a.category} gradient={a.gradient} index={i} />
           ))}
         </AnimatePresence>
-        {query === "" && <AddTile />}
         {filtered.length === 0 && (
           <div className="col-span-full py-12 text-center text-sm text-(--color-muted)">
             No apps match “{query}”.

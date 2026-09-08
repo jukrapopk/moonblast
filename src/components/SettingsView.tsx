@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 
 function Toggle({
@@ -9,15 +10,27 @@ function Toggle({
   description: string;
   disabled?: boolean;
 }) {
+  const [on, setOn] = useState(false);
   return (
     <div className="flex items-center justify-between gap-4 py-4">
       <div>
         <div className="font-medium text-(--color-text)">{label}</div>
         <div className="text-sm text-(--color-muted)">{description}</div>
       </div>
-      <div
-        className={`h-6 w-11 shrink-0 rounded-full bg-(--color-border) ${disabled ? "opacity-40" : ""}`}
-      />
+      <button
+        onClick={() => !disabled && setOn((v) => !v)}
+        aria-pressed={on}
+        disabled={disabled}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+          disabled ? "opacity-40" : on ? "bg-(--color-accent)" : "bg-(--color-border)"
+        }`}
+      >
+        <span
+          className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
+            on ? "left-6" : "left-1"
+          }`}
+        />
+      </button>
     </div>
   );
 }
@@ -25,10 +38,10 @@ function Toggle({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-(--color-border) bg-(--color-surface)">
-      <div className="border-b border-(--color-border) px-5 py-3 text-sm font-semibold text-(--color-text)">
+      <div className="border-b border-(--color-border) px-5 py-3 text-base font-semibold text-(--color-text)">
         {title}
       </div>
-      <div className="px-5 py-1">{children}</div>
+      <div className="px-5">{children}</div>
     </div>
   );
 }
@@ -42,20 +55,14 @@ export function SettingsView() {
       className="max-w-2xl space-y-6"
     >
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-(--color-muted)">Configure your streaming shell.</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-base text-(--color-muted)">App-level settings.</p>
       </div>
 
-      <Section title="Moonlight">
+      <Section title="General">
         <Toggle
-          label="Launch Moonlight for each game"
-          description="Start the Moonlight client when you press Play."
-          disabled
-        />
-        <Toggle
-          label="Close shell during streaming"
-          description="Free up resources while a session is running. (Coming soon)"
-          disabled
+          label="Start with Windows"
+          description="Launch Moonblast when you sign in to Windows."
         />
       </Section>
 
@@ -73,9 +80,9 @@ export function SettingsView() {
       </Section>
 
       <Section title="About">
-        <div className="py-4 text-sm text-(--color-muted)">
-          Moonblast is a lightweight Fullscreen Mode alternative built on Tauri + Rust. Step 1 is an
-          interface shell — Moonlight integration and process management come in later steps.
+        <div className="py-4 text-base text-(--color-muted)">
+          Moonblast is a lightweight Fullscreen Mode alternative built on Tauri + Rust.
+          Moonlight streaming settings live on the Moonlight page.
         </div>
       </Section>
     </motion.div>
