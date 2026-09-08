@@ -13,6 +13,13 @@ pub struct Settings {
     pub integrations: Integrations,
     pub moonlight: MoonlightStreaming,
     pub fullscreen: Fullscreen,
+    pub machines: Vec<MoonlightHost>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoonlightHost {
+    pub name: String,
+    pub address: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +76,7 @@ impl Default for Settings {
                 suppress_explorer: false,
                 auto_fullscreen: false,
             },
+            machines: Vec::new(),
         }
     }
 }

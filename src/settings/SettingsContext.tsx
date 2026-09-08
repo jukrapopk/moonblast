@@ -28,6 +28,7 @@ export interface Settings {
     mouse_smoothing: boolean;
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean };
+  machines: { name: string; address: string }[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -48,6 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
     mouse_smoothing: false,
   },
   fullscreen: { suppress_explorer: false, auto_fullscreen: false },
+  machines: [],
 };
 
 interface SettingsContextValue {

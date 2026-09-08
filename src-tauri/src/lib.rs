@@ -1,5 +1,6 @@
 use tauri::AppHandle;
 use tauri::Manager;
+use tauri::State;
 use std::process::Command;
 
 mod settings;
@@ -117,6 +118,160 @@ fn validate_moonlight_dir(path: String) -> bool {
         .any(|name| dir.join(name).is_file())
 }
 
+/// Resolve the Moonlight executable from the configured install folder.
+fn moonlight_exe(state: &State<'_, settings::SettingsState>) -> Option<std::path::PathBuf> {
+    let settings = state.0.lock().ok()?;
+    let folder = settings.integrations.moonlight_folder.clone()?;
+    for name in ["moonlight.exe", "moonlight-qt.exe"] {
+        let p = std::path::Path::new(&folder).join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// List a host's apps via `moonlight listapps <host>`.
+#[tauri::command]
+fn moonlight_list_apps(
+    host: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<Vec<String>, String> {
+    let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
+    let out = Command::new(&exe)
+        .args(["listapps", &host])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).into_owned();
+        return Err(msg.trim().to_string());
+    }
+    let apps = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    Ok(apps)
+}
+
+/// Launch Moonlight's pairing flow for a host (opens Moonlight QT's PIN window).
+#[tauri::command]
+fn moonlight_pair(
+    host: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<(), String> {
+    let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
+    Command::new(&exe)
+        .args(["pair", &host])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Launch a stream for a host + app via `moonlight stream <host> <app>`.
+#[tauri::command]
+fn moonlight_stream(
+    host: String,
+    app: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<(), String> {
+    let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
+    Command::new(&exe)
+        .args(["stream", &host, &app])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Ask the running stream on a host to quit.
+#[tauri::command]
+fn moonlight_quit(
+    host: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<(), String> {
+    let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
+    Command::new(&exe)
+        .args(["quit", &host])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Discover Sunshine/GameStream hosts on the LAN via mDNS, and classify each as
+/// paired or not by probing with `moonlight listapps`.
+#[tauri::command]
+fn discover_hosts(state: State<'_, settings::SettingsState>) -> Vec<DiscoveredHost> {
+    use mdns_sd::{ServiceDaemon, ServiceEvent};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    let mut hosts: HashMap<String, (String, String)> = HashMap::new();
+
+    if let Ok(mdns) = ServiceDaemon::new() {
+        if let Ok(receiver) = mdns.browse("_nvstream._tcp.local.") {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                match receiver.recv_timeout(Duration::from_millis(200)) {
+                    Ok(ServiceEvent::ServiceResolved(info)) => {
+                        let hostname = info.get_hostname();
+                        let address = info
+                            .get_addresses()
+                            .iter()
+                            .next()
+                            .map(|a| a.to_string())
+                            .unwrap_or_default();
+                        if !address.is_empty() {
+                            let name = hostname.split('.').next().unwrap_or(&hostname).to_string();
+                            hosts.insert(hostname.to_string(), (name, address));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        drop(mdns);
+    }
+
+    let exe = moonlight_exe(&state);
+    let mut out = Vec::new();
+    for (hostname, (name, address)) in hosts {
+        let paired = match &exe {
+            Some(exe) => probe_listapps(exe, &address),
+            None => false,
+        };
+        out.push(DiscoveredHost {
+            hostname,
+            name,
+            address,
+            paired,
+        });
+    }
+    out
+}
+
+#[derive(serde::Serialize)]
+struct DiscoveredHost {
+    hostname: String,
+    name: String,
+    address: String,
+    paired: bool,
+}
+
+fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
+    let exe = exe.to_path_buf();
+    let host = host.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ok = Command::new(&exe)
+            .args(["listapps", &host])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        let _ = tx.send(ok);
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(8)).unwrap_or(false)
+}
+
 /// Exit Moonblast entirely.
 #[tauri::command]
 fn close_app(app: AppHandle) {
@@ -157,7 +312,12 @@ pub fn run() {
             system_power,
             tailscale_status,
             tailscale_set,
-            validate_moonlight_dir
+            validate_moonlight_dir,
+            moonlight_list_apps,
+            moonlight_pair,
+            moonlight_stream,
+            moonlight_quit,
+            discover_hosts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
