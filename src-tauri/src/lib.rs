@@ -1,4 +1,5 @@
 use tauri::AppHandle;
+use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
 use std::process::Command;
@@ -131,7 +132,7 @@ fn moonlight_exe(state: &State<'_, settings::SettingsState>) -> Option<std::path
     None
 }
 
-/// List a host's apps via `moonlight listapps <host>`.
+/// List a host's apps via `moonlight list <host>`.
 #[tauri::command]
 fn moonlight_list_apps(
     host: String,
@@ -139,7 +140,7 @@ fn moonlight_list_apps(
 ) -> Result<Vec<String>, String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
     let out = Command::new(&exe)
-        .args(["listapps", &host])
+        .args(["list", &host])
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
@@ -154,17 +155,31 @@ fn moonlight_list_apps(
     Ok(apps)
 }
 
-/// Launch Moonlight's pairing flow for a host (opens Moonlight QT's PIN window).
+/// Launch Moonlight's pairing flow for a host and notify when it completes.
 #[tauri::command]
 fn moonlight_pair(
+    app: tauri::AppHandle,
     host: String,
     state: State<'_, settings::SettingsState>,
 ) -> Result<(), String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    Command::new(&exe)
+    let child = Command::new(&exe)
         .args(["pair", &host])
         .spawn()
         .map_err(|e| e.to_string())?;
+    // Wait for Moonlight's pairing process to finish (it exits once the user
+    // completes pairing), then notify the frontend.
+    std::thread::spawn(move || {
+        let success = child
+            .wait_with_output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        let full_host = host.clone();
+        let _ = app.emit(
+            "pair-complete",
+            serde_json::json!({ "host": full_host, "success": success }),
+        );
+    });
     Ok(())
 }
 
@@ -263,7 +278,7 @@ fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let ok = Command::new(&exe)
-            .args(["listapps", &host])
+            .args(["list", &host])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Plus, Play, LockKey, Monitor, Trash, GameController, ArrowsClockwise } from "@phosphor-icons/react";
 import { MoonlightSettings } from "./MoonlightSettings";
 import { PageShell } from "./PageShell";
@@ -93,11 +94,13 @@ function DiscoveredCard({
   host,
   onApps,
   onPair,
+  onDesktop,
   busy,
 }: {
   host: DiscoveredHost;
   onApps: () => void;
   onPair: () => void;
+  onDesktop: () => void;
   busy: boolean;
 }) {
   return (
@@ -126,22 +129,35 @@ function DiscoveredCard({
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        <button
-          onClick={onPair}
-          disabled={busy}
-          className="flex items-center gap-1.5 rounded-full border border-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
-        >
-          <LockKey size={14} weight="bold" />
-          Pair
-        </button>
-        <button
-          onClick={onApps}
-          disabled={busy}
-          className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-3 py-1.5 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
-        >
-          <GameController size={14} weight="bold" />
-          Apps
-        </button>
+        {host.paired ? (
+          <>
+            <button
+              onClick={onDesktop}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white transition enabled:hover:brightness-110 disabled:opacity-40"
+            >
+              <Play size={15} weight="fill" />
+              Desktop
+            </button>
+            <button
+              onClick={onApps}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-full border border-(--color-border) px-3 py-2 text-sm font-medium text-(--color-muted) transition enabled:hover:text-(--color-text) disabled:opacity-40"
+            >
+              <GameController size={14} weight="bold" />
+              Apps
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onPair}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded-full border border-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
+          >
+            <LockKey size={14} weight="bold" />
+            Pair
+          </button>
+        )}
       </div>
     </div>
   );
@@ -293,12 +309,9 @@ export function MoonlightView() {
   const [toast, setToast] = useState<string | null>(null);
   const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
   const [scanning, setScanning] = useState(false);
+  const pairingRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (sub === "machines") scan();
-  }, [sub]);
-
-  async function scan() {
+  const scan = useCallback(async () => {
     setScanning(true);
     try {
       const list = await invoke<DiscoveredHost[]>("discover_hosts");
@@ -308,7 +321,30 @@ export function MoonlightView() {
     } finally {
       setScanning(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (sub === "machines") scan();
+  }, [sub, scan]);
+
+  // When a pairing session completes, refresh once instead of polling.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ host: string; success: boolean }>("pair-complete", (event) => {
+      const { host, success } = event.payload;
+      if (pairingRef.current === host) {
+        pairingRef.current = null;
+        setBusyAddress(null);
+        scan();
+        showToast(success ? `Paired with ${host}` : `Pairing ${host} failed`);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [scan]);
 
   function showToast(message: string) {
     setToast(message);
@@ -324,14 +360,24 @@ export function MoonlightView() {
   }
 
   async function pair(host: Host) {
+    pairingRef.current = host.address;
     setBusyAddress(host.address);
+    showToast(`Pairing ${host.name}…`);
     try {
       await invoke("moonlight_pair", { host: host.address });
-      showToast(`Pairing ${host.name}…`);
+    } catch (err) {
+      pairingRef.current = null;
+      setBusyAddress(null);
+      showToast(String(err));
+    }
+  }
+
+  async function streamDesktop(host: Host) {
+    try {
+      await invoke("moonlight_stream", { host: host.address, app: "Desktop" });
+      showToast(`Streaming ${host.name} Desktop…`);
     } catch (err) {
       showToast(String(err));
-    } finally {
-      setBusyAddress(null);
     }
   }
 
@@ -409,6 +455,7 @@ export function MoonlightView() {
                             busy={busyAddress === d.address}
                             onApps={() => setAppsHost({ name: d.name, address: d.address })}
                             onPair={() => pair({ name: d.name, address: d.address })}
+                            onDesktop={() => streamDesktop({ name: d.name, address: d.address })}
                           />
                         ))}
                       </div>
