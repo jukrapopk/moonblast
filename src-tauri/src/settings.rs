@@ -14,12 +14,23 @@ pub struct Settings {
     pub moonlight: MoonlightStreaming,
     pub fullscreen: Fullscreen,
     pub machines: Vec<MoonlightHost>,
+    #[serde(default)]
+    pub app_shortcuts: Vec<AppShortcut>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MoonlightHost {
     pub name: String,
     pub address: String,
+}
+
+/// A user-curated app in the Apps tab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppShortcut {
+    pub name: String,
+    pub path: String,
+    #[serde(default)]
+    pub category: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +48,7 @@ fn default_last_view() -> String {
 pub struct Integrations {
     pub moonlight_folder: Option<String>,
     pub moonlight_enabled: bool,
+    pub apps_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +145,7 @@ impl Default for Settings {
             integrations: Integrations {
                 moonlight_folder: None,
                 moonlight_enabled: false,
+                apps_enabled: true,
             },
             moonlight: MoonlightStreaming::default(),
             fullscreen: Fullscreen {
@@ -140,6 +153,7 @@ impl Default for Settings {
                 auto_fullscreen: false,
             },
             machines: Vec::new(),
+            app_shortcuts: Vec::new(),
         }
     }
 }

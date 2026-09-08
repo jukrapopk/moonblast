@@ -145,11 +145,15 @@ export function SettingsView({
   onToggleMoonlight,
   moonlightDir,
   onSelectMoonlight,
+  appsEnabled,
+  onToggleApps,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
   moonlightDir: string | null;
   onSelectMoonlight: (dir: string) => void;
+  appsEnabled: boolean;
+  onToggleApps: (v: boolean) => void;
 }) {
   return (
     <PageShell title="Settings" subtitle="App-level settings.">
@@ -170,6 +174,9 @@ export function SettingsView({
 
       <Section title="Integrations">
         <TailscaleRow />
+        <Row label="Apps" description="Discover and launch installed Windows apps.">
+          <Toggle checked={appsEnabled} onChange={onToggleApps} />
+        </Row>
         <MoonlightRow
           enabled={moonlightEnabled}
           onToggle={onToggleMoonlight}

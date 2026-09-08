@@ -258,6 +258,208 @@ fn client_display() -> Result<ClientDisplay, String> {
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppEntry {
+    id: String,
+    name: String,
+    category: String,
+    path: String,
+}
+
+/// Walk a Start Menu directory, collecting `.lnk` shortcuts.
+fn walk_programs(
+    dir: &std::path::Path,
+    category: &str,
+    out: &mut Vec<AppEntry>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_dir {
+            let sub = if category.is_empty() {
+                name
+            } else {
+                format!("{category} › {name}")
+            };
+            walk_programs(&path, &sub, out, seen);
+        } else if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("lnk"))
+            .unwrap_or(false)
+        {
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if stem.is_empty() {
+                continue;
+            }
+            let p = path.to_string_lossy().into_owned();
+            if !seen.insert(p.clone()) {
+                continue; // system + user menus may overlap
+            }
+            out.push(AppEntry {
+                id: p.clone(),
+                name: stem,
+                category: category.to_string(),
+                path: p,
+            });
+        }
+    }
+}
+
+/// Discover installed apps from the Start Menu (system + current user).
+#[tauri::command]
+async fn discover_apps() -> Vec<AppEntry> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut out: Vec<AppEntry> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut roots = Vec::new();
+        if let Some(s) = std::env::var("PROGRAMDATA").ok() {
+            roots.push(format!("{s}\\Microsoft\\Windows\\Start Menu\\Programs"));
+        }
+        if let Some(u) = std::env::var("APPDATA").ok() {
+            roots.push(format!("{u}\\Microsoft\\Windows\\Start Menu\\Programs"));
+        }
+        for root in &roots {
+            walk_programs(std::path::Path::new(root), "", &mut out, &mut seen);
+        }
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Launch an app or shortcut via the Windows shell.
+#[tauri::command]
+fn launch_app(path: String) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let mut op: Vec<u16> = "open".encode_utf16().collect();
+    op.push(0);
+    let mut pw: Vec<u16> = path.encode_utf16().collect();
+    pw.push(0);
+    let res = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            op.as_ptr(),
+            pw.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        ) as isize
+    };
+    if res > 32 {
+        Ok(())
+    } else {
+        Err(format!("Failed to launch app (error {res})"))
+    }
+}
+
+/// Extract an app's icon (from its exe or .lnk) and return it as a base64 PNG.
+#[tauri::command]
+fn app_icon(path: String) -> Result<Option<String>, String> {
+    let Some(png) = (|| -> Option<Vec<u8>> {
+        use windows_sys::Win32::Graphics::Gdi::{
+            CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+            BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        };
+        use windows_sys::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL};
+
+        const SIZE: i32 = 32;
+        const SHGFI_ICON: u32 = 0x0000_0100;
+
+        let mut wide: Vec<u16> = path.encode_utf16().collect();
+        wide.push(0);
+        let mut info: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        let got = unsafe {
+            SHGetFileInfoW(
+                wide.as_ptr(),
+                0,
+                &mut info as *mut SHFILEINFOW,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON,
+            )
+        };
+        if got == 0 || info.hIcon.is_null() {
+            return None;
+        }
+
+        // Draw the icon into a 32bpp DIB so we can read its pixels.
+        let dc = unsafe { CreateCompatibleDC(std::ptr::null_mut()) };
+        if dc.is_null() {
+            unsafe { DestroyIcon(info.hIcon) };
+            return None;
+        }
+        let mut header: BITMAPINFOHEADER = unsafe { std::mem::zeroed() };
+        header.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        header.biWidth = SIZE;
+        header.biHeight = -SIZE; // top-down
+        header.biPlanes = 1;
+        header.biBitCount = 32;
+        header.biCompression = BI_RGB;
+        let mut bmi: BITMAPINFO = unsafe { std::mem::zeroed() };
+        bmi.bmiHeader = header;
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let hbm = unsafe {
+            CreateDIBSection(
+                dc,
+                &bmi,
+                DIB_RGB_COLORS,
+                &mut bits,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if hbm.is_null() || bits.is_null() {
+            unsafe {
+                DeleteDC(dc);
+                DestroyIcon(info.hIcon);
+            }
+            return None;
+        }
+        let old = unsafe { SelectObject(dc, hbm) };
+        unsafe { DrawIconEx(dc, 0, 0, info.hIcon, SIZE, SIZE, 0, std::ptr::null_mut(), DI_NORMAL) };
+
+        // Copy pixels while the DIBSection is still alive (bits are freed on DeleteObject).
+        let n = (SIZE * SIZE * 4) as usize;
+        let raw = unsafe { std::slice::from_raw_parts(bits as *const u8, n) };
+        let mut rgba = Vec::with_capacity(n);
+        for px in raw.chunks_exact(4) {
+            rgba.push(px[2]); // R
+            rgba.push(px[1]); // G
+            rgba.push(px[0]); // B
+            rgba.push(px[3]); // A
+        }
+
+        unsafe {
+            SelectObject(dc, old);
+            DeleteObject(hbm);
+            DeleteDC(dc);
+            DestroyIcon(info.hIcon);
+        }
+
+        let img = image::RgbaImage::from_raw(SIZE as u32, SIZE as u32, rgba)?;
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .ok()?;
+        Some(out)
+    })() else {
+        return Ok(None);
+    };
+
+    Ok(Some(format!("data:image/png;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png))))
+}
+
 /// Build the `moonlight stream` CLI flags from the stored streaming prefs.
 fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
@@ -562,7 +764,10 @@ pub fn run() {
             moonlight_stream,
             moonlight_quit,
             discover_hosts,
-            client_display
+            client_display,
+            discover_apps,
+            launch_app,
+            app_icon
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

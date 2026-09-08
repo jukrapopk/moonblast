@@ -30,17 +30,21 @@ export function TopBar({
   fullscreen,
   onToggleFullscreen,
   showMoonlight,
+  showApps,
 }: {
   view: View;
   onNavigate: (v: View) => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
   showMoonlight: boolean;
+  showApps: boolean;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
-  const visibleLeft = !showMoonlight
-    ? leftItems.filter((i) => i.id !== "moonlight")
-    : leftItems;
+  const visibleLeft = leftItems.filter((i) => {
+    if (i.id === "moonlight" && !showMoonlight) return false;
+    if (i.id === "apps" && !showApps) return false;
+    return true;
+  });
   const rightItems = items.filter((i) => i.nav === "right");
   const [powerOpen, setPowerOpen] = useState(false);
 

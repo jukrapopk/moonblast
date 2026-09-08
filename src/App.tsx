@@ -19,6 +19,16 @@ export default function App() {
 
   const moonlightEnabled = settings.integrations.moonlight_enabled;
   const moonlightDir = settings.integrations.moonlight_folder;
+  const appsEnabled = settings.integrations.apps_enabled;
+
+  // If apps are disabled, fall back to another view so we don't stay stuck.
+  useEffect(() => {
+    if (!appsEnabled && view === "apps") setView("moonlight");
+  }, [appsEnabled, view]);
+
+  function setAppsEnabled(v: boolean) {
+    update((s) => ({ ...s, integrations: { ...s.integrations, apps_enabled: v } }));
+  }
 
   function setMoonlightEnabled(v: boolean) {
     update((s) => ({
@@ -68,6 +78,7 @@ export default function App() {
         fullscreen={fullscreen}
         onToggleFullscreen={toggleFullscreen}
         showMoonlight={moonlightEnabled && moonlightDir !== null}
+        showApps={appsEnabled}
       />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
@@ -88,6 +99,8 @@ export default function App() {
                 onToggleMoonlight={setMoonlightEnabled}
                 moonlightDir={moonlightDir}
                 onSelectMoonlight={setMoonlightDir}
+                appsEnabled={appsEnabled}
+                onToggleApps={setAppsEnabled}
               />
             </motion.div>
           )}

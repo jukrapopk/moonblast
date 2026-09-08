@@ -16,6 +16,7 @@ export interface Settings {
   integrations: {
     moonlight_folder: string | null;
     moonlight_enabled: boolean;
+    apps_enabled: boolean;
   };
   moonlight: {
     resolution: string;
@@ -50,6 +51,7 @@ export interface Settings {
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean };
   machines: { name: string; address: string }[];
+  app_shortcuts: { name: string; path: string; category: string }[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -58,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   integrations: {
     moonlight_folder: null,
     moonlight_enabled: false,
+    apps_enabled: true,
   },
   moonlight: {
     resolution: "auto",
@@ -92,6 +95,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   fullscreen: { suppress_explorer: false, auto_fullscreen: false },
   machines: [],
+  app_shortcuts: [],
 };
 
 interface SettingsContextValue {
