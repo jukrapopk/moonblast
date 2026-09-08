@@ -54,55 +54,64 @@ fn is_maximized(window: tauri::Window) -> Result<bool, String> {
 /// Reports real Tailscale state as one of: not-found, not-running, starting,
 /// logged-out, connected, disconnected.
 #[tauri::command]
-fn tailscale_status() -> TailscaleInfo {
-    let status = match Command::new("tailscale").arg("status").output() {
-        Err(_) => "not-found".to_string(),
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let lower = format!("{stdout}\n{stderr}").to_lowercase();
+async fn tailscale_status() -> TailscaleInfo {
+    // Offload the subprocess wait off the main thread so the UI never freezes.
+    tauri::async_runtime::spawn_blocking(|| {
+        let status = match Command::new("tailscale").arg("status").output() {
+            Err(_) => "not-found".to_string(),
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                let lower = format!("{stdout}\n{stderr}").to_lowercase();
 
-            // Daemon unreachable.
-            if lower.contains("failed to connect to local tailscale daemon")
-                || lower.contains("is the tailscale service running")
-                || lower.contains("tailscaled process")
-                || lower.contains("connection refused")
-            {
-                "not-running".to_string()
-            // Connected (peer list / healthy), not logged out.
-            } else if output.status.success()
-                && !lower.contains("logged out")
-                && !lower.contains("needs login")
-            {
-                "connected".to_string()
-            // Reachable but not signed in.
-            } else if lower.contains("logged out") || lower.contains("needs login") {
-                "logged-out".to_string()
-            // Warming up.
-            } else if lower.contains("starting") || lower.contains("please wait") || lower.contains("health check") {
-                "starting".to_string()
-            } else {
-                "disconnected".to_string()
+                // Daemon unreachable.
+                if lower.contains("failed to connect to local tailscale daemon")
+                    || lower.contains("is the tailscale service running")
+                    || lower.contains("tailscaled process")
+                    || lower.contains("connection refused")
+                {
+                    "not-running".to_string()
+                // Connected (peer list / healthy), not logged out.
+                } else if output.status.success()
+                    && !lower.contains("logged out")
+                    && !lower.contains("needs login")
+                {
+                    "connected".to_string()
+                // Reachable but not signed in.
+                } else if lower.contains("logged out") || lower.contains("needs login") {
+                    "logged-out".to_string()
+                // Warming up.
+                } else if lower.contains("starting") || lower.contains("please wait") || lower.contains("health check") {
+                    "starting".to_string()
+                } else {
+                    "disconnected".to_string()
+                }
             }
-        }
-    };
-    TailscaleInfo { status }
+        };
+        TailscaleInfo { status }
+    })
+    .await
+    .unwrap_or(TailscaleInfo { status: "not-found".to_string() })
 }
 
 /// Bring Tailscale up or down. Only meaningful when the daemon is running.
 #[tauri::command]
-fn tailscale_set(up: bool) -> Result<(), String> {
-    let arg = if up { "up" } else { "down" };
-    let out = Command::new("tailscale").arg(arg).output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        let msg = format!(
-            "{}{}",
-            String::from_utf8_lossy(&out.stderr),
-            String::from_utf8_lossy(&out.stdout)
-        );
-        return Err(msg.trim().to_string());
-    }
-    Ok(())
+async fn tailscale_set(up: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let arg = if up { "up" } else { "down" };
+        let out = Command::new("tailscale").arg(arg).output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let msg = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stderr),
+                String::from_utf8_lossy(&out.stdout)
+            );
+            return Err(msg.trim().to_string());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(serde::Serialize)]
@@ -132,27 +141,32 @@ fn moonlight_exe(state: &State<'_, settings::SettingsState>) -> Option<std::path
     None
 }
 
-/// List a host's apps via `moonlight list <host>`.
+/// List a host's apps via `moonlight list <host>`. Async so the subprocess wait
+/// doesn't block the main thread / UI.
 #[tauri::command]
-fn moonlight_list_apps(
+async fn moonlight_list_apps(
     host: String,
     state: State<'_, settings::SettingsState>,
 ) -> Result<Vec<String>, String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    let out = Command::new(&exe)
-        .args(["list", &host])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        let msg = String::from_utf8_lossy(&out.stderr).into_owned();
-        return Err(msg.trim().to_string());
-    }
-    let apps = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
-    Ok(apps)
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = Command::new(&exe)
+            .args(["list", &host])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let msg = String::from_utf8_lossy(&out.stderr).into_owned();
+            return Err(msg.trim().to_string());
+        }
+        let apps = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Ok(apps)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Launch Moonlight's pairing flow for a host and notify when it completes.
@@ -214,54 +228,61 @@ fn moonlight_quit(
 
 /// Discover Sunshine/GameStream hosts on the LAN via mDNS, and classify each as
 /// paired or not by probing with `moonlight listapps`.
+///
+/// Async + spawn_blocking so the 3s mDNS browse and the per-host probe timeouts
+/// don't block the main thread (which previously froze the whole UI during Scan).
 #[tauri::command]
-fn discover_hosts(state: State<'_, settings::SettingsState>) -> Vec<DiscoveredHost> {
-    use mdns_sd::{ServiceDaemon, ServiceEvent};
-    use std::collections::HashMap;
-    use std::time::{Duration, Instant};
+async fn discover_hosts(state: State<'_, settings::SettingsState>) -> Result<Vec<DiscoveredHost>, String> {
+    let exe = moonlight_exe(&state);
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        use mdns_sd::{ServiceDaemon, ServiceEvent};
+        use std::collections::HashMap;
+        use std::time::{Duration, Instant};
 
-    let mut hosts: HashMap<String, (String, String)> = HashMap::new();
+        let mut hosts: HashMap<String, (String, String)> = HashMap::new();
 
-    if let Ok(mdns) = ServiceDaemon::new() {
-        if let Ok(receiver) = mdns.browse("_nvstream._tcp.local.") {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline {
-                match receiver.recv_timeout(Duration::from_millis(200)) {
-                    Ok(ServiceEvent::ServiceResolved(info)) => {
-                        let hostname = info.get_hostname();
-                        let address = info
-                            .get_addresses()
-                            .iter()
-                            .next()
-                            .map(|a| a.to_string())
-                            .unwrap_or_default();
-                        if !address.is_empty() {
-                            let name = hostname.split('.').next().unwrap_or(&hostname).to_string();
-                            hosts.insert(hostname.to_string(), (name, address));
+        if let Ok(mdns) = ServiceDaemon::new() {
+            if let Ok(receiver) = mdns.browse("_nvstream._tcp.local.") {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while Instant::now() < deadline {
+                    match receiver.recv_timeout(Duration::from_millis(200)) {
+                        Ok(ServiceEvent::ServiceResolved(info)) => {
+                            let hostname = info.get_hostname();
+                            let address = info
+                                .get_addresses()
+                                .iter()
+                                .next()
+                                .map(|a| a.to_string())
+                                .unwrap_or_default();
+                            if !address.is_empty() {
+                                let name = hostname.split('.').next().unwrap_or(&hostname).to_string();
+                                hosts.insert(hostname.to_string(), (name, address));
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
+            drop(mdns);
         }
-        drop(mdns);
-    }
 
-    let exe = moonlight_exe(&state);
-    let mut out = Vec::new();
-    for (hostname, (name, address)) in hosts {
-        let paired = match &exe {
-            Some(exe) => probe_listapps(exe, &address),
-            None => false,
-        };
-        out.push(DiscoveredHost {
-            hostname,
-            name,
-            address,
-            paired,
-        });
-    }
-    out
+        let mut out = Vec::new();
+        for (hostname, (name, address)) in hosts {
+            let paired = match &exe {
+                Some(exe) => probe_listapps(exe, &address),
+                None => false,
+            };
+            out.push(DiscoveredHost {
+                hostname,
+                name,
+                address,
+                paired,
+            });
+        }
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())?)
 }
 
 #[derive(serde::Serialize)]
