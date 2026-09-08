@@ -10,6 +10,11 @@ mod settings;
 #[tauri::command]
 fn toggle_fullscreen(window: tauri::Window) -> Result<bool, String> {
     let fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
+    if !fullscreen && window.is_maximized().map_err(|e| e.to_string())? {
+        // Frameless maximized windows keep an invisible resize border that can
+        // leave a blank strip at the top when going fullscreen; unmaximize first.
+        window.unmaximize().map_err(|e| e.to_string())?;
+    }
     window.set_fullscreen(!fullscreen).map_err(|e| e.to_string())?;
     Ok(!fullscreen)
 }
