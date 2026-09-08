@@ -5,8 +5,11 @@ import { PageShell } from "./PageShell";
 import { Section } from "./ui/Section";
 import { Row } from "./ui/Row";
 import { Toggle } from "./ui/Toggle";
+import { useSettings } from "../settings/SettingsContext";
 
 function TailscaleRow() {
+  const { settings, update } = useSettings();
+  const enabled = settings.integrations.tailscale_enabled;
   const [info, setInfo] = useState<{ found: boolean; up: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -20,7 +23,10 @@ function TailscaleRow() {
     setBusy(true);
     try {
       await invoke("tailscale_set", { up });
-      setInfo((prev) => ({ found: prev?.found ?? false, up }));
+      update((s) => ({
+        ...s,
+        integrations: { ...s.integrations, tailscale_enabled: up },
+      }));
     } catch {
       // leave state as-is on failure
     } finally {
@@ -46,7 +52,7 @@ function TailscaleRow() {
 
   return (
     <Row label="Tailscale" description={info.up ? "Connected" : "Disconnected"}>
-      <Toggle checked={info.up} onChange={toggle} disabled={busy} />
+      <Toggle checked={enabled} onChange={toggle} disabled={busy} />
     </Row>
   );
 }

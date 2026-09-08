@@ -1,5 +1,8 @@
 use tauri::AppHandle;
+use tauri::Manager;
 use std::process::Command;
+
+mod settings;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
@@ -104,9 +107,15 @@ fn system_power(action: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            app.manage(settings::SettingsState::load(app.handle()));
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            settings::get_settings,
+            settings::update_settings,
             toggle_fullscreen,
             is_fullscreen,
             minimize_window,

@@ -6,12 +6,28 @@ import { TitleBar } from "./components/TitleBar";
 import { AppsView } from "./components/AppsView";
 import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView } from "./components/SettingsView";
+import { useSettings } from "./settings/SettingsContext";
 
 export default function App() {
   const [view, setView] = useState<View>("apps");
   const [fullscreen, setFullscreen] = useState(false);
-  const [moonlightEnabled, setMoonlightEnabled] = useState(false);
-  const [moonlightDir, setMoonlightDir] = useState<string | null>(null);
+  const { settings, update } = useSettings();
+
+  const moonlightEnabled = settings.integrations.moonlight_enabled;
+  const moonlightDir = settings.integrations.moonlight_folder;
+
+  function setMoonlightEnabled(v: boolean) {
+    update((s) => ({
+      ...s,
+      integrations: { ...s.integrations, moonlight_enabled: v },
+    }));
+  }
+  function setMoonlightDir(dir: string) {
+    update((s) => ({
+      ...s,
+      integrations: { ...s.integrations, moonlight_folder: dir },
+    }));
+  }
 
   // Sync the initial fullscreen state.
   useEffect(() => {
