@@ -17,6 +17,30 @@ fn is_fullscreen(window: tauri::Window) -> Result<bool, String> {
     window.is_fullscreen().map_err(|e| e.to_string())
 }
 
+/// Minimize the window.
+#[tauri::command]
+fn minimize_window(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+/// Toggle maximize/restore. Returns the new maximized state.
+#[tauri::command]
+fn toggle_maximize(window: tauri::Window) -> Result<bool, String> {
+    let maximized = window.is_maximized().map_err(|e| e.to_string())?;
+    if maximized {
+        window.unmaximize().map_err(|e| e.to_string())?;
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+    }
+    Ok(!maximized)
+}
+
+/// Returns whether the window is currently maximized.
+#[tauri::command]
+fn is_maximized(window: tauri::Window) -> Result<bool, String> {
+    window.is_maximized().map_err(|e| e.to_string())
+}
+
 /// Exit Moonblast entirely.
 #[tauri::command]
 fn close_app(app: AppHandle) {
@@ -43,6 +67,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             toggle_fullscreen,
             is_fullscreen,
+            minimize_window,
+            toggle_maximize,
+            is_maximized,
             close_app,
             system_power
         ])

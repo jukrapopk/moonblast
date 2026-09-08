@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { TopBar, type View } from "./components/TopBar";
+import { TitleBar } from "./components/TitleBar";
 import { AppsView } from "./components/AppsView";
 import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView } from "./components/SettingsView";
@@ -38,6 +39,7 @@ export default function App() {
 
   return (
     <div className="flex h-full w-full flex-col">
+      {!fullscreen && <TitleBar />}
       <TopBar
         view={view}
         onNavigate={setView}
