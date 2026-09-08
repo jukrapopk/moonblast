@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, X, FolderOpen } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, X, FolderOpen, Image, ArrowClockwise } from "@phosphor-icons/react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
+import { useContextMenu } from "./ui/ContextMenu";
 import { useSettings } from "../settings/SettingsContext";
 
 interface AppEntry {
@@ -19,6 +21,7 @@ interface Shortcut {
   name: string;
   path: string;
   category: string;
+  custom_icon: string | null;
 }
 
 const PALETTE = [
@@ -48,7 +51,7 @@ const nameFromPath = (p: string) =>
 
 const iconCache = new Map<string, string | null>();
 
-function useAppIcon(name: string, path: string): string | null {
+function useAppIcon(name: string, path: string, bust: number): string | null {
   const [icon, setIcon] = useState<string | null>(iconCache.get(path) ?? null);
 
   useEffect(() => {
@@ -69,7 +72,7 @@ function useAppIcon(name: string, path: string): string | null {
     return () => {
       alive = false;
     };
-  }, [path, name]);
+  }, [path, name, bust]);
 
   return icon;
 }
@@ -80,16 +83,23 @@ function AppTile({
   name,
   category,
   path,
+  customIcon,
+  bust,
   onLaunch,
   onRemove,
+  onContextMenu,
 }: {
   name: string;
   category: string;
   path: string;
+  customIcon: string | null;
+  bust: number;
   onLaunch: () => void;
   onRemove?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  const icon = useAppIcon(name, path);
+  const fetchedIcon = useAppIcon(name, path, bust);
+  const icon = customIcon ? convertFileSrc(customIcon) : fetchedIcon;
 
   return (
     <motion.div
@@ -99,6 +109,7 @@ function AppTile({
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
       className="group relative"
+      onContextMenu={onContextMenu}
     >
       <button
         onClick={onLaunch}
@@ -143,7 +154,7 @@ function AddAppModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onAdd: (a: Shortcut) => void;
+  onAdd: (a: { name: string; path: string; category?: string }) => void;
   existingPaths: Set<string>;
 }) {
   const [tab, setTab] = useState<"installed" | "browse">("installed");
@@ -253,15 +264,35 @@ export function AppsView() {
   const shortcuts = settings.app_shortcuts;
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [bust, setBust] = useState(0);
+  const ctx = useContextMenu();
 
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
-  function addShortcut(a: Shortcut) {
-    if (existingPaths.has(a.path.toLowerCase())) return;
-    update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, a] }));
+  function addShortcut(a: { name: string; path: string; category?: string }) {
+    const entry: Shortcut = { name: a.name, path: a.path, category: a.category ?? "", custom_icon: null };
+    if (existingPaths.has(entry.path.toLowerCase())) return;
+    update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, entry] }));
   }
   function removeShortcut(path: string) {
     update((s) => ({ ...s, app_shortcuts: s.app_shortcuts.filter((x) => x.path !== path) }));
+  }
+  function setCustomIcon(path: string, value: string | null) {
+    update((s) => ({
+      ...s,
+      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, custom_icon: value } : x)),
+    }));
+  }
+  async function pickCustomIcon(a: Shortcut) {
+    const picked = await openDialog({
+      multiple: false,
+      filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "webp", "ico", "bmp", "gif"] }],
+    });
+    if (typeof picked === "string" && picked) setCustomIcon(a.path, picked);
+  }
+  function refreshIcon(a: Shortcut) {
+    iconCache.delete(a.path);
+    setBust((b) => b + 1);
   }
   async function launch(a: Shortcut) {
     try {
@@ -331,8 +362,21 @@ export function AppsView() {
                   name={a.name}
                   category={a.category}
                   path={a.path}
+                  customIcon={a.custom_icon}
+                  bust={bust}
                   onLaunch={() => launch(a)}
                   onRemove={() => removeShortcut(a.path)}
+                  onContextMenu={(e) =>
+                    ctx.open(e, [
+                      { icon: <MagnifyingGlass size={14} weight="bold" />, label: "Search SteamGridDB", onClick: () => refreshIcon(a) },
+                      { icon: <Image size={14} weight="bold" />, label: "Custom icon…", onClick: () => pickCustomIcon(a) },
+                      ...(a.custom_icon
+                        ? [{ label: "Clear custom icon", onClick: () => setCustomIcon(a.path, null) }]
+                        : []),
+                      { icon: <ArrowClockwise size={14} weight="bold" />, label: "Re-extract icon", onClick: () => refreshIcon(a) },
+                      { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
+                    ])
+                  }
                 />
               ))}
             </AnimatePresence>
@@ -346,6 +390,8 @@ export function AppsView() {
         onAdd={addShortcut}
         existingPaths={existingPaths}
       />
+
+      {ctx.render}
     </>
   );
 }

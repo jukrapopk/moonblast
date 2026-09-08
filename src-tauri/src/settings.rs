@@ -31,6 +31,8 @@ pub struct AppShortcut {
     pub path: String,
     #[serde(default)]
     pub category: String,
+    #[serde(default)]
+    pub custom_icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

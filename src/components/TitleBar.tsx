@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Minus, Square, Copy, X } from "@phosphor-icons/react";
+import { useContextMenu } from "./ui/ContextMenu";
 
-export function TitleBar() {
+export function TitleBar({
+  fullscreen,
+  onToggleFullscreen,
+}: {
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
+}) {
   const [maximized, setMaximized] = useState(false);
+  const ctx = useContextMenu();
 
   useEffect(() => {
     invoke<boolean>("is_maximized").then(setMaximized).catch(() => {});
@@ -31,6 +39,17 @@ export function TitleBar() {
       {/* Title + drag region */}
       <div
         data-tauri-drag-region
+        onContextMenu={(e) =>
+          ctx.open(e, [
+            { label: maximized ? "Restore" : "Maximize", onClick: () => toggleMaximize() },
+            { label: "Minimize", onClick: () => minimize() },
+            {
+              label: fullscreen ? "Exit fullscreen" : "Fullscreen",
+              onClick: () => onToggleFullscreen(),
+            },
+            { label: "Close", danger: true, onClick: () => close() },
+          ])
+        }
         className="flex min-w-0 flex-1 cursor-default items-center gap-2 px-3 text-sm font-medium text-(--color-muted)"
       >
         <img
@@ -69,6 +88,7 @@ export function TitleBar() {
           <X size={16} weight="bold" />
         </button>
       </div>
+      {ctx.render}
     </header>
   );
 }

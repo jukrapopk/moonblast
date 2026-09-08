@@ -8,6 +8,7 @@ import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
 import { Toast } from "./ui/Toast";
+import { useContextMenu } from "./ui/ContextMenu";
 import { useSettings } from "../settings/SettingsContext";
 
 interface Host {
@@ -50,6 +51,7 @@ function MachineCard({
   elapsedLabel,
   onResume,
   onDisconnect,
+  onContextMenu,
 }: {
   host: Host;
   onApps: () => void;
@@ -61,12 +63,14 @@ function MachineCard({
   elapsedLabel: string;
   onResume: () => void;
   onDisconnect: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
+      onContextMenu={onContextMenu}
       className={`flex items-center gap-4 rounded-2xl border bg-(--color-surface) p-4 ${
         streaming ? "border-(--color-accent)/40" : "border-(--color-border)"
       }`}
@@ -148,6 +152,7 @@ function DiscoveredCard({
   elapsedLabel,
   onResume,
   onDisconnect,
+  onContextMenu,
 }: {
   host: DiscoveredHost;
   onApps: () => void;
@@ -159,12 +164,14 @@ function DiscoveredCard({
   elapsedLabel: string;
   onResume: () => void;
   onDisconnect: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <div
       className={`flex items-center gap-4 rounded-2xl border bg-(--color-surface) p-4 ${
         streaming ? "border-(--color-accent)/40" : "border-(--color-border)"
       }`}
+      onContextMenu={onContextMenu}
     >
       <div
         className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
@@ -429,6 +436,7 @@ export function MoonlightView() {
   const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
   const [scanning, setScanning] = useState(false);
   const pairingRef = useRef<string | null>(null);
+  const ctx = useContextMenu();
 
   // Active streaming session (armed in Moonblast) + live elapsed timer.
   const [session, setSession] = useState<Session | null>(null);
@@ -630,6 +638,17 @@ export function MoonlightView() {
                             onApps={() => setAppsHost({ name: d.name, address: d.address })}
                             onPair={() => pair({ name: d.name, address: d.address })}
                             onDesktop={() => streamDesktop({ name: d.name, address: d.address })}
+                            onContextMenu={(e) =>
+                              ctx.open(e, [
+                                ...(d.paired
+                                  ? [
+                                      { label: "Stream Desktop", onClick: () => streamDesktop({ name: d.name, address: d.address }) },
+                                      { label: "Apps", onClick: () => setAppsHost({ name: d.name, address: d.address }) },
+                                    ]
+                                  : [{ label: "Pair", onClick: () => pair({ name: d.name, address: d.address }) }]),
+                                { label: "Remove", danger: true, onClick: () => removeHost(d.address) },
+                              ])
+                            }
                           />
                         ))}
                       </div>
@@ -652,6 +671,14 @@ export function MoonlightView() {
                             onApps={() => setAppsHost(m)}
                             onPair={() => pair(m)}
                             onRemove={() => removeHost(m.address)}
+                            onContextMenu={(e) =>
+                              ctx.open(e, [
+                                { label: "Stream Desktop", onClick: () => streamDesktop(m) },
+                                { label: "Apps", onClick: () => setAppsHost(m) },
+                                { label: "Pair", onClick: () => pair(m) },
+                                { label: "Remove", danger: true, onClick: () => removeHost(m.address) },
+                              ])
+                            }
                           />
                         ))}
                       </div>
@@ -686,6 +713,8 @@ export function MoonlightView() {
       )}
 
       <Toast message={toast} />
+
+      {ctx.render}
     </>
   );
 }

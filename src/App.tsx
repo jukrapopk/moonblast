@@ -74,7 +74,7 @@ export default function App() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      {!fullscreen && <TitleBar />}
+      {!fullscreen && <TitleBar fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen} />}
       <TopBar
         view={view}
         onNavigate={setView}
