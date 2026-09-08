@@ -22,7 +22,6 @@ pub struct General {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Integrations {
-    pub tailscale_enabled: bool,
     pub moonlight_folder: Option<String>,
     pub moonlight_enabled: bool,
 }
@@ -53,7 +52,6 @@ impl Default for Settings {
                 start_with_windows: false,
             },
             integrations: Integrations {
-                tailscale_enabled: true,
                 moonlight_folder: None,
                 moonlight_enabled: false,
             },

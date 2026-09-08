@@ -14,7 +14,6 @@ export interface Settings {
   version: number;
   general: { start_with_windows: boolean };
   integrations: {
-    tailscale_enabled: boolean;
     moonlight_folder: string | null;
     moonlight_enabled: boolean;
   };
@@ -35,7 +34,6 @@ export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   general: { start_with_windows: false },
   integrations: {
-    tailscale_enabled: true,
     moonlight_folder: null,
     moonlight_enabled: false,
   },

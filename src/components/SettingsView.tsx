@@ -5,36 +5,44 @@ import { PageShell } from "./PageShell";
 import { Section } from "./ui/Section";
 import { Row } from "./ui/Row";
 import { Toggle } from "./ui/Toggle";
-import { useSettings } from "../settings/SettingsContext";
+
+type TailscaleStatus =
+  | "not-found"
+  | "not-running"
+  | "starting"
+  | "logged-out"
+  | "connected"
+  | "disconnected";
 
 function TailscaleRow() {
-  const { settings, update } = useSettings();
-  const enabled = settings.integrations.tailscale_enabled;
-  const [info, setInfo] = useState<{ found: boolean; up: boolean } | null>(null);
+  const [status, setStatus] = useState<TailscaleStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
+  async function refresh() {
+    try {
+      const info = await invoke<{ status: TailscaleStatus }>("tailscale_status");
+      setStatus(info.status);
+    } catch {
+      setStatus("not-found");
+    }
+  }
+
   useEffect(() => {
-    invoke<{ found: boolean; up: boolean }>("tailscale_status")
-      .then(setInfo)
-      .catch(() => setInfo({ found: false, up: false }));
+    refresh();
   }, []);
 
   async function toggle(up: boolean) {
     setBusy(true);
     try {
       await invoke("tailscale_set", { up });
-      update((s) => ({
-        ...s,
-        integrations: { ...s.integrations, tailscale_enabled: up },
-      }));
     } catch {
-      // leave state as-is on failure
-    } finally {
-      setBusy(false);
+      // keep current status; refresh below reflects reality
     }
+    await refresh();
+    setBusy(false);
   }
 
-  if (!info) {
+  if (status === null) {
     return (
       <Row label="Tailscale">
         <span className="text-sm text-(--color-muted)">Checking…</span>
@@ -42,7 +50,7 @@ function TailscaleRow() {
     );
   }
 
-  if (!info.found) {
+  if (status === "not-found") {
     return (
       <Row label="Tailscale">
         <span className="text-sm text-(--color-muted)/60">Tailscale not found.</span>
@@ -50,9 +58,35 @@ function TailscaleRow() {
     );
   }
 
+  if (status === "not-running") {
+    return (
+      <Row label="Tailscale" description="Tailscale isn't running">
+        <span className="text-sm text-(--color-muted)/60">Start the Tailscale app to use it.</span>
+      </Row>
+    );
+  }
+
+  if (status === "starting") {
+    return (
+      <Row label="Tailscale" description="Tailscale is starting…">
+        <span className="text-sm text-(--color-muted)/60">Please wait.</span>
+      </Row>
+    );
+  }
+
+  if (status === "logged-out") {
+    return (
+      <Row label="Tailscale" description="Logged out">
+        <span className="text-sm text-(--color-muted)/60">Sign in to Tailscale to connect.</span>
+      </Row>
+    );
+  }
+
+  const up = status === "connected";
+
   return (
-    <Row label="Tailscale" description={info.up ? "Connected" : "Disconnected"}>
-      <Toggle checked={enabled} onChange={toggle} disabled={busy} />
+    <Row label="Tailscale" description={up ? "Connected" : "Disconnected"}>
+      <Toggle checked={up} onChange={toggle} disabled={busy} />
     </Row>
   );
 }

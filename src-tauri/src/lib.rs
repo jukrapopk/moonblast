@@ -44,36 +44,63 @@ fn is_maximized(window: tauri::Window) -> Result<bool, String> {
     window.is_maximized().map_err(|e| e.to_string())
 }
 
-/// Detects whether the Tailscale CLI is available and whether it's up.
+/// Reports real Tailscale state as one of: not-found, not-running, starting,
+/// logged-out, connected, disconnected.
 #[tauri::command]
 fn tailscale_status() -> TailscaleInfo {
-    match Command::new("tailscale").arg("status").output() {
+    let status = match Command::new("tailscale").arg("status").output() {
+        Err(_) => "not-found".to_string(),
         Ok(output) => {
-            let result = String::from_utf8_lossy(&output.stdout);
-            let up = output.status.success()
-                && !result.contains("Logged out")
-                && !result.contains("Needs login");
-            TailscaleInfo { found: true, up }
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let lower = format!("{stdout}\n{stderr}").to_lowercase();
+
+            // Daemon unreachable.
+            if lower.contains("failed to connect to local tailscale daemon")
+                || lower.contains("is the tailscale service running")
+                || lower.contains("tailscaled process")
+                || lower.contains("connection refused")
+            {
+                "not-running".to_string()
+            // Connected (peer list / healthy), not logged out.
+            } else if output.status.success()
+                && !lower.contains("logged out")
+                && !lower.contains("needs login")
+            {
+                "connected".to_string()
+            // Reachable but not signed in.
+            } else if lower.contains("logged out") || lower.contains("needs login") {
+                "logged-out".to_string()
+            // Warming up.
+            } else if lower.contains("starting") || lower.contains("please wait") || lower.contains("health check") {
+                "starting".to_string()
+            } else {
+                "disconnected".to_string()
+            }
         }
-        Err(_) => TailscaleInfo { found: false, up: false },
-    }
+    };
+    TailscaleInfo { status }
 }
 
-/// Turns Tailscale up (`up`) or down (`down`).
+/// Bring Tailscale up or down. Only meaningful when the daemon is running.
 #[tauri::command]
 fn tailscale_set(up: bool) -> Result<(), String> {
     let arg = if up { "up" } else { "down" };
-    Command::new("tailscale")
-        .arg(arg)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let out = Command::new("tailscale").arg(arg).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let msg = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
+        return Err(msg.trim().to_string());
+    }
     Ok(())
 }
 
 #[derive(serde::Serialize)]
 struct TailscaleInfo {
-    found: bool,
-    up: bool,
+    status: String,
 }
 
 /// Returns true if the folder looks like a Moonlight install (contains moonlight.exe).
