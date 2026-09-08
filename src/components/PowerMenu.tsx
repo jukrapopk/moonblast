@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowsOut,
+  ArrowsIn,
   X,
   Power,
   Moon,
@@ -11,6 +12,8 @@ import { Modal } from "./ui/Modal";
 interface PowerMenuProps {
   open: boolean;
   onClose: () => void;
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
 }
 
 function MenuItem({
@@ -47,7 +50,7 @@ function Divider() {
   return <div className="mx-4 my-1.5 h-px bg-(--color-border)" />;
 }
 
-export function PowerMenu({ open, onClose }: PowerMenuProps) {
+export function PowerMenu({ open, onClose, fullscreen, onToggleFullscreen }: PowerMenuProps) {
   async function run(command: string, payload?: Record<string, unknown>) {
     try {
       await invoke(command, payload);
@@ -61,9 +64,9 @@ export function PowerMenu({ open, onClose }: PowerMenuProps) {
     <Modal open={open} onClose={onClose} title="Power">
       <div className="space-y-1">
         <MenuItem
-          icon={<ArrowsOut size={18} weight="bold" />}
-          label="Fullscreen"
-          onClick={() => run("toggle_fullscreen")}
+          icon={fullscreen ? <ArrowsIn size={18} weight="bold" /> : <ArrowsOut size={18} weight="bold" />}
+          label={fullscreen ? "Windowed" : "Fullscreen"}
+          onClick={onToggleFullscreen}
         />
         <MenuItem
           icon={<X size={18} weight="bold" />}

@@ -27,9 +27,13 @@ function Icon({ name }: { name: View }) {
 export function TopBar({
   view,
   onNavigate,
+  fullscreen,
+  onToggleFullscreen,
 }: {
   view: View;
   onNavigate: (v: View) => void;
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
   const rightItems = items.filter((i) => i.nav === "right");
@@ -62,7 +66,12 @@ export function TopBar({
         >
           <Power size={24} weight="bold" />
         </button>
-        <PowerMenu open={powerOpen} onClose={() => setPowerOpen(false)} />
+        <PowerMenu
+          open={powerOpen}
+          onClose={() => setPowerOpen(false)}
+          fullscreen={fullscreen}
+          onToggleFullscreen={onToggleFullscreen}
+        />
       </div>
     </header>
   );

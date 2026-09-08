@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { TopBar, type View } from "./components/TopBar";
 import { AppsView } from "./components/AppsView";
@@ -7,10 +8,42 @@ import { SettingsView } from "./components/SettingsView";
 
 export default function App() {
   const [view, setView] = useState<View>("apps");
+  const [fullscreen, setFullscreen] = useState(false);
+
+  // Sync the initial fullscreen state.
+  useEffect(() => {
+    invoke<boolean>("is_fullscreen").then(setFullscreen).catch(() => {});
+  }, []);
+
+  async function toggleFullscreen() {
+    try {
+      const next = await invoke<boolean>("toggle_fullscreen");
+      setFullscreen(next);
+    } catch {
+      // ignore
+    }
+  }
+
+  // F11 toggles windowed / fullscreen.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "F11") {
+        e.preventDefault();
+        toggleFullscreen();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="flex h-full w-full flex-col">
-      <TopBar view={view} onNavigate={setView} />
+      <TopBar
+        view={view}
+        onNavigate={setView}
+        fullscreen={fullscreen}
+        onToggleFullscreen={toggleFullscreen}
+      />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
           {view === "apps" && (

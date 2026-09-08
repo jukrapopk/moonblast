@@ -11,6 +11,12 @@ fn toggle_fullscreen(window: tauri::Window) -> Result<bool, String> {
     Ok(!fullscreen)
 }
 
+/// Returns whether the window is currently fullscreen.
+#[tauri::command]
+fn is_fullscreen(window: tauri::Window) -> Result<bool, String> {
+    window.is_fullscreen().map_err(|e| e.to_string())
+}
+
 /// Exit Moonblast entirely.
 #[tauri::command]
 fn close_app(app: AppHandle) {
@@ -36,6 +42,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             toggle_fullscreen,
+            is_fullscreen,
             close_app,
             system_power
         ])
