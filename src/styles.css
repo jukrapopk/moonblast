@@ -12,6 +12,13 @@
   --color-accent-2: #4aa49b;
   --color-danger: #c96060;
 
+  /* Derived/alpha tokens */
+  --color-accent-soft: rgb(111 120 200 / 0.16);
+  --color-surface-ghost: rgb(22 25 35 / 0.6);
+  --color-overlay: rgb(0 0 0 / 0.6);
+  --color-overlay-soft: rgb(0 0 0 / 0.15);
+  --color-muted-soft: rgb(144 153 172 / 0.5);
+
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 

@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Plus, Play, LockKey, Monitor } from "@phosphor-icons/react";
+import { Plus, Play, LockKey, Monitor } from "@phosphor-icons/react";
 import { machines, type Machine } from "../data";
 import { MoonlightSettings } from "./MoonlightSettings";
 import { PageShell } from "./PageShell";
-import { SegmentedTabs } from "./SegmentedTabs";
+import { Modal } from "./ui/Modal";
+import { Segmented } from "./ui/Segmented";
+import { Toast } from "./ui/Toast";
 
 type Step = "address" | "pin";
 
@@ -12,7 +14,7 @@ function StatusDot({ online }: { online: boolean }) {
   return (
     <span
       className={`inline-block h-2.5 w-2.5 rounded-full ${
-        online ? "bg-(--color-accent-2)" : "bg-(--color-muted)/50"
+        online ? "bg-(--color-accent-2)" : "bg-(--color-muted-soft)"
       }`}
       title={online ? "Online" : "Offline"}
     />
@@ -77,7 +79,7 @@ function pairedButton(machine: Machine, onPlay: (m: Machine) => void, onPair: (m
   return (
     <button
       onClick={() => onPair(machine)}
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--color-accent) px-4 py-2 text-sm font-medium text-(--color-accent) transition hover:bg-(--color-accent)/10"
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--color-accent) px-4 py-2 text-sm font-medium text-(--color-accent) transition hover:bg-(--color-accent-soft)"
     >
       <LockKey size={16} weight="fill" />
       Pair
@@ -87,10 +89,18 @@ function pairedButton(machine: Machine, onPlay: (m: Machine) => void, onPair: (m
 
 /* ----------------------------- Pairing modal ----------------------------- */
 
-function AddMachineModal({ onClose }: { onClose: () => void }) {
+function AddMachineModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = useState<Step>("address");
   const [address, setAddress] = useState("");
   const [pin, setPin] = useState(["", "", "", ""]);
+
+  useEffect(() => {
+    if (open) {
+      setStep("address");
+      setAddress("");
+      setPin(["", "", "", ""]);
+    }
+  }, [open]);
 
   function nextFromAddress() {
     if (!address.trim()) return;
@@ -116,37 +126,17 @@ function AddMachineModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={step === "address" ? "Add machine" : "Enter pairing PIN"}
+      subtitle={
+        step === "address"
+          ? "Enter the IP address or hostname of your Sunshine host."
+          : "Enter the 4-digit PIN shown on your host."
+      }
     >
-      <motion.div
-        initial={{ scale: 0.96, y: 8 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 8 }}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-(--color-border) bg-(--color-surface-2) p-6"
-      >
-        <div className="mb-5 flex items-start justify-between">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight">
-              {step === "address" ? "Add machine" : "Enter pairing PIN"}
-            </h2>
-            <p className="mt-0.5 text-sm text-(--color-muted)">
-              {step === "address"
-                ? "Enter the IP address or hostname of your Sunshine host."
-                : "Enter the 4-digit PIN shown on your host."}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-(--color-muted) transition hover:text-(--color-text)">
-            <X size={20} />
-          </button>
-        </div>
-
-        <AnimatePresence mode="wait">
+      <AnimatePresence mode="wait">
           {step === "address" ? (
             <motion.div key="addr" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <input
@@ -206,8 +196,7 @@ function AddMachineModal({ onClose }: { onClose: () => void }) {
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
-    </motion.div>
+      </Modal>
   );
 }
 
@@ -250,7 +239,7 @@ export function MoonlightView() {
           ) : undefined
         }
         tabs={
-          <SegmentedTabs
+          <Segmented
             value={sub}
             onChange={setSub}
             options={[
@@ -293,21 +282,10 @@ export function MoonlightView() {
       </PageShell>
 
       <AnimatePresence>
-        {modalOpen && <AddMachineModal onClose={() => setModalOpen(false)} />}
+        <AddMachineModal open={modalOpen} onClose={() => setModalOpen(false)} />
       </AnimatePresence>
 
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-(--color-surface-2) px-5 py-2.5 text-sm text-(--color-text) shadow-lg ring-1 ring-(--color-border)"
-          >
-            {toast}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Toast message={toast} />
     </>
   );
 }

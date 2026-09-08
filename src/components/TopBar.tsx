@@ -33,7 +33,7 @@ export function TopBar({
   const rightItems = items.filter((i) => i.nav === "right");
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface)/60 px-4">
+    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       <nav className="flex items-center gap-1">
         {leftItems.map((item) => (
           <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
@@ -68,7 +68,7 @@ function TopBarButton({
       aria-label={item.label}
       className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors ${
         active
-          ? "bg-(--color-accent)/20 text-(--color-accent)"
+          ? "bg-(--color-accent-soft) text-(--color-accent)"
           : "text-(--color-muted) hover:text-(--color-text)"
       }`}
     >

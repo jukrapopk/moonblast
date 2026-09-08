@@ -1,124 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { CaretDown, Check } from "@phosphor-icons/react";
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-(--color-border) bg-(--color-surface)">
-      <div className="border-b border-(--color-border) px-5 py-3 text-base font-semibold text-(--color-text)">
-        {title}
-      </div>
-      <div className="divide-y divide-(--color-border) px-5">{children}</div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-4">
-      <div>
-        <div className="text-base font-medium text-(--color-text)">{label}</div>
-        {description && <div className="mt-0.5 text-sm text-(--color-muted)">{description}</div>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Toggle({ defaultOn }: { defaultOn?: boolean }) {
-  const [on, setOn] = useState(Boolean(defaultOn));
-  return (
-    <button
-      onClick={() => setOn((v) => !v)}
-      aria-pressed={on}
-      className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-        on ? "bg-(--color-accent)" : "bg-(--color-border)"
-      }`}
-    >
-      <span
-        className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
-          on ? "left-6" : "left-1"
-        }`}
-      />
-    </button>
-  );
-}
-
-function Select({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.currentTarget.value)}
-        className="h-9 cursor-pointer appearance-none rounded-lg border border-(--color-border) bg-(--color-surface-2) pl-3 pr-9 text-sm text-(--color-text) outline-none transition focus:border-(--color-accent)"
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-      <CaretDown
-        size={14}
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-(--color-muted)"
-      />
-    </div>
-  );
-}
-
-function Segmented({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex shrink-0 items-center gap-1 rounded-lg bg-(--color-surface-2) p-1">
-      {options.map((o) => {
-        const active = o === value;
-        return (
-          <button
-            key={o}
-            onClick={() => onChange(o)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              active
-                ? "bg-(--color-accent) text-white"
-                : "text-(--color-muted) hover:text-(--color-text)"
-            }`}
-          >
-            {active && <Check size={14} weight="bold" />}
-            {o}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+import { Section } from "./ui/Section";
+import { Row } from "./ui/Row";
+import { Toggle } from "./ui/Toggle";
+import { Select } from "./ui/Select";
+import { Segmented } from "./ui/Segmented";
 
 export function MoonlightSettings() {
   const [resolution, setResolution] = useState("1920×1080");
@@ -143,7 +29,12 @@ export function MoonlightSettings() {
         </Row>
         <Row label="Refresh rate" description="Frames per second">
           <Segmented
-            options={["60 Hz", "120 Hz", "144 Hz"]}
+            variant="value"
+            options={[
+              { id: "60 Hz", label: "60 Hz" },
+              { id: "120 Hz", label: "120 Hz" },
+              { id: "144 Hz", label: "144 Hz" },
+            ]}
             value={refresh}
             onChange={setRefresh}
           />

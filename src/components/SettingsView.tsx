@@ -1,72 +1,27 @@
-import { useState } from "react";
 import { PageShell } from "./PageShell";
-
-function Toggle({
-  label,
-  description,
-  disabled,
-}: {
-  label: string;
-  description: string;
-  disabled?: boolean;
-}) {
-  const [on, setOn] = useState(false);
-  return (
-    <div className="flex items-center justify-between gap-4 py-4">
-      <div>
-        <div className="font-medium text-(--color-text)">{label}</div>
-        <div className="text-sm text-(--color-muted)">{description}</div>
-      </div>
-      <button
-        onClick={() => !disabled && setOn((v) => !v)}
-        aria-pressed={on}
-        disabled={disabled}
-        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-          disabled ? "opacity-40" : on ? "bg-(--color-accent)" : "bg-(--color-border)"
-        }`}
-      >
-        <span
-          className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
-            on ? "left-6" : "left-1"
-          }`}
-        />
-      </button>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-(--color-border) bg-(--color-surface)">
-      <div className="border-b border-(--color-border) px-5 py-3 text-base font-semibold text-(--color-text)">
-        {title}
-      </div>
-      <div className="px-5">{children}</div>
-    </div>
-  );
-}
+import { Section } from "./ui/Section";
+import { Row } from "./ui/Row";
+import { Toggle } from "./ui/Toggle";
 
 export function SettingsView() {
   return (
     <PageShell title="Settings" subtitle="App-level settings.">
       <Section title="General">
-        <Toggle
-          label="Start with Windows"
-          description="Launch Moonblast when you sign in to Windows."
-        />
+        <Row label="Start with Windows" description="Launch Moonblast when you sign in to Windows.">
+          <Toggle defaultOn={false} />
+        </Row>
       </Section>
 
       <Section title="Fullscreen Mode">
-        <Toggle
+        <Row
           label="Suppress Explorer & background processes"
           description="Similar to Fullscreen Xbox Mode. Planned for v2."
-          disabled
-        />
-        <Toggle
-          label="Hide taskbar & auto-fullscreen"
-          description="Enter a clean fullscreen shell on launch."
-          disabled
-        />
+        >
+          <Toggle disabled />
+        </Row>
+        <Row label="Hide taskbar & auto-fullscreen" description="Enter a clean fullscreen shell on launch.">
+          <Toggle disabled />
+        </Row>
       </Section>
 
       <Section title="About">

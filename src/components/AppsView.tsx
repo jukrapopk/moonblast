@@ -28,7 +28,7 @@ function AppTile({
         style={{ background: gradient }}
       >
         <span>{name.charAt(0)}</span>
-        <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/15" />
+        <div className="absolute inset-0 transition-colors group-hover:bg-(--color-overlay-soft)" />
       </div>
       <div className="px-0.5">
         <div className="truncate text-sm font-medium text-(--color-text)">{name}</div>
