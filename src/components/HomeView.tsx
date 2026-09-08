@@ -45,21 +45,20 @@ export function HomeView({ onOpenGame }: { onOpenGame: (id: string) => void }) {
         className="relative overflow-hidden rounded-3xl border border-(--color-border) p-8"
         style={{
           background:
-            "linear-gradient(120deg, rgba(124,108,255,0.25), rgba(35,216,198,0.12) 55%, transparent)",
+            "linear-gradient(120deg, rgba(111,120,200,0.13), rgba(74,164,155,0.05) 55%, transparent)",
         }}
       >
         <div className="relative z-10 max-w-md">
           <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-(--color-accent-2)">
             Good evening
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight">Ready when you are</h1>
+          </p>          <h1 className="text-3xl font-semibold tracking-tight">Ready when you are</h1>
           <p className="mt-2 text-sm leading-relaxed text-(--color-muted)">
             Pick a game and stream it from your host. This shell is the lightweight gateway to your
             Moonlight sessions.
           </p>
           <button
             onClick={() => onOpenGame("cyber")}
-            className="mt-6 inline-flex items-center gap-2 rounded-full bg-(--color-accent) px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-(--color-accent)/25 transition hover:brightness-110"
+            className="mt-6 inline-flex items-center gap-2 rounded-full bg-(--color-accent) px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-(--color-accent)/15 transition hover:brightness-110"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
               <path d="M8 5v14l11-7z" />

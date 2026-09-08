@@ -1,16 +1,16 @@
 @import "tailwindcss";
 
 @theme {
-  /* Moonblast palette */
-  --color-bg: #0b0d14;
-  --color-surface: #141826;
-  --color-surface-2: #1c2233;
-  --color-border: #262d42;
-  --color-muted: #8b93a7;
-  --color-text: #e8eaf2;
-  --color-accent: #7c6cff;
-  --color-accent-2: #23d8c6;
-  --color-danger: #ff6b6b;
+  /* Moonblast palette - muted, low-glare dark theme */
+  --color-bg: #0d1017;
+  --color-surface: #161923;
+  --color-surface-2: #1d2230;
+  --color-border: #262c3a;
+  --color-muted: #9099ac;
+  --color-text: #d9dde8;
+  --color-accent: #6f78c8;
+  --color-accent-2: #4aa49b;
+  --color-danger: #c96060;
 
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
