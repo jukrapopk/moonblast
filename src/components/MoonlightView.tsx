@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Plus, Play, LockKey, Monitor, Trash, GameController, ArrowsClockwise } from "@phosphor-icons/react";
+import { Plus, Play, LockKey, Monitor, Trash, GameController, ArrowsClockwise, ArrowClockwise, Broadcast, X } from "@phosphor-icons/react";
 import { MoonlightSettings } from "./MoonlightSettings";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
@@ -22,6 +22,19 @@ interface DiscoveredHost {
   paired: boolean;
 }
 
+interface Session {
+  host: Host;
+  app: string;
+  startedAt: number;
+}
+
+function formatElapsed(startedAt: number, now: number) {
+  const total = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-3 mt-2 text-sm font-semibold uppercase tracking-wider text-(--color-muted)">{children}</h2>;
 }
@@ -32,57 +45,91 @@ function MachineCard({
   onPair,
   onRemove,
   busy,
+  streaming,
+  streamApp,
+  elapsedLabel,
+  onResume,
+  onDisconnect,
 }: {
   host: Host;
   onApps: () => void;
   onPair: () => void;
   onRemove: () => void;
   busy: boolean;
+  streaming: boolean;
+  streamApp: string;
+  elapsedLabel: string;
+  onResume: () => void;
+  onDisconnect: () => void;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="flex items-center gap-4 rounded-2xl border border-(--color-border) bg-(--color-surface) p-4"
+      className={`flex items-center gap-4 rounded-2xl border bg-(--color-surface) p-4 ${
+        streaming ? "border-(--color-accent)/40" : "border-(--color-border)"
+      }`}
     >
       <div
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white/80"
-        style={{ background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+          streaming ? "bg-(--color-accent-soft) text-(--color-accent)" : "text-white/80"
+        }`}
+        style={streaming ? undefined : { background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
       >
-        <Monitor size={22} weight="bold" />
+        {streaming ? <Broadcast size={22} weight="bold" /> : <Monitor size={22} weight="bold" />}
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-(--color-text)">{host.name}</div>
+        <div className="flex items-center gap-2">
+          <span className="truncate font-medium text-(--color-text)">{host.name}</span>
+          {streaming && (
+            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2 py-0.5 text-xs font-medium text-(--color-accent)">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+              Streaming
+            </span>
+          )}
+        </div>
         <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        <button
-          onClick={onPair}
-          disabled={busy}
-          className="flex items-center gap-1.5 rounded-full border border-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
-        >
-          <LockKey size={14} weight="bold" />
-          Pair
-        </button>
-        <button
-          onClick={onApps}
-          disabled={busy}
-          className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-3 py-1.5 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
-        >
-          <GameController size={14} weight="bold" />
-          Apps
-        </button>
-        <button
-          onClick={onRemove}
-          title="Remove"
-          aria-label="Remove"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
-        >
-          <Trash size={16} weight="bold" />
-        </button>
+        {streaming ? (
+          <StreamActions
+            app={streamApp}
+            elapsedLabel={elapsedLabel}
+            busy={busy}
+            onResume={onResume}
+            onDisconnect={onDisconnect}
+          />
+        ) : (
+          <>
+            <button
+              onClick={onPair}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-full border border-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
+            >
+              <LockKey size={14} weight="bold" />
+              Pair
+            </button>
+            <button
+              onClick={onApps}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-3 py-1.5 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
+            >
+              <GameController size={14} weight="bold" />
+              Apps
+            </button>
+            <button
+              onClick={onRemove}
+              title="Remove"
+              aria-label="Remove"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
+            >
+              <Trash size={16} weight="bold" />
+            </button>
+          </>
+        )}
       </div>
     </motion.div>
   );
@@ -96,40 +143,71 @@ function DiscoveredCard({
   onPair,
   onDesktop,
   busy,
+  streaming,
+  streamApp,
+  elapsedLabel,
+  onResume,
+  onDisconnect,
 }: {
   host: DiscoveredHost;
   onApps: () => void;
   onPair: () => void;
   onDesktop: () => void;
   busy: boolean;
+  streaming: boolean;
+  streamApp: string;
+  elapsedLabel: string;
+  onResume: () => void;
+  onDisconnect: () => void;
 }) {
   return (
-    <div className="flex items-center gap-4 rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
+    <div
+      className={`flex items-center gap-4 rounded-2xl border bg-(--color-surface) p-4 ${
+        streaming ? "border-(--color-accent)/40" : "border-(--color-border)"
+      }`}
+    >
       <div
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white/80"
-        style={{ background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+          streaming ? "bg-(--color-accent-soft) text-(--color-accent)" : "text-white/80"
+        }`}
+        style={streaming ? undefined : { background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
       >
-        <Monitor size={22} weight="bold" />
+        {streaming ? <Broadcast size={22} weight="bold" /> : <Monitor size={22} weight="bold" />}
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium text-(--color-text)">{host.name}</span>
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
-              host.paired
-                ? "bg-(--color-accent-soft) text-(--color-accent)"
-                : "bg-(--color-muted-soft) text-(--color-muted)"
-            }`}
-          >
-            {host.paired ? "Paired" : "Not paired"}
-          </span>
+          {streaming ? (
+            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2 py-0.5 text-xs font-medium text-(--color-accent)">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+              Streaming
+            </span>
+          ) : (
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
+                host.paired
+                  ? "bg-(--color-accent-soft) text-(--color-accent)"
+                  : "bg-(--color-muted-soft) text-(--color-muted)"
+              }`}
+            >
+              {host.paired ? "Paired" : "Not paired"}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        {host.paired ? (
+        {streaming ? (
+          <StreamActions
+            app={streamApp}
+            elapsedLabel={elapsedLabel}
+            busy={busy}
+            onResume={onResume}
+            onDisconnect={onDisconnect}
+          />
+        ) : host.paired ? (
           <>
             <button
               onClick={onDesktop}
@@ -160,6 +238,47 @@ function DiscoveredCard({
         )}
       </div>
     </div>
+  );
+}
+
+/* ----------------------------- Stream actions ---------------------------- */
+
+function StreamActions({
+  app,
+  elapsedLabel,
+  busy,
+  onResume,
+  onDisconnect,
+}: {
+  app: string;
+  elapsedLabel: string;
+  busy: boolean;
+  onResume: () => void;
+  onDisconnect: () => void;
+}) {
+  return (
+    <>
+      <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2.5 py-1 text-xs font-medium text-(--color-accent)">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+        {app} · {elapsedLabel}
+      </span>
+      <button
+        onClick={onResume}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white transition enabled:hover:brightness-110 disabled:opacity-40"
+      >
+        <ArrowClockwise size={15} weight="bold" />
+        Resume
+      </button>
+      <button
+        onClick={onDisconnect}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-full border border-(--color-border) px-3 py-2 text-sm font-medium text-(--color-muted) transition enabled:hover:border-(--color-danger) enabled:hover:text-(--color-danger) disabled:opacity-40"
+      >
+        <X size={15} weight="bold" />
+        Disconnect
+      </button>
+    </>
   );
 }
 
@@ -311,6 +430,28 @@ export function MoonlightView() {
   const [scanning, setScanning] = useState(false);
   const pairingRef = useRef<string | null>(null);
 
+  // Active streaming session (armed in Moonblast) + live elapsed timer.
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!session) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [session]);
+
+  const elapsedLabel = session ? formatElapsed(session.startedAt, now) : "";
+
+  // Sort so the currently-streaming host floats to the top of each list.
+  const streamingAddress = session ? session.host.address : null;
+  const sortedDiscovered = [...discovered].sort(
+    (a, b) => Number(b.address === streamingAddress) - Number(a.address === streamingAddress)
+  );
+  const sortedMachines = [...machines].sort(
+    (a, b) => Number(b.address === streamingAddress) - Number(a.address === streamingAddress)
+  );
+
   const scan = useCallback(async () => {
     setScanning(true);
     try {
@@ -372,21 +513,44 @@ export function MoonlightView() {
     }
   }
 
-  async function streamDesktop(host: Host) {
-    try {
-      await invoke("moonlight_stream", { host: host.address, app: "Desktop" });
-      showToast(`Streaming ${host.name} Desktop…`);
-    } catch (err) {
-      showToast(String(err));
-    }
-  }
-
-  async function playApp(host: Host, app: string) {
+  async function startStream(host: Host, app: string) {
+    setSessionBusy(true);
     try {
       await invoke("moonlight_stream", { host: host.address, app });
+      setSession({ host, app, startedAt: Date.now() });
+      setNow(Date.now());
       showToast(`Streaming ${app}…`);
     } catch (err) {
       showToast(String(err));
+    } finally {
+      setSessionBusy(false);
+    }
+  }
+
+  async function streamDesktop(host: Host) {
+    await startStream(host, "Desktop");
+  }
+
+  async function playApp(host: Host, app: string) {
+    await startStream(host, app);
+  }
+
+  async function resumeSession() {
+    if (session) await startStream(session.host, session.app);
+  }
+
+  async function disconnectSession() {
+    if (!session) return;
+    setSessionBusy(true);
+    const host = session.host;
+    try {
+      await invoke("moonlight_quit", { host: host.address });
+      showToast(`Disconnected from ${host.name}`);
+    } catch (err) {
+      showToast(String(err));
+    } finally {
+      setSessionBusy(false);
+      setSession(null);
     }
   }
 
@@ -448,11 +612,16 @@ export function MoonlightView() {
                     <div>
                       <SectionHeading>Found on your network</SectionHeading>
                       <div className="space-y-3">
-                        {discovered.map((d) => (
+                        {sortedDiscovered.map((d) => (
                           <DiscoveredCard
                             key={d.address + d.name}
                             host={d}
-                            busy={busyAddress === d.address}
+                            busy={busyAddress === d.address || sessionBusy}
+                            streaming={d.address === streamingAddress}
+                            streamApp={session?.app ?? ""}
+                            elapsedLabel={elapsedLabel}
+                            onResume={resumeSession}
+                            onDisconnect={disconnectSession}
                             onApps={() => setAppsHost({ name: d.name, address: d.address })}
                             onPair={() => pair({ name: d.name, address: d.address })}
                             onDesktop={() => streamDesktop({ name: d.name, address: d.address })}
@@ -465,11 +634,16 @@ export function MoonlightView() {
                     <div>
                       <SectionHeading>Saved machines</SectionHeading>
                       <div className="space-y-3">
-                        {machines.map((m) => (
+                        {sortedMachines.map((m) => (
                           <MachineCard
                             key={m.address}
                             host={m}
-                            busy={busyAddress === m.address}
+                            busy={busyAddress === m.address || sessionBusy}
+                            streaming={m.address === streamingAddress}
+                            streamApp={session?.app ?? ""}
+                            elapsedLabel={elapsedLabel}
+                            onResume={resumeSession}
+                            onDisconnect={disconnectSession}
                             onApps={() => setAppsHost(m)}
                             onPair={() => pair(m)}
                             onRemove={() => removeHost(m.address)}
