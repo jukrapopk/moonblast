@@ -9,9 +9,13 @@ import { SettingsView } from "./components/SettingsView";
 import { useSettings } from "./settings/SettingsContext";
 
 export default function App() {
-  const [view, setView] = useState<View>("apps");
-  const [fullscreen, setFullscreen] = useState(false);
   const { settings, update } = useSettings();
+
+  // Active view is persisted so the last open tab is restored on next launch.
+  const view = settings.general.last_view as View;
+  const setView = (v: View) =>
+    update((s) => ({ ...s, general: { ...s.general, last_view: v } }));
+  const [fullscreen, setFullscreen] = useState(false);
 
   const moonlightEnabled = settings.integrations.moonlight_enabled;
   const moonlightDir = settings.integrations.moonlight_folder;

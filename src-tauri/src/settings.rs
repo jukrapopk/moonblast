@@ -25,6 +25,12 @@ pub struct MoonlightHost {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct General {
     pub start_with_windows: bool,
+    #[serde(default = "default_last_view")]
+    pub last_view: String,
+}
+
+fn default_last_view() -> String {
+    "apps".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +63,7 @@ impl Default for Settings {
             version: 1,
             general: General {
                 start_with_windows: false,
+                last_view: "apps".to_string(),
             },
             integrations: Integrations {
                 moonlight_folder: None,
