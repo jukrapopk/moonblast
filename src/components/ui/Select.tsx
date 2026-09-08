@@ -22,6 +22,7 @@ export function Select({ options, value, onChange }: SelectProps) {
       </select>
       <CaretDown
         size={14}
+        weight="bold"
         className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-(--color-muted)"
       />
     </div>

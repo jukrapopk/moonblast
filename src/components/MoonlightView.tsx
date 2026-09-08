@@ -41,7 +41,7 @@ function MachineCard({
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white/80"
         style={{ background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
       >
-        <Monitor size={22} weight="fill" />
+        <Monitor size={22} weight="bold" />
       </div>
 
       <div className="min-w-0 flex-1">
@@ -70,7 +70,7 @@ function pairedButton(machine: Machine, onPlay: (m: Machine) => void, onPair: (m
           onClick={() => onPlay(machine)}
           className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-medium text-white transition hover:brightness-110"
         >
-          <Play size={16} weight="fill" />
+          <Play size={16} weight="bold" />
           Play
         </button>
       </div>
@@ -81,7 +81,7 @@ function pairedButton(machine: Machine, onPlay: (m: Machine) => void, onPair: (m
       onClick={() => onPair(machine)}
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--color-accent) px-4 py-2 text-sm font-medium text-(--color-accent) transition hover:bg-(--color-accent-soft)"
     >
-      <LockKey size={16} weight="fill" />
+      <LockKey size={16} weight="bold" />
       Pair
     </button>
   );

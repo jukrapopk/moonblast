@@ -51,7 +51,7 @@ export function AppsView() {
       actions={
         <>
           <div className="relative">
-            <MagnifyingGlass size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)" />
+            <MagnifyingGlass size={18} weight="bold" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)" />
             <input
               value={query}
               onChange={(e) => setQuery(e.currentTarget.value)}

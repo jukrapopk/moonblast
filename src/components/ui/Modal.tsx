@@ -40,7 +40,7 @@ export function Modal({ open, onClose, title, subtitle, children, width = "max-w
                   onClick={onClose}
                   className="text-(--color-muted) transition hover:text-(--color-text)"
                 >
-                  <X size={20} />
+                  <X size={20} weight="bold" />
                 </button>
               </div>
             )}

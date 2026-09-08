@@ -1,4 +1,6 @@
-import { SquaresFour, Monitor, Gear } from "@phosphor-icons/react";
+import { useState } from "react";
+import { SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { PowerMenu } from "./PowerMenu";
 
 export type View = "apps" | "moonlight" | "settings";
 
@@ -9,7 +11,7 @@ const items: { id: View; label: string; nav: "left" | "right"; icon: View }[] = 
 ];
 
 function Icon({ name }: { name: View }) {
-  const props = { size: 24, weight: "fill" as const };
+  const props = { size: 24, weight: "bold" as const };
   switch (name) {
     case "apps":
       return <SquaresFour {...props} />;
@@ -31,6 +33,7 @@ export function TopBar({
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
   const rightItems = items.filter((i) => i.nav === "right");
+  const [powerOpen, setPowerOpen] = useState(false);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
@@ -42,11 +45,25 @@ export function TopBar({
 
       <div className="ml-auto" />
 
-      <nav className="flex items-center gap-1">
+      <div className="relative flex items-center gap-1">
         {rightItems.map((item) => (
           <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
         ))}
-      </nav>
+        <button
+          onClick={() => setPowerOpen((o) => !o)}
+          title="Power"
+          aria-label="Power"
+          aria-expanded={powerOpen}
+          className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors ${
+            powerOpen
+              ? "bg-(--color-accent-soft) text-(--color-accent)"
+              : "text-(--color-muted) hover:text-(--color-text)"
+          }`}
+        >
+          <Power size={24} weight="bold" />
+        </button>
+        <PowerMenu open={powerOpen} onClose={() => setPowerOpen(false)} />
+      </div>
     </header>
   );
 }
