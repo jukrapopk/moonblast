@@ -364,9 +364,20 @@ fn launch_app(path: String) -> Result<(), String> {
     }
 }
 
-/// Extract an app's icon (from its exe or .lnk) and return it as a base64 PNG.
-#[tauri::command]
-fn app_icon(path: String) -> Result<Option<String>, String> {
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Extract an app's icon (from its exe or .lnk) as a base64 PNG data URI.
+fn extract_icon_data_uri(path: &str) -> Option<String> {
     let Some(png) = (|| -> Option<Vec<u8>> {
         use windows_sys::Win32::Graphics::Gdi::{
             CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
@@ -454,10 +465,96 @@ fn app_icon(path: String) -> Result<Option<String>, String> {
             .ok()?;
         Some(out)
     })() else {
-        return Ok(None);
+        return None;
     };
 
-    Ok(Some(format!("data:image/png;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png))))
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png)
+    ))
+}
+
+/// Look up a SteamGridDB icon URL for an app by name (API v2).
+fn steamgrid_icon_url(name: &str, key: &str) -> Option<String> {
+    let search_url = format!(
+        "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
+        urlencode(name)
+    );
+    let body: serde_json::Value = ureq::get(&search_url)
+        .set("Authorization", &format!("Bearer {key}"))
+        .timeout(std::time::Duration::from_secs(8))
+        .call()
+        .ok()?
+        .into_string()
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())?;
+    let id = body["data"][0]["id"].as_i64()?;
+    let icons_url = format!("https://www.steamgriddb.com/api/v2/icons/game/{id}");
+    let body2: serde_json::Value = ureq::get(&icons_url)
+        .set("Authorization", &format!("Bearer {key}"))
+        .timeout(std::time::Duration::from_secs(8))
+        .call()
+        .ok()?
+        .into_string()
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())?;
+    body2["data"][0]["url"].as_str().map(|s| s.to_string())
+}
+
+/// Validate a SteamGridDB API key with a lightweight request.
+#[tauri::command]
+async fn check_steamgrid_key(key: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let url = format!(
+            "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
+            urlencode("test")
+        );
+        let out = match ureq::get(&url)
+            .set("Authorization", &format!("Bearer {key}"))
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+        {
+            Ok(resp) => {
+                if resp.status() == 200 {
+                    "valid".to_string()
+                } else {
+                    "invalid".to_string()
+                }
+            }
+            Err(ureq::Error::Status(401, _)) => "invalid".to_string(),
+            Err(_) => "error".to_string(),
+        };
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Resolve an app icon: SteamGridDB by name (if a key is configured), else extract.
+#[tauri::command]
+async fn app_icon(
+    path: String,
+    name: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<Option<String>, String> {
+    let key = state
+        .0
+        .lock()
+        .unwrap()
+        .integrations
+        .steamgrid_key
+        .clone()
+        .unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !key.is_empty() && !name.trim().is_empty() {
+            if let Some(url) = steamgrid_icon_url(&name, &key) {
+                return Ok(Some(url));
+            }
+        }
+        Ok(extract_icon_data_uri(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Build the `moonlight stream` CLI flags from the stored streaming prefs.
@@ -767,7 +864,8 @@ pub fn run() {
             client_display,
             discover_apps,
             launch_app,
-            app_icon
+            app_icon,
+            check_steamgrid_key
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

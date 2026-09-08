@@ -49,6 +49,7 @@ pub struct Integrations {
     pub moonlight_folder: Option<String>,
     pub moonlight_enabled: bool,
     pub apps_enabled: bool,
+    pub steamgrid_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +147,7 @@ impl Default for Settings {
                 moonlight_folder: None,
                 moonlight_enabled: false,
                 apps_enabled: true,
+                steamgrid_key: None,
             },
             moonlight: MoonlightStreaming::default(),
             fullscreen: Fullscreen {

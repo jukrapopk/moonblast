@@ -48,7 +48,7 @@ const nameFromPath = (p: string) =>
 
 const iconCache = new Map<string, string | null>();
 
-function useAppIcon(path: string): string | null {
+function useAppIcon(name: string, path: string): string | null {
   const [icon, setIcon] = useState<string | null>(iconCache.get(path) ?? null);
 
   useEffect(() => {
@@ -57,7 +57,7 @@ function useAppIcon(path: string): string | null {
       return;
     }
     let alive = true;
-    invoke<string | null>("app_icon", { path })
+    invoke<string | null>("app_icon", { path, name })
       .then((u) => {
         iconCache.set(path, u ?? null);
         if (alive) setIcon(u ?? null);
@@ -69,7 +69,7 @@ function useAppIcon(path: string): string | null {
     return () => {
       alive = false;
     };
-  }, [path]);
+  }, [path, name]);
 
   return icon;
 }
@@ -89,7 +89,7 @@ function AppTile({
   onLaunch: () => void;
   onRemove?: () => void;
 }) {
-  const icon = useAppIcon(path);
+  const icon = useAppIcon(name, path);
 
   return (
     <motion.div

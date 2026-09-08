@@ -29,6 +29,9 @@ export default function App() {
   function setAppsEnabled(v: boolean) {
     update((s) => ({ ...s, integrations: { ...s.integrations, apps_enabled: v } }));
   }
+  function setSteamgridKey(k: string) {
+    update((s) => ({ ...s, integrations: { ...s.integrations, steamgrid_key: k || null } }));
+  }
 
   function setMoonlightEnabled(v: boolean) {
     update((s) => ({
@@ -101,6 +104,8 @@ export default function App() {
                 onSelectMoonlight={setMoonlightDir}
                 appsEnabled={appsEnabled}
                 onToggleApps={setAppsEnabled}
+                steamgridKey={settings.integrations.steamgrid_key}
+                onSetSteamgridKey={setSteamgridKey}
               />
             </motion.div>
           )}

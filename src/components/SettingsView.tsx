@@ -12,9 +12,7 @@ type TailscaleStatus =
   | "starting"
   | "logged-out"
   | "connected"
-  | "disconnected";
-
-function TailscaleRow() {
+  | "disconnected";function TailscaleRow() {
   const [status, setStatus] = useState<TailscaleStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -147,6 +145,8 @@ export function SettingsView({
   onSelectMoonlight,
   appsEnabled,
   onToggleApps,
+  steamgridKey,
+  onSetSteamgridKey,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -154,7 +154,21 @@ export function SettingsView({
   onSelectMoonlight: (dir: string) => void;
   appsEnabled: boolean;
   onToggleApps: (v: boolean) => void;
+  steamgridKey: string | null;
+  onSetSteamgridKey: (k: string) => void;
 }) {
+  const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
+
+  async function checkKey() {
+    if (!steamgridKey) return;
+    setSgStatus("checking");
+    try {
+      const s = await invoke<string>("check_steamgrid_key", { key: steamgridKey });
+      setSgStatus(s === "valid" ? "valid" : s === "invalid" ? "invalid" : "error");
+    } catch {
+      setSgStatus("error");
+    }
+  }
   return (
     <PageShell title="Settings" subtitle="App-level settings.">
       <Section title="General">
@@ -177,6 +191,45 @@ export function SettingsView({
         <Row label="Apps" description="Discover and launch installed Windows apps.">
           <Toggle checked={appsEnabled} onChange={onToggleApps} />
         </Row>
+        <Row label="SteamGridDB" description="Optional API key for nicer game icons (falls back to the extracted icon).">
+          <div className="flex items-center gap-2">
+            <input
+              value={steamgridKey ?? ""}
+              onChange={(e) => {
+                onSetSteamgridKey(e.currentTarget.value);
+                setSgStatus(null);
+              }}
+              placeholder="API key"
+              className="h-9 w-56 rounded-lg border border-(--color-border) bg-(--color-surface-2) px-3 text-sm text-(--color-text) outline-none transition focus:border-(--color-accent) placeholder:text-(--color-muted)"
+            />
+            <button
+              onClick={checkKey}
+              disabled={!steamgridKey || sgStatus === "checking"}
+              className="rounded-full border border-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
+            >
+              Check
+            </button>
+          </div>
+        </Row>
+        {sgStatus && (
+          <div
+            className={`px-1 py-2 text-sm ${
+              sgStatus === "valid"
+                ? "text-(--color-accent)"
+                : sgStatus === "checking"
+                  ? "text-(--color-muted)"
+                  : "text-(--color-danger)"
+            }`}
+          >
+            {sgStatus === "checking"
+              ? "Checking…"
+              : sgStatus === "valid"
+                ? "✓ Key is valid."
+                : sgStatus === "invalid"
+                  ? "✕ Key was rejected."
+                  : "Couldn't reach SteamGridDB."}
+          </div>
+        )}
         <MoonlightRow
           enabled={moonlightEnabled}
           onToggle={onToggleMoonlight}

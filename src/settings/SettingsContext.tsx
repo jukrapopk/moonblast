@@ -17,6 +17,7 @@ export interface Settings {
     moonlight_folder: string | null;
     moonlight_enabled: boolean;
     apps_enabled: boolean;
+    steamgrid_key: string | null;
   };
   moonlight: {
     resolution: string;
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
     moonlight_folder: null,
     moonlight_enabled: false,
     apps_enabled: true,
+    steamgrid_key: null,
   },
   moonlight: {
     resolution: "auto",
