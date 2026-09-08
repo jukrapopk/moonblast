@@ -14,17 +14,17 @@ export default function App() {
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
           {view === "apps" && (
-            <motion.div key="apps" className="h-full p-8">
+            <motion.div key="apps" className="p-8">
               <AppsView />
             </motion.div>
           )}
           {view === "moonlight" && (
-            <motion.div key="moonlight" className="h-full p-8">
+            <motion.div key="moonlight" className="p-8">
               <MoonlightView />
             </motion.div>
           )}
           {view === "settings" && (
-            <motion.div key="settings" className="h-full p-8">
+            <motion.div key="settings" className="p-8">
               <SettingsView />
             </motion.div>
           )}
