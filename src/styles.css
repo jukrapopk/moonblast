@@ -28,6 +28,11 @@ body,
   overflow: hidden;
 }
 
+/* Big Picture style: scale the whole rem-based UI up for larger, clearer type */
+html {
+  font-size: 17px;
+}
+
 /* Slim scrollbars for the dark UI */
 ::-webkit-scrollbar {
   width: 10px;
