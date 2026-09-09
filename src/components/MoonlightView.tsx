@@ -9,6 +9,7 @@ import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
 import { Toast } from "./ui/Toast";
 import { useContextMenu } from "./ui/ContextMenu";
+import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 
 interface Host {
@@ -325,19 +326,17 @@ function AddMachineModal({
       subtitle="Enter the address of your Sunshine host."
     >
       <div className="space-y-3">
-        <input
+        <Input
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Name (optional)"
-          className="h-11 w-full rounded-xl border border-(--color-border) bg-(--color-surface) px-4 text-sm text-(--color-text) outline-none transition placeholder:text-(--color-muted) focus:border-(--color-accent)"
         />
-        <input
+        <Input
           autoFocus
           value={address}
           onChange={(e) => setAddress(e.currentTarget.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="e.g. 192.168.1.20"
-          className="h-11 w-full rounded-xl border border-(--color-border) bg-(--color-surface) px-4 text-sm text-(--color-text) outline-none transition placeholder:text-(--color-muted) focus:border-(--color-accent)"
         />
         <div className="flex justify-end gap-2 pt-2">
           <button

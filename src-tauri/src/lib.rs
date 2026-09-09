@@ -544,6 +544,119 @@ async fn check_steamgrid_key(key: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SgTitle {
+    id: i64,
+    name: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SgIcon {
+    id: i64,
+    url: String,
+}
+
+fn extract_titles(v: &serde_json::Value) -> Vec<SgTitle> {
+    let mut out = Vec::new();
+    let push = |o: &serde_json::Value, out: &mut Vec<SgTitle>| {
+        if let (Some(id), Some(name)) = (o.get("id").and_then(|x| x.as_i64()), o.get("name").and_then(|x| x.as_str())) {
+            out.push(SgTitle { id, name: name.to_string() });
+        }
+    };
+    if let Some(arr) = v["data"].as_array() {
+        for el in arr {
+            push(el, &mut out);
+        }
+    } else {
+        push(&v["data"], &mut out);
+    }
+    out
+}
+
+/// Search SteamGridDB for a game by name, or by id via `id::<steam_appid>`.
+#[tauri::command]
+async fn steamgrid_search(
+    query: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<Vec<SgTitle>, String> {
+    let key = state
+        .0
+        .lock()
+        .unwrap()
+        .integrations
+        .steamgrid_key
+        .clone()
+        .unwrap_or_default();
+    if key.trim().is_empty() {
+        return Err("Set a SteamGridDB API key in Settings → Integrations first.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = format!(
+            "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
+            urlencode(q)
+        );
+        let body: serde_json::Value = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {key}"))
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+            .map_err(|e| e.to_string())?
+            .into_string()
+            .map_err(|e| e.to_string())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).map_err(|e| e.to_string()))?;
+        Ok(extract_titles(&body))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Fetch icon images available for a SteamGridDB game.
+#[tauri::command]
+async fn steamgrid_icons(
+    game_id: i64,
+    state: State<'_, settings::SettingsState>,
+) -> Result<Vec<SgIcon>, String> {
+    let key = state
+        .0
+        .lock()
+        .unwrap()
+        .integrations
+        .steamgrid_key
+        .clone()
+        .unwrap_or_default();
+    if key.trim().is_empty() {
+        return Err("Set a SteamGridDB API key in Settings → Integrations first.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let url = format!("https://www.steamgriddb.com/api/v2/icons/game/{game_id}");
+        let body: serde_json::Value = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {key}"))
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+            .map_err(|e| e.to_string())?
+            .into_string()
+            .map_err(|e| e.to_string())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).map_err(|e| e.to_string()))?;
+        let arr = body["data"].as_array().cloned().unwrap_or_default();
+        Ok(arr
+            .iter()
+            .filter_map(|v| {
+                Some(SgIcon {
+                    id: v["id"].as_i64()?,
+                    url: v["url"].as_str()?.to_string(),
+                })
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Resolve an app icon: SteamGridDB by name (if a key is configured), else extract.
 #[tauri::command]
 async fn app_icon(
@@ -880,7 +993,9 @@ pub fn run() {
             discover_apps,
             launch_app,
             app_icon,
-            check_steamgrid_key
+            check_steamgrid_key,
+            steamgrid_search,
+            steamgrid_icons
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -32,6 +32,8 @@ export default function App() {
     function onCapture(e: Event) {
       e.preventDefault();
     }
+    // Any input/textarea right-click is handled by the shared `Input`/textarea
+    // components (they stopPropagation), so here we only serve the generic menu.
     function onBubble(e: Event) {
       const me = e as MouseEvent;
       pageCtx.openAt(me.clientX, me.clientY, [

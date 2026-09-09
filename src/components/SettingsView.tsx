@@ -5,6 +5,7 @@ import { PageShell } from "./PageShell";
 import { Section } from "./ui/Section";
 import { Row } from "./ui/Row";
 import { Toggle } from "./ui/Toggle";
+import { Input } from "./ui/Input";
 
 type TailscaleStatus =
   | "not-found"
@@ -193,15 +194,16 @@ export function SettingsView({
         </Row>
         <Row label="SteamGridDB" description="Optional API key for nicer game icons (falls back to the extracted icon).">
           <div className="flex items-center gap-2">
-            <input
-              value={steamgridKey ?? ""}
-              onChange={(e) => {
-                onSetSteamgridKey(e.currentTarget.value);
-                setSgStatus(null);
-              }}
-              placeholder="API key"
-              className="h-9 w-56 rounded-lg border border-(--color-border) bg-(--color-surface-2) px-3 text-sm text-(--color-text) outline-none transition focus:border-(--color-accent) placeholder:text-(--color-muted)"
-            />
+            <div className="w-56">
+              <Input
+                value={steamgridKey ?? ""}
+                onChange={(e) => {
+                  onSetSteamgridKey(e.currentTarget.value);
+                  setSgStatus(null);
+                }}
+                placeholder="API key"
+              />
+            </div>
             <button
               onClick={checkKey}
               disabled={!steamgridKey || sgStatus === "checking"}

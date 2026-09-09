@@ -8,6 +8,7 @@ import { Toggle } from "./ui/Toggle";
 import { Select, type SelectOptionInput } from "./ui/Select";
 import { Segmented } from "./ui/Segmented";
 import { Modal } from "./ui/Modal";
+import { Input } from "./ui/Input";
 import { useSettings, type Settings } from "../settings/SettingsContext";
 
 const RATIOS = ["16:9", "16:10", "21:9", "32:9", "4:3", "5:4"];
@@ -77,13 +78,12 @@ function PromptModal({
 
   return (
     <Modal open={open} onClose={onClose} title={title} subtitle={subtitle} width="max-w-sm">
-      <input
+      <Input
         autoFocus
         value={val}
         onChange={(e) => setVal(e.currentTarget.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-(--color-border) bg-(--color-surface) px-4 text-sm text-(--color-text) outline-none transition placeholder:text-(--color-muted) focus:border-(--color-accent)"
       />
       {hint && <p className="mt-2 text-xs text-(--color-muted)">{hint}</p>}
       <div className="mt-4 flex justify-end gap-2">

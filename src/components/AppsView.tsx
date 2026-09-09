@@ -8,6 +8,7 @@ import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
 import { useContextMenu } from "./ui/ContextMenu";
+import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 
 interface AppEntry {
@@ -23,6 +24,7 @@ interface Shortcut {
   category: string;
   custom_icon: string | null;
   use_desktop_icon: boolean;
+  steamgrid_icon: string | null;
 }
 
 const PALETTE = [
@@ -84,6 +86,7 @@ function AppTile({
   name,
   path,
   customIcon,
+  steamgridIcon,
   useDesktopIcon,
   bust,
   focused,
@@ -93,14 +96,17 @@ function AppTile({
   name: string;
   path: string;
   customIcon: string | null;
+  steamgridIcon: string | null;
   useDesktopIcon: boolean;
   bust: number;
   focused: boolean;
   onLaunch: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  const fetchedIcon = useAppIcon(name, path, bust, useDesktopIcon);
-  const icon = customIcon ? convertFileSrc(customIcon) : fetchedIcon;
+  // Custom file icon > pinned SteamGridDB URL > desktop/auto.
+  const forceDesktop = useDesktopIcon && !customIcon && !steamgridIcon;
+  const fetchedIcon = useAppIcon(name, path, bust, forceDesktop);
+  const icon = customIcon ? convertFileSrc(customIcon) : (steamgridIcon ?? fetchedIcon);
 
   return (
     <motion.div
@@ -198,18 +204,13 @@ function AddAppModal({
 
       {tab === "installed" ? (
         <>
-          <div className="relative mb-3">
-            <MagnifyingGlass
-              size={16}
-              weight="bold"
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)"
-            />
-            <input
+          <div className="mb-3">
+            <Input
               ref={searchRef}
+              icon={<MagnifyingGlass size={16} weight="bold" />}
               value={q}
               onChange={(e) => setQ(e.currentTarget.value)}
               placeholder="Search installed apps…"
-              className="h-10 w-full rounded-xl border border-(--color-border) bg-(--color-surface) pl-9 pr-4 text-sm text-(--color-text) outline-none transition placeholder:text-(--color-muted) focus:border-(--color-accent)"
             />
           </div>
           <div className="max-h-80 space-y-1 overflow-y-auto">
@@ -249,6 +250,184 @@ function AddAppModal({
 
 /* ------------------------------ main ---------------------------------- */
 
+/* -------------------------- SteamGridDB modal ------------------------ */
+
+interface SgTitle {
+  id: number;
+  name: string;
+}
+interface SgIcon {
+  id: number;
+  url: string;
+}
+
+function SteamGridModal({
+  app,
+  onClose,
+  onSetIcon,
+}: {
+  app: Shortcut | null;
+  onClose: () => void;
+  onSetIcon: (path: string, url: string | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [titles, setTitles] = useState<SgTitle[]>([]);
+  const [icons, setIcons] = useState<SgIcon[]>([]);
+  const [selected, setSelected] = useState<SgTitle | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (app) {
+      setQuery(app.name);
+      setTitles([]);
+      setIcons([]);
+      setSelected(null);
+      setError(null);
+    }
+  }, [app]);
+
+  async function search() {
+    const t = query.trim();
+    if (!t || !app) return;
+    setBusy(true);
+    setError(null);
+    setIcons([]);
+    setSelected(null);
+    try {
+      const idMatch = /^\d+$/.test(t);
+      if (idMatch) {
+        const id = Number(t);
+        setSelected({ id, name: `Game #${id}` });
+        setIcons(await invoke<SgIcon[]>("steamgrid_icons", { gameId: id }));
+      } else {
+        setTitles(await invoke<SgTitle[]>("steamgrid_search", { query: t }));
+      }
+    } catch (e) {
+      setError(String(e));
+      setTitles([]);
+      setIcons([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickTitle(t: SgTitle) {
+    setSelected(t);
+    setBusy(true);
+    setError(null);
+    try {
+      setIcons(await invoke<SgIcon[]>("steamgrid_icons", { gameId: t.id }));
+    } catch (e) {
+      setError(String(e));
+      setIcons([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function choose(icon: SgIcon) {
+    if (!app) return;
+    onSetIcon(app.path, icon.url);
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={!!app}
+      onClose={onClose}
+      title="SteamGridDB icon"
+      subtitle={app ? `for ${app.name}` : ""}
+      width="max-w-lg"
+    >
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && search()}
+            placeholder="Search by name, or enter a game id…"
+          />
+        </div>
+        <button
+          onClick={search}
+          disabled={!query.trim() || busy}
+          className="rounded-full border border-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
+        >
+          Search
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-sm text-(--color-danger)">{error}</p>}
+
+      {selected ? (
+        <div className="mt-3">
+          <button
+            onClick={() => {
+              setSelected(null);
+              setIcons([]);
+            }}
+            className="text-xs text-(--color-muted) transition hover:text-(--color-text)"
+          >
+            ← back to results
+          </button>
+          <div className="mt-2 grid max-h-64 grid-cols-4 gap-2 overflow-y-auto">
+            {icons.length === 0 && !busy ? (
+              <p className="col-span-full py-6 text-center text-sm text-(--color-muted)">
+                No icons for “{selected.name}”.
+              </p>
+            ) : (
+              icons.map((ic) => (
+                <button
+                  key={ic.id}
+                  onClick={() => choose(ic)}
+                  className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface) transition hover:border-(--color-accent)"
+                >
+                  <img src={ic.url} alt="" loading="lazy" className="h-full w-full object-contain" />
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+          {titles.length === 0 && !busy ? (
+            <p className="py-4 text-center text-sm text-(--color-muted)">
+              Type a query to find a title.
+            </p>
+          ) : (
+            titles.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => pickTitle(t)}
+                className="w-full rounded-lg px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
+              >
+                {t.name}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {app?.steamgrid_icon && (
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={() => {
+              onSetIcon(app.path, null);
+              onClose();
+            }}
+            className="text-sm text-(--color-danger) transition hover:underline"
+          >
+            Clear icon
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ------------------------------ main ------------------------------ */
+
 export function AppsView() {
   const { settings, update } = useSettings();
   const shortcuts = settings.app_shortcuts;
@@ -256,6 +435,7 @@ export function AppsView() {
   const [query, setQuery] = useState("");
   const [bust, setBust] = useState(0);
   const ctx = useContextMenu();
+  const [sgApp, setSgApp] = useState<Shortcut | null>(null);
 
   // Keyboard / gamepad grid navigation.
   const gridRef = useRef<HTMLDivElement>(null);
@@ -310,7 +490,7 @@ export function AppsView() {
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; category?: string }) {
-    const entry: Shortcut = { name: a.name, path: a.path, category: a.category ?? "", custom_icon: null, use_desktop_icon: false };
+    const entry: Shortcut = { name: a.name, path: a.path, category: a.category ?? "", custom_icon: null, use_desktop_icon: false, steamgrid_icon: null };
     if (existingPaths.has(entry.path.toLowerCase())) return;
     update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, entry] }));
   }
@@ -340,6 +520,14 @@ export function AppsView() {
       app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, use_desktop_icon: v } : x)),
     }));
   }
+  function setSteamgridIcon(path: string, url: string | null) {
+    update((s) => ({
+      ...s,
+      app_shortcuts: s.app_shortcuts.map((x) =>
+        x.path === path ? { ...x, steamgrid_icon: url, use_desktop_icon: false } : x,
+      ),
+    }));
+  }
   async function launch(a: Shortcut) {
     try {
       await invoke("launch_app", { path: a.path });
@@ -360,17 +548,12 @@ export function AppsView() {
         subtitle="Your curated apps. Click to launch."
         actions={
           <div className="flex items-center gap-2">
-            <div className="relative">
-              <MagnifyingGlass
-                size={18}
-                weight="bold"
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)"
-              />
-              <input
+            <div className="w-56">
+              <Input
+                icon={<MagnifyingGlass size={16} weight="bold" />}
                 value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
                 placeholder="Search apps…"
-                className="h-9 w-56 rounded-full border border-(--color-border) bg-(--color-surface) pl-9 pr-4 text-sm text-(--color-text) outline-none transition placeholder:text-(--color-muted) focus:border-(--color-accent)"
               />
             </div>
             <button
@@ -413,6 +596,7 @@ export function AppsView() {
                 name={a.name}
                 path={a.path}
                 customIcon={a.custom_icon}
+                steamgridIcon={a.steamgrid_icon}
                 useDesktopIcon={a.use_desktop_icon}
                 bust={bust}
                 focused={i === focusIdx}
@@ -422,10 +606,7 @@ export function AppsView() {
                     {
                       icon: <MagnifyingGlass size={14} weight="bold" />,
                       label: "Search SteamGridDB",
-                      onClick: () => {
-                        setUseDesktopIcon(a.path, false);
-                        refreshIcon(a);
-                      },
+                      onClick: () => setSgApp(a),
                     },
                     { icon: <Image size={14} weight="bold" />, label: "Use Custom Icon", onClick: () => pickCustomIcon(a) },
                     ...(a.custom_icon
@@ -455,6 +636,8 @@ export function AppsView() {
         onAdd={addShortcut}
         existingPaths={existingPaths}
       />
+
+      <SteamGridModal app={sgApp} onClose={() => setSgApp(null)} onSetIcon={setSteamgridIcon} />
 
       {ctx.render}
     </>

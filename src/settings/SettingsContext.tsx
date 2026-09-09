@@ -52,7 +52,7 @@ export interface Settings {
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean };
   machines: { name: string; address: string }[];
-  app_shortcuts: { name: string; path: string; category: string; custom_icon: string | null; use_desktop_icon: boolean }[];
+  app_shortcuts: { name: string; path: string; category: string; custom_icon: string | null; use_desktop_icon: boolean; steamgrid_icon: string | null }[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {

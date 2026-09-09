@@ -35,6 +35,8 @@ pub struct AppShortcut {
     pub custom_icon: Option<String>,
     #[serde(default)]
     pub use_desktop_icon: bool,
+    #[serde(default)]
+    pub steamgrid_icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
