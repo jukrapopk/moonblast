@@ -35,7 +35,7 @@ Streaming/pairing is done by **driving the Moonlight QT client via its CLI**, NO
 - Note: same-PC local connect works via `127.0.0.1`.
 
 ## Settings (persistent)
-- **Rust `settings.rs`** — typed serde `Settings` with `version`, `general`, `integrations` (moonlight_folder/enabled), `moonlight` (streaming prefs), `fullscreen`, `machines[{name,address}]`. Loaded once from app-config `settings.json`, written atomically, emits `settings-changed`.
+- **Rust `settings.rs`** — typed serde `Settings` with `version`, `general`, `integrations` (moonlight_folder/enabled, apps_enabled, steamgrid_key), `moonlight` (streaming prefs), `fullscreen`, `machines[{name,address}]`, `app_shortcuts[{name,path,custom_icon,use_desktop_icon,steamgrid_icon}]`. Loaded once from `settings.json`, written atomically, emits `settings-changed`. **All persistent data is centralized** in one Local AppData folder (`%LOCALAPPDATA%\<identifier>\`): `settings.json` + sibling `.icons\` icon cache; migrated from the old Roaming config dir on first run.
 - **Frontend `settings/SettingsContext.tsx`** — `SettingsProvider` wraps the app; `useSettings()` → `{ settings, update(mutator) }`; optimistic updates. **Single source of truth for all persisted values.**
 - Adding a setting = add to Rust `Settings` + mirror in the TS `Settings`/`DEFAULT_SETTINGS`, then read/write via `useSettings()`.
 - To add a setting field in Rust Settings, update `settings.rs` Default and `SettingsContext.tsx` (interface + DEFAULT_SETTINGS); bump `version` if a migration is needed.
@@ -50,12 +50,14 @@ Streaming/pairing is done by **driving the Moonlight QT client via its CLI**, NO
 - Power menu (`PowerMenu.tsx`) is a centered **Modal** (`ui/Modal.tsx`) with items: Fullscreen, Close Moonblast, Sleep, Reboot, Shutdown (danger), Cancel.
 
 ## Apps tab
-- `/src/data.ts` holds the placeholder `apps` catalog (name + gradient). `AppsView.tsx` is a searchable grid. The user wants App launching / curation wired to real Windows apps eventually.
+- Curated, persisted list (`app_shortcuts` in settings). Add via discovered Start Menu apps or browse `.exe`/`.lnk`.
+- Icons resolved/cached to disk: `app_icon` (desktop extract or SteamGridDB-by-name) writes a PNG to `…\.icons\` keyed by app path, so reloads are offline. Priority: **custom file → pinned SteamGridDB → desktop-extracted → gradient auto**.
+- `cache_steamgrid_icon` downloads a pinned SGDB icon to `.icons`; `import_app_icon` copies a custom image into `.icons` (so moving the original won't break it); `clear_cached_icon` purges on "Use Desktop Icon".
 
 ## Design / UI conventions
 - **Tokens** in `src/styles.css` `@theme`: `--color-{bg,surface,surface-2,border,muted,text,accent,accent-2,danger}` plus derived alpha tokens `accent-soft`, `surface-ghost`, `overlay`, `overlay-soft`, `muted-soft`. Use tokens for all colors (no hardcoded `black/x` opacity).
 - Root font-size `17px` for Big-Picture sizing.
-- **Shared `ui/` primitives:** `Toggle`, `Row`, `Section`, `Select`, `Segmented`, `Modal`, `Toast`. Reuse these — no duplicate local components.
+- **Shared `ui/` primitives:** `Toggle`, `Row`, `Section`, `Select`, `Segmented`, `Modal`, `Toast`, `Input`, `ContextMenu`. Reuse these — no duplicate local components.
 - `Modal` default padding `p-5`; supports `title`/`subtitle` (in-panel header + X) and `width`.
 - `Toast` is width-capped with a copy button.
 - Icons: Phosphor, `weight="bold"` everywhere.

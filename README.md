@@ -16,7 +16,10 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 - **Custom frameless title bar** — drag region + minimize / maximize / close, hiding in fullscreen
 - **Power menu** — Fullscreen, Close, Sleep, Reboot, Shutdown (real Windows actions)
 - **F11** toggles fullscreen
-- **Apps tab** — searchable, curated grid of Windows apps
+- **Apps tab** — searchable, curated grid of Windows apps:
+  - extracted Windows icons, **SteamGridDB** game icons, and custom images
+  - all icons cached to disk (`.icons`) so they load instantly and work **offline**
+- **Context menus** everywhere (right-click replaces the native WebView2 menu) with keyboard + gamepad navigation
 - **Moonlight tab** — machines + streaming:
   - mDNS **discovery** of Sunshine/GameStream hosts (paired/unpaired)
   - **Pair / Desktop / Apps** actions per host
@@ -26,8 +29,9 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 
 ## Architecture
 
-- **Rust backend** (`src-tauri/src/lib.rs`) exposes Tauri commands for window controls, system power, Tailscale, Moonlight CLI, host discovery, and settings.
-- **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON in the OS app-config dir, written atomically; emits a `settings-changed` event.
+- **Rust backend** (`src-tauri/src/lib.rs`) exposes Tauri commands for window controls, system power, Tailscale, Moonlight CLI (list/pair/stream/quit), host discovery, app launching, and icon extraction/caching (`app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`).
+- **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON, written atomically; emits a `settings-changed` event.
+- **All persistent data is centralized** in one folder under *Local* AppData: `%LOCALAPPDATA%\com.moonblast.app\` containing `settings.json` and a sibling `.icons\` icon cache. Settings are migrated from the old Roaming (config-dir) location on first run.
 - **Frontend** — a React `SettingsProvider` context (single source of truth) hydrates on boot and syncs all views; shared `ui/` primitives keep the UI consistent.
 
 ## Project structure
@@ -35,17 +39,17 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 ```
 src/                      # React frontend
   components/
-    ui/                   # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast)
+    ui/                   # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu)
     TopBar.tsx            # icon nav + power button
     TitleBar.tsx          # custom window title bar
     PageShell.tsx         # shared page layout
-    AppsView.tsx          # Apps tab
+    AppsView.tsx          # Apps tab (curated grid, SteamGridDB + custom icons, context menus)
     MoonlightView.tsx     # Moonlight tab (Machines + Settings)
     MoonlightSettings.tsx # Moonlight streaming settings
     SettingsView.tsx      # app-level settings
     PowerMenu.tsx         # power menu modal
   settings/SettingsContext.tsx  # persistent settings provider
-  data.ts                 # placeholder app catalog
+  hooks/useGamepad.ts     # gamepad → keyboard bridge
 src-tauri/                # Rust backend
   src/lib.rs              # Tauri commands
   src/settings.rs         # persisted settings
