@@ -712,8 +712,6 @@ export function MoonlightView() {
       )}
 
       <Toast message={toast} />
-
-      {ctx.render}
     </>
   );
 }

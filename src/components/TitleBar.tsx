@@ -88,7 +88,6 @@ export function TitleBar({
           <X size={16} weight="bold" />
         </button>
       </div>
-      {ctx.render}
     </header>
   );
 }

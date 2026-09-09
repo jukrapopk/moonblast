@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 
 export interface CtxAction {
   label: string;
@@ -33,12 +33,12 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
     function onScroll() {
       onClose();
     }
-    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("mousedown", onDoc, true);
     document.addEventListener("keydown", onKey);
     window.addEventListener("blur", onClose);
     window.addEventListener("scroll", onScroll, true);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("mousedown", onDoc, true);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onClose);
       window.removeEventListener("scroll", onScroll, true);
@@ -86,20 +86,44 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
   );
 }
 
-/** Right-click context menu state + open helper. */
-export function useContextMenu() {
-  const [menu, setMenu] = useState<MenuState | null>(null);
+// ---- global singleton store ----------------------------------------------
+// Only one context menu may be open at a time, so all `useContextMenu()`
+// instances share a single module-level store; opening a menu replaces any
+// previously-open one. A single `<ContextMenuHost/>` is mounted once at the
+// app root and renders whatever the store holds.
 
+let menuState: MenuState | null = null;
+const listeners = new Set<() => void>();
+
+function storeSet(s: MenuState | null) {
+  menuState = s;
+  listeners.forEach((l) => l());
+}
+function storeSubscribe(l: () => void) {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+}
+function storeGet() {
+  return menuState;
+}
+
+export function useContextMenu() {
   function open(e: ReactMouseEvent, items: CtxAction[]) {
     e.preventDefault();
     e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, items });
+    storeSet({ x: e.clientX, y: e.clientY, items });
   }
+  const openAt = (x: number, y: number, items: CtxAction[]) => {
+    storeSet({ x, y, items });
+  };
+  const setMenu = (s: MenuState | null) => storeSet(s);
+  return { open, openAt, setMenu };
+}
 
-  function openAt(x: number, y: number, items: CtxAction[]) {
-    setMenu({ x, y, items });
-  }
-
-  const render = <ContextMenu state={menu} onClose={() => setMenu(null)} />;
-  return { open, openAt, render, setMenu };
+/** Mount once (e.g. in App.tsx) — the single rendered context menu. */
+export function ContextMenuHost() {
+  const state = useSyncExternalStore(storeSubscribe, storeGet);
+  return <ContextMenu state={state} onClose={() => storeSet(null)} />;
 }

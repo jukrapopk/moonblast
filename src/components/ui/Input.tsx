@@ -68,7 +68,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           className={[cls, className].filter(Boolean).join(" ")}
         />
       </div>
-      {ctx.render}
     </>
   );
 });

@@ -683,8 +683,6 @@ export function AppsView() {
       />
 
       <SteamGridModal app={sgApp} onClose={() => setSgApp(null)} onSetIcon={setSteamgridIcon} />
-
-      {ctx.render}
     </>
   );
 }

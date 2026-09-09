@@ -8,7 +8,7 @@ import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView } from "./components/SettingsView";
 import { useSettings } from "./settings/SettingsContext";
 import { useGamepad } from "./hooks/useGamepad";
-import { useContextMenu } from "./components/ui/ContextMenu";
+import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 
 export default function App() {
   const { settings, update } = useSettings();
@@ -155,7 +155,8 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
-      {pageCtx.render}
+      {/* Single global context menu — all views share it. */}
+      <ContextMenuHost />
     </div>
   );
 }
