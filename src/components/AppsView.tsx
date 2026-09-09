@@ -150,12 +150,8 @@ function AppTile({
         className="block w-full outline-none focus:outline-none"
       >
         <div
-          className={`relative flex aspect-square items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold ${icon ? "" : "w-full text-white/80"}`}
-          style={
-            icon
-              ? { width: "calc(100% + 0.75rem)", marginInline: "-0.375rem" }
-              : { background: gradientFor(name) }
-          }
+          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold ${icon ? "" : "text-white/80"}`}
+          style={icon ? undefined : { background: gradientFor(name) }}
         >
           {icon ? (
             <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
