@@ -33,6 +33,8 @@ pub struct AppShortcut {
     pub category: String,
     #[serde(default)]
     pub custom_icon: Option<String>,
+    #[serde(default)]
+    pub use_desktop_icon: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

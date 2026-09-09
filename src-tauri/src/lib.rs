@@ -376,8 +376,22 @@ fn urlencode(s: &str) -> String {
     out
 }
 
+/// Resolve a `.lnk` shortcut to its target path (to extract the icon without
+/// Windows' shortcut-arrow overlay). Returns None for non-.lnk paths.
+fn resolve_lnk_target(path: &str) -> Option<String> {
+    let p = std::path::Path::new(path);
+    if !p.extension().map(|e| e.eq_ignore_ascii_case("lnk")).unwrap_or(false) {
+        return None;
+    }
+    let shell_link = lnk::ShellLink::open(path, lnk::encoding::WINDOWS_1252).ok()?;
+    let target = shell_link.link_target()?;
+    if target.trim().is_empty() { None } else { Some(target) }
+}
+
 /// Extract an app's icon (from its exe or .lnk) as a base64 PNG data URI.
 fn extract_icon_data_uri(path: &str) -> Option<String> {
+    // For shortcuts, resolve the target so we don't include the arrow overlay.
+    let icon_path = resolve_lnk_target(path).unwrap_or_else(|| path.to_string());
     let Some(png) = (|| -> Option<Vec<u8>> {
         use windows_sys::Win32::Graphics::Gdi::{
             CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
@@ -389,7 +403,7 @@ fn extract_icon_data_uri(path: &str) -> Option<String> {
         const SIZE: i32 = 32;
         const SHGFI_ICON: u32 = 0x0000_0100;
 
-        let mut wide: Vec<u16> = path.encode_utf16().collect();
+        let mut wide: Vec<u16> = icon_path.encode_utf16().collect();
         wide.push(0);
         let mut info: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let got = unsafe {
@@ -535,6 +549,7 @@ async fn check_steamgrid_key(key: String) -> Result<String, String> {
 async fn app_icon(
     path: String,
     name: String,
+    force_desktop: bool,
     state: State<'_, settings::SettingsState>,
 ) -> Result<Option<String>, String> {
     let key = state
@@ -546,7 +561,7 @@ async fn app_icon(
         .clone()
         .unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
-        if !key.is_empty() && !name.trim().is_empty() {
+        if !force_desktop && !key.is_empty() && !name.trim().is_empty() {
             if let Some(url) = steamgrid_icon_url(&name, &key) {
                 return Ok(Some(url));
             }

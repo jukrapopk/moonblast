@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, X, FolderOpen, Image, ArrowClockwise } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise } from "@phosphor-icons/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
@@ -22,6 +22,7 @@ interface Shortcut {
   path: string;
   category: string;
   custom_icon: string | null;
+  use_desktop_icon: boolean;
 }
 
 const PALETTE = [
@@ -51,7 +52,7 @@ const nameFromPath = (p: string) =>
 
 const iconCache = new Map<string, string | null>();
 
-function useAppIcon(name: string, path: string, bust: number): string | null {
+function useAppIcon(name: string, path: string, bust: number, forceDesktop: boolean): string | null {
   const [icon, setIcon] = useState<string | null>(iconCache.get(path) ?? null);
 
   useEffect(() => {
@@ -60,7 +61,7 @@ function useAppIcon(name: string, path: string, bust: number): string | null {
       return;
     }
     let alive = true;
-    invoke<string | null>("app_icon", { path, name })
+    invoke<string | null>("app_icon", { path, name, forceDesktop })
       .then((u) => {
         iconCache.set(path, u ?? null);
         if (alive) setIcon(u ?? null);
@@ -72,7 +73,7 @@ function useAppIcon(name: string, path: string, bust: number): string | null {
     return () => {
       alive = false;
     };
-  }, [path, name, bust]);
+  }, [path, name, bust, forceDesktop]);
 
   return icon;
 }
@@ -81,26 +82,24 @@ function useAppIcon(name: string, path: string, bust: number): string | null {
 
 function AppTile({
   name,
-  category,
   path,
   customIcon,
+  useDesktopIcon,
   bust,
   focused,
   onLaunch,
-  onRemove,
   onContextMenu,
 }: {
   name: string;
-  category: string;
   path: string;
   customIcon: string | null;
+  useDesktopIcon: boolean;
   bust: number;
   focused: boolean;
   onLaunch: () => void;
-  onRemove?: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  const fetchedIcon = useAppIcon(name, path, bust);
+  const fetchedIcon = useAppIcon(name, path, bust, useDesktopIcon);
   const icon = customIcon ? convertFileSrc(customIcon) : fetchedIcon;
 
   return (
@@ -115,33 +114,22 @@ function AppTile({
     >
       <button
         onClick={onLaunch}
-        className="flex w-full flex-col gap-3 rounded-2xl p-3 text-left transition-colors hover:bg-(--color-surface)"
+        className="flex w-full flex-col gap-1.5 rounded-2xl p-1.5 text-center transition-colors hover:bg-(--color-surface)"
       >
         <div
-          className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl"
+          className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl"
           style={icon ? { background: "var(--color-surface)" } : { background: gradientFor(name) }}
         >
           {icon ? (
-            <img src={icon} alt="" draggable={false} className="h-3/5 w-3/5 object-contain" />
+            <img src={icon} alt="" draggable={false} className="h-4/5 w-4/5 object-contain" />
           ) : (
             <span className="text-3xl font-semibold text-white/80">{name.charAt(0)}</span>
           )}
         </div>
         <div className="px-0.5">
           <div className="truncate text-sm font-medium text-(--color-text)">{name}</div>
-          {category && <div className="truncate text-xs text-(--color-muted)">{category}</div>}
         </div>
       </button>
-      {onRemove && (
-        <button
-          onClick={onRemove}
-          title="Remove"
-          aria-label="Remove"
-          className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-(--color-overlay) text-white/70 opacity-0 transition hover:bg-(--color-danger) hover:text-white group-hover:opacity-100"
-        >
-          <X size={13} weight="bold" />
-        </button>
-      )}
     </motion.div>
   );
 }
@@ -322,7 +310,7 @@ export function AppsView() {
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; category?: string }) {
-    const entry: Shortcut = { name: a.name, path: a.path, category: a.category ?? "", custom_icon: null };
+    const entry: Shortcut = { name: a.name, path: a.path, category: a.category ?? "", custom_icon: null, use_desktop_icon: false };
     if (existingPaths.has(entry.path.toLowerCase())) return;
     update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, entry] }));
   }
@@ -345,6 +333,12 @@ export function AppsView() {
   function refreshIcon(a: Shortcut) {
     iconCache.delete(a.path);
     setBust((b) => b + 1);
+  }
+  function setUseDesktopIcon(path: string, v: boolean) {
+    update((s) => ({
+      ...s,
+      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, use_desktop_icon: v } : x)),
+    }));
   }
   async function launch(a: Shortcut) {
     try {
@@ -417,25 +411,38 @@ export function AppsView() {
               <AppTile
                 key={a.path}
                 name={a.name}
-                category={a.category}
                 path={a.path}
                 customIcon={a.custom_icon}
+                useDesktopIcon={a.use_desktop_icon}
                 bust={bust}
                 focused={i === focusIdx}
                 onLaunch={() => launch(a)}
-                  onRemove={() => removeShortcut(a.path)}
-                  onContextMenu={(e) =>
-                    ctx.open(e, [
-                      { icon: <MagnifyingGlass size={14} weight="bold" />, label: "Search SteamGridDB", onClick: () => refreshIcon(a) },
-                      { icon: <Image size={14} weight="bold" />, label: "Custom icon…", onClick: () => pickCustomIcon(a) },
-                      ...(a.custom_icon
-                        ? [{ label: "Clear custom icon", onClick: () => setCustomIcon(a.path, null) }]
-                        : []),
-                      { icon: <ArrowClockwise size={14} weight="bold" />, label: "Re-extract icon", onClick: () => refreshIcon(a) },
-                      { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
-                    ])
-                  }
-                />
+                onContextMenu={(e) =>
+                  ctx.open(e, [
+                    {
+                      icon: <MagnifyingGlass size={14} weight="bold" />,
+                      label: "Search SteamGridDB",
+                      onClick: () => {
+                        setUseDesktopIcon(a.path, false);
+                        refreshIcon(a);
+                      },
+                    },
+                    { icon: <Image size={14} weight="bold" />, label: "Use Custom Icon", onClick: () => pickCustomIcon(a) },
+                    ...(a.custom_icon
+                      ? [{ label: "Clear custom icon", onClick: () => setCustomIcon(a.path, null) }]
+                      : []),
+                    {
+                      icon: <ArrowClockwise size={14} weight="bold" />,
+                      label: "Use Desktop Icon",
+                      onClick: () => {
+                        setUseDesktopIcon(a.path, true);
+                        refreshIcon(a);
+                      },
+                    },
+                    { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
+                  ])
+                }
+              />
               ))}
             </AnimatePresence>
           </div>
