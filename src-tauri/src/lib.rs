@@ -1789,6 +1789,43 @@ async fn exit_immersive() -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatteryStatus {
+    /// 0–100. Returns -1 when the OS reports "unknown" (laptop with a battery
+    /// that hasn't reported a level yet, or a percentage the API couldn't read).
+    percent: i32,
+    /// True when plugged in / charging.
+    charging: bool,
+}
+
+/// Report the current battery state, or `None` when the system has no battery
+/// (desktops, VMs, etc.) so the UI can simply skip the chip. Read via the
+/// Win32 `GetSystemPowerStatus` API, which is the same one Explorer uses for
+/// the tray.
+#[tauri::command]
+fn battery() -> Option<BatteryStatus> {
+    use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    let mut s: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetSystemPowerStatus(&mut s) };
+    if ok == 0 {
+        return None;
+    }
+    // BatteryFlag bit 0x80 = "no system battery" (desktop / no battery fitted).
+    if s.BatteryFlag & 0x80 != 0 {
+        return None;
+    }
+    Some(BatteryStatus {
+        // BatteryLifePercent is 0–100, or 255 when unknown. We surface -1 for
+        // unknown so the UI can fall back to a charging icon without a percent.
+        percent: if s.BatteryLifePercent == 255 { -1 } else { s.BatteryLifePercent as i32 },
+        // ACLineStatus: 1 = online, 0 = offline, 255 = unknown. Treat 1 as
+        // charging (matches Windows' own "plugged in, not necessarily charging"
+        // semantics — the OS updates the icon either way).
+        charging: s.ACLineStatus == 1,
+    })
+}
+
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 fn system_power(action: String) -> Result<(), String> {
@@ -1908,6 +1945,7 @@ pub fn run() {
             booted_as_shell,
             enter_immersive,
             exit_immersive,
+            battery,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,
