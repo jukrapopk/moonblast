@@ -1346,13 +1346,30 @@ async fn exit_immersive() -> Result<(), String> {
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 fn system_power(action: String) -> Result<(), String> {
-    let (prog, args): (&str, Vec<&str>) = match action.as_str() {
-        "sleep" => ("rundll32.exe", vec!["powrprof.dll,SetSuspendState 0,1,0"]),
-        "reboot" => ("shutdown.exe", vec!["/r", "/t", "0"]),
-        "shutdown" => ("shutdown.exe", vec!["/s", "/t", "0"]),
+    match action.as_str() {
+        // Use SetSuspendState directly — `rundll32 powrprof.dll,SetSuspendState`
+        // is unreliable on Windows 10/11 (may hibernate or silently no-op).
+        "sleep" => {
+            use windows_sys::Win32::System::Power::SetSuspendState;
+            let ok = unsafe { SetSuspendState(0, 0, 0) };
+            return if ok != 0 { Ok(()) } else { Err("SetSuspendState failed".to_string()) };
+        }
+        "reboot" => {
+            let _ = Command::new("shutdown.exe")
+                .args(["/r", "/t", "0"])
+                .creation_flags(0x0800_0000)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        "shutdown" => {
+            let _ = Command::new("shutdown.exe")
+                .args(["/s", "/t", "0"])
+                .creation_flags(0x0800_0000)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
         _ => return Err(format!("unknown power action: {action}")),
-    };
-    Command::new(prog).args(&args).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
