@@ -2,7 +2,10 @@ use tauri::AppHandle;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
@@ -388,11 +391,11 @@ fn resolve_lnk_target(path: &str) -> Option<String> {
     if target.trim().is_empty() { None } else { Some(target) }
 }
 
-/// Extract an app's icon (from its exe or .lnk) as a base64 PNG data URI.
-fn extract_icon_data_uri(path: &str) -> Option<String> {
+/// Extract an app's icon (from its exe or .lnk) as raw PNG bytes.
+fn extract_icon_png(path: &str) -> Option<Vec<u8>> {
     // For shortcuts, resolve the target so we don't include the arrow overlay.
     let icon_path = resolve_lnk_target(path).unwrap_or_else(|| path.to_string());
-    let Some(png) = (|| -> Option<Vec<u8>> {
+    (|| -> Option<Vec<u8>> {
         use windows_sys::Win32::Graphics::Gdi::{
             CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
             BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
@@ -478,14 +481,49 @@ fn extract_icon_data_uri(path: &str) -> Option<String> {
         img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
             .ok()?;
         Some(out)
-    })() else {
-        return None;
-    };
+    })()
+}
 
-    Some(format!(
+fn png_data_uri(bytes: &[u8]) -> String {
+    format!(
         "data:image/png;base64,{}",
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png)
-    ))
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+    )
+}
+
+/// Download an image (SteamGridDB icon) into memory (capped at ~3MB).
+fn download_image(url: &str) -> Result<Vec<u8>, String> {
+    let mut reader = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_reader();
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    while buf.len() < 3_000_000 {
+        let n = std::io::Read::read(&mut reader, &mut chunk).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(buf)
+}
+
+/// `.icons` cache directory under the app data dir (Local AppData), co-located
+/// with `settings.json` so all Moonblast persistent data lives in one folder.
+fn icon_cache_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?.join(".icons");
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir)
+}
+
+/// Stable cache file for a given key (app path or icon URL). Same key always
+/// maps to the same file, so offline reloads hit disk instead of re-extracting.
+fn icon_cache_file(app: &tauri::AppHandle, key: &str) -> Option<PathBuf> {
+    let mut h = DefaultHasher::new();
+    key.hash(&mut h);
+    Some(icon_cache_dir(app)?.join(format!("{:016x}.png", h.finish())))
 }
 
 /// Look up a SteamGridDB icon URL for an app by name (API v2).
@@ -657,9 +695,15 @@ async fn steamgrid_icons(
     .map_err(|e| e.to_string())?
 }
 
-/// Resolve an app icon: SteamGridDB by name (if a key is configured), else extract.
+/// Resolve an app icon, persisted to the `.icons` cache.
+///
+/// Order: SteamGridDB by name (if a key is configured) → extracted desktop
+/// icon. The result is written to disk (keyed by app path) so later loads —
+/// and all offline sessions — serve straight from cache instead of re-extracting
+/// or re-hitting the network.
 #[tauri::command]
 async fn app_icon(
+    app: tauri::AppHandle,
     path: String,
     name: String,
     force_desktop: bool,
@@ -674,15 +718,95 @@ async fn app_icon(
         .clone()
         .unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
-        if !force_desktop && !key.is_empty() && !name.trim().is_empty() {
-            if let Some(url) = steamgrid_icon_url(&name, &key) {
-                return Ok(Some(url));
+        let cache = icon_cache_file(&app, &path);
+        // Serve from cache if present (fast + offline).
+        if let Some(cf) = &cache {
+            if cf.exists() {
+                if let Ok(bytes) = std::fs::read(cf) {
+                    return Ok(Some(png_data_uri(&bytes)));
+                }
             }
         }
-        Ok(extract_icon_data_uri(&path))
+        // Resolve fresh, network-first then extraction.
+        let mut img: Option<Vec<u8>> = None;
+        if !force_desktop && !key.is_empty() && !name.trim().is_empty() {
+            if let Some(url) = steamgrid_icon_url(&name, &key) {
+                img = download_image(&url).ok();
+            }
+        }
+        if img.is_none() {
+            img = extract_icon_png(&path);
+        }
+        if let Some(bytes) = &img {
+            if let Some(cf) = &cache {
+                let _ = std::fs::write(cf, bytes);
+            }
+            return Ok(Some(png_data_uri(bytes)));
+        }
+        Ok(None)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Persist a SteamGridDB icon URL to the `.icons` cache and return the local
+/// path (so it works offline). Idempotent for already-local paths.
+#[tauri::command]
+async fn cache_steamgrid_icon(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !url.starts_with("http") {
+            return Ok(Some(url));
+        }
+        let Some(cf) = icon_cache_file(&app, &url) else {
+            return Ok(None);
+        };
+        let bytes = download_image(&url)?;
+        std::fs::write(&cf, &bytes).map_err(|e| e.to_string())?;
+        Ok(Some(cf.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Copy a custom image into the `.icons` cache and return the local path, so
+/// the original file moving/renaming no longer breaks the icon.
+#[tauri::command]
+async fn import_app_icon(app: tauri::AppHandle, src: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // Already cached → return as-is (idempotent).
+        if let Some(dir) = icon_cache_dir(&app) {
+            let canon = std::fs::canonicalize(&src).unwrap_or_else(|_| PathBuf::from(&src));
+            if canon.starts_with(&dir) {
+                return Ok(Some(src));
+            }
+        }
+        let ext = std::path::Path::new(&src)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png");
+        let mut h = DefaultHasher::new();
+        src.hash(&mut h);
+        let Some(dir) = icon_cache_dir(&app) else {
+            return Ok(None);
+        };
+        let cf = dir.join(format!("custom_{:016x}.{}", h.finish(), ext));
+        std::fs::copy(&src, &cf).map_err(|e| e.to_string())?;
+        Ok(Some(cf.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Remove a specific app's cached icon so "Use Desktop Icon" can re-extract.
+#[tauri::command]
+async fn clear_cached_icon(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if let Some(cf) = icon_cache_file(&app, &path) {
+        let _ = std::fs::remove_file(&cf);
+    }
+    Ok(())
 }
 
 /// Build the `moonlight stream` CLI flags from the stored streaming prefs.
@@ -993,6 +1117,9 @@ pub fn run() {
             discover_apps,
             launch_app,
             app_icon,
+            cache_steamgrid_icon,
+            import_app_icon,
+            clear_cached_icon,
             check_steamgrid_key,
             steamgrid_search,
             steamgrid_icons

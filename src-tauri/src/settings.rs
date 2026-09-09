@@ -171,15 +171,42 @@ pub struct SettingsState(pub Mutex<Settings>);
 impl SettingsState {
     /// Loads settings from disk, falling back to defaults.
     pub fn load(app: &AppHandle) -> Self {
+        // One-time migration from the old Roaming (`app_config_dir`) location.
+        migrate_from_roaming(app);
         let settings = read_settings(app).unwrap_or_default();
         Self(Mutex::new(settings))
     }
 
+    // All Moonblast persistent data lives in one Local folder (Windows:
+    // `%LOCALAPPDATA%\<identifier>` via `app_data_dir`). `settings.json` sits at
+    // the root; the `.icons` icon cache is a sibling folder under the same root
+    // (see lib.rs icon_cache_dir).
     fn config_file(app: &AppHandle) -> PathBuf {
         app.path()
-            .app_config_dir()
-            .unwrap_or_else(|_| PathBuf::from("moonblast-config"))
+            .app_data_dir()
+            .unwrap_or_else(|_| PathBuf::from("moonblast-local"))
             .join("settings.json")
+    }
+}
+
+/// Copy `settings.json` from the legacy Roaming (`app_config_dir`) location into
+/// the new Local location if the new one doesn't exist yet.
+fn migrate_from_roaming(app: &AppHandle) {
+    let new = SettingsState::config_file(app);
+    if new.exists() {
+        return;
+    }
+    let old = app
+        .path()
+        .app_config_dir()
+        .map(|d| d.join("settings.json"))
+        .ok()
+        .filter(|p| p.exists());
+    if let Some(old) = old {
+        if let Some(parent) = new.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::copy(&old, &new);
     }
 }
 

@@ -54,10 +54,17 @@ const nameFromPath = (p: string) =>
 
 const iconCache = new Map<string, string | null>();
 
-function useAppIcon(name: string, path: string, bust: number, forceDesktop: boolean): string | null {
-  const [icon, setIcon] = useState<string | null>(iconCache.get(path) ?? null);
+function useAppIcon(
+  name: string,
+  path: string,
+  bust: number,
+  forceDesktop: boolean,
+  skip: boolean,
+): string | null {
+  const [icon, setIcon] = useState<string | null>(skip ? null : (iconCache.get(path) ?? null));
 
   useEffect(() => {
+    if (skip) return;
     if (iconCache.has(path)) {
       setIcon(iconCache.get(path) ?? null);
       return;
@@ -75,9 +82,9 @@ function useAppIcon(name: string, path: string, bust: number, forceDesktop: bool
     return () => {
       alive = false;
     };
-  }, [path, name, bust, forceDesktop]);
+  }, [path, name, bust, forceDesktop, skip]);
 
-  return icon;
+  return skip ? null : icon;
 }
 
 /* ------------------------------ tile ---------------------------------- */
@@ -103,10 +110,18 @@ function AppTile({
   onLaunch: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  // Custom file icon > pinned SteamGridDB URL > desktop/auto.
-  const forceDesktop = useDesktopIcon && !customIcon && !steamgridIcon;
-  const fetchedIcon = useAppIcon(name, path, bust, forceDesktop);
-  const icon = customIcon ? convertFileSrc(customIcon) : (steamgridIcon ?? fetchedIcon);
+  // Custom file icon > pinned SteamGridDB icon > desktop/auto.
+  const hasOverride = !!(customIcon || steamgridIcon);
+  const forceDesktop = useDesktopIcon && !hasOverride;
+  const fetchedIcon = useAppIcon(name, path, bust, forceDesktop, hasOverride);
+  // steamgrid_icon is a local `.icons` cache path (or a legacy remote URL that
+  // gets localized by the migration effect — prefer raw while still remote).
+  const steamgridSrc = steamgridIcon
+    ? steamgridIcon.startsWith("http")
+      ? steamgridIcon
+      : convertFileSrc(steamgridIcon)
+    : null;
+  const icon = customIcon ? convertFileSrc(customIcon) : (steamgridSrc ?? fetchedIcon);
 
   return (
     <motion.div
@@ -326,9 +341,13 @@ function SteamGridModal({
     }
   }
 
-  function choose(icon: SgIcon) {
+  async function choose(icon: SgIcon) {
     if (!app) return;
-    onSetIcon(app.path, icon.url);
+    // Persist the chosen icon to the `.icons` cache so it's offline-stable.
+    const local = await invoke<string | null>("cache_steamgrid_icon", { url: icon.url }).catch(
+      () => null,
+    );
+    onSetIcon(app.path, local ?? icon.url);
     onClose();
   }
 
@@ -508,10 +527,17 @@ export function AppsView() {
       multiple: false,
       filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "webp", "ico", "bmp", "gif"] }],
     });
-    if (typeof picked === "string" && picked) setCustomIcon(a.path, picked);
+    if (typeof picked === "string" && picked) {
+      // Copy into the `.icons` cache so the icon survives the source file moving.
+      const local = await invoke<string | null>("import_app_icon", { src: picked }).catch(
+        () => null,
+      );
+      setCustomIcon(a.path, local ?? picked);
+    }
   }
   function refreshIcon(a: Shortcut) {
     iconCache.delete(a.path);
+    void invoke("clear_cached_icon", { path: a.path });
     setBust((b) => b + 1);
   }
   function setUseDesktopIcon(path: string, v: boolean) {
@@ -540,6 +566,25 @@ export function AppsView() {
   const filtered = q
     ? shortcuts.filter((a) => `${a.name} ${a.category}`.toLowerCase().includes(q))
     : shortcuts;
+
+  // One-time migration: localize legacy steamgrid URLs and out-of-cache custom
+  // files into the `.icons` cache so they're stable and offline-safe.
+  useEffect(() => {
+    for (const a of shortcuts) {
+      if (a.steamgrid_icon && a.steamgrid_icon.startsWith("http")) {
+        void invoke<string | null>("cache_steamgrid_icon", { url: a.steamgrid_icon }).then(
+          (p) => {
+            if (p) setSteamgridIcon(a.path, p);
+          },
+        );
+      } else if (a.custom_icon && !/\.icons[\\/]/.test(a.custom_icon)) {
+        void invoke<string | null>("import_app_icon", { src: a.custom_icon }).then((p) => {
+          if (p && p !== a.custom_icon) setCustomIcon(a.path, p);
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shortcuts]);
 
   return (
     <>
