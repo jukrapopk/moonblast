@@ -147,6 +147,8 @@ impl Default for MoonlightStreaming {
 pub struct Fullscreen {
     pub suppress_explorer: bool,
     pub auto_fullscreen: bool,
+    /// Sign in straight into Moonblast: registers the launcher as the Windows
+    /// shell (see `shell.rs`) and enters Immersive Mode on that boot.
     #[serde(default)]
     pub auto_immersive: bool,
 }
@@ -257,4 +259,19 @@ pub fn update_settings(
     let _ = save_settings(&app, &settings);
     let _ = app.emit("settings-changed", &settings);
     settings
+}
+
+/// Force `auto_immersive` off from Rust and persist it.
+///
+/// Used when a boot-time rescue (Shift held at sign-in, or the crash bail-out)
+/// has already restored the normal shell: the stored intent would otherwise
+/// disagree with reality and silently re-arm the takeover on the next launch.
+pub fn disable_auto_immersive(app: &AppHandle, state: &SettingsState) {
+    let updated = {
+        let mut guard = state.0.lock().unwrap();
+        guard.fullscreen.auto_immersive = false;
+        guard.clone()
+    };
+    let _ = save_settings(app, &updated);
+    let _ = app.emit("settings-changed", &updated);
 }

@@ -13,15 +13,24 @@ import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 export default function App() {
   const { settings, ready, update } = useSettings();
 
-  // Active view is persisted so the last open tab is restored on next launch —
-  // but Settings is excluded: it never overwrites the stored view, so the app
-  // boots into the last "content" page (apps/moonlight) instead of Settings.
-  const view = settings.general.last_view as View;
-  const setView = (v: View) =>
-    update((s) => ({
-      ...s,
-      general: { ...s.general, last_view: v === "settings" ? s.general.last_view : v },
-    }));
+  // Active view is local state; `general.last_view` only records where to *boot*.
+  // Settings is excluded from that recording (so the app opens on apps/moonlight
+  // next launch) — but it must still be reachable, hence the separate state.
+  const [view, setViewState] = useState<View>("apps");
+  const setView = (v: View) => {
+    setViewState(v);
+    if (v !== "settings") {
+      update((s) => ({ ...s, general: { ...s.general, last_view: v } }));
+    }
+  };
+  // Settings hydrate asynchronously, so restore the persisted view once, on load.
+  const restoredView = useRef(false);
+  useEffect(() => {
+    if (!ready || restoredView.current) return;
+    restoredView.current = true;
+    setViewState(settings.general.last_view as View);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
   const [fullscreen, setFullscreen] = useState(false);
   const [immersive, setImmersive] = useState(false);
 
@@ -98,13 +107,19 @@ export default function App() {
   function setStartWithWindows(v: boolean) {
     update((s) => ({ ...s, general: { ...s.general, start_with_windows: v } }));
     void invoke("set_start_with_windows", { enabled: v }).catch(() => {});
-    // Auto Immersive requires Start with Windows, so reset it when that's off.
+    // Auto Immersive builds on starting with Windows, so turning that off also
+    // disarms it — including unregistering the shell, or the takeover would
+    // survive with no visible setting left switched on.
     if (!v && settings.fullscreen.auto_immersive) {
       update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: false } }));
+      void invoke("set_replace_desktop", { enabled: false }).catch(() => {});
     }
   }
+  // One switch: registers Moonblast as the Windows shell *and* arms Immersive
+  // Mode for the next sign-in. Deliberately does not enter Immersive Mode now.
   function setAutoImmersive(v: boolean) {
     update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: v } }));
+    void invoke("set_replace_desktop", { enabled: v }).catch(() => {});
   }
 
   // Sync the initial fullscreen state.
@@ -127,10 +142,6 @@ export default function App() {
       if (e.key === "F11") {
         e.preventDefault();
         if (!immersive) toggleFullscreen();
-      } else if (e.key === "F10") {
-        e.preventDefault();
-        if (immersive) exitImmersive();
-        else enterImmersive();
       } else if (e.key === "Escape" && immersive) {
         e.preventDefault();
         exitImmersive();
@@ -167,18 +178,21 @@ export default function App() {
     setFullscreen(false);
   }
 
-  // Auto-enter Immersive Mode when enabled. Settings hydrate asynchronously, so
-  // wait for `ready` and only ever fire once per session (a later toggle change
-  // mid-session must not yank the user into immersive).
+  // Auto-enter Immersive Mode, but only when the shell stub started us at
+  // sign-in (`booted_as_shell`). The decision is made once, the moment settings
+  // hydrate — so toggling the setting later never yanks the user into it.
   const autoEntered = useRef(false);
   useEffect(() => {
     if (!ready || autoEntered.current) return;
-    if (settings.fullscreen.auto_immersive && settings.general.start_with_windows) {
-      autoEntered.current = true;
-      void enterImmersive();
-    }
+    autoEntered.current = true;
+    if (!settings.fullscreen.auto_immersive) return;
+    void invoke<boolean>("booted_as_shell")
+      .then((boot) => {
+        if (boot) void enterImmersive();
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, settings.fullscreen.auto_immersive, settings.general.start_with_windows]);
+  }, [ready]);
 
   return (
     <div className="relative flex h-full w-full flex-col">

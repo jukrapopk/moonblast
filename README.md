@@ -14,8 +14,8 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 ## Features
 
 - **Custom frameless title bar** — drag region + minimize / maximize / close, hiding in fullscreen.
-- **Fullscreen + Immersive Mode** — F11 toggles window fullscreen; **Immersive Mode** (Power menu or F10) adds a clean fullscreen surface that suppresses the Windows desktop/taskbar and minimizes background windows (restored on exit).
-- **Auto Immersive Mode** — Settings toggle (requires Start with Windows): boot straight into Immersive Mode on launch. Rust suppresses the shell as early as `setup`, then the frontend flips to fullscreen once settings have hydrated.
+- **Fullscreen + Immersive Mode** — F11 toggles window fullscreen; **Immersive Mode** (Power menu) adds a clean fullscreen surface that suppresses the Windows desktop/taskbar and minimizes background windows (restored on exit).
+- **Auto Immersive Mode** — one Settings toggle (requires Start with Windows) that makes Moonblast your Windows shell: signing in goes straight into the launcher, fullscreen, instead of the desktop. Registered per-user (`Winlogon\Shell`), so there's **no UAC prompt, ever**. Explorer never starts, which means no desktop/taskbar flash and no startup apps at all (Explorer is what runs them). Toggling it only arms the *next* sign-in — it never drops you into Immersive Mode on the spot. Exiting Immersive Mode or closing Moonblast hands the desktop back; a stub supervisor guarantees a working desktop even if Moonblast crashes, and holding **Shift** at sign-in restores the normal desktop.
 - **Power menu** — Immersive Mode, Fullscreen ⇄ Windowed, Close, Sleep, Reboot, Shutdown (real Windows actions via `SetSuspendState` / `shutdown.exe`).
 - **Apps tab** — searchable, curated grid of Windows apps:
   - discovered from the **Start Menu**, **Microsoft Store** (AUMID via `Get-StartApps`), and **Steam** (registry + `appmanifest_*.acf` / `libraryfolders.vdf`, with source labels); browse any `.exe`/`.lnk`.
@@ -38,7 +38,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 - **Rust backend** (`src-tauri/src/lib.rs`) exposes Tauri commands for:
   - window: `toggle_fullscreen`, `is_fullscreen`, `minimize_window`, `toggle_maximize`, `is_maximized`, `close_app`
   - system power: `system_power(sleep|reboot|shutdown)`, `enter_immersive`, `exit_immersive`
-  - startup: `set_start_with_windows` (HKCU Run key)
+  - startup: `set_start_with_windows` (HKCU Run key), `set_replace_desktop` (per-user `Winlogon\Shell` takeover), `booted_as_shell`
   - Tailscale: `tailscale_status`, `tailscale_set`
   - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps`, `moonlight_pair` (emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`), `moonlight_quit`
   - host discovery / pairing: `discover_hosts` (mDNS + per-host `list` probe), `moonlight_paired_hosts` (reads QSettings), `moonlight_probe` (TCP + list check, used for online/offline)
@@ -70,6 +70,7 @@ src/                          # React frontend
 src-tauri/                    # Rust backend
   src/lib.rs                  # Tauri commands
   src/settings.rs             # persisted settings
+  src/shell.rs                # Windows shell (desktop) replacement + boot stub
 ```
 
 ## Keyboard & gamepad reference
@@ -77,8 +78,8 @@ src-tauri/                    # Rust backend
 | Action | Keyboard | Gamepad |
 |---|---|---|
 | Fullscreen | F11 | — |
-| Immersive Mode toggle | F10 | — |
-| Exit Immersive | Esc / F10 | B |
+| Immersive Mode | Power menu | — |
+| Exit Immersive | Esc | B |
 | Next / prev view | Tab / Shift+Tab | RB / LB |
 | Move | Arrows | D-pad / left stick |
 | Activate | Enter / Space | A |

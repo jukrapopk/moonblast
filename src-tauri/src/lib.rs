@@ -23,6 +23,9 @@ impl Default for StreamState {
 }
 
 mod settings;
+mod shell;
+
+pub use shell::run_shell_stub;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
@@ -540,17 +543,96 @@ fn shell_open(target: &str) -> Result<(), String> {
     }
 }
 
+/// COM vtable for `IApplicationActivationManager` (`2e941141-7f97-4756-ba1d-9decde894a3d`).
+///
+/// `windows-sys` ships the CLSID but not the interface (it binds no COM methods),
+/// and the interface is small, so declare the slots we need by hand. Only layout
+/// matters for the two trailing methods — they're never called.
+#[repr(C)]
+struct ApplicationActivationManagerVtbl {
+    query_interface: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const windows_sys::core::GUID,
+        *mut *mut std::ffi::c_void,
+    ) -> windows_sys::core::HRESULT,
+    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    activate_application: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u16,
+        *const u16,
+        u32,
+        *mut u32,
+    ) -> windows_sys::core::HRESULT,
+    _activate_for_file: usize,
+    _activate_for_protocol: usize,
+}
+
+/// Launch a Microsoft Store app by AUMID.
+///
+/// Deliberately *not* `explorer.exe shell:AppsFolder\<AUMID>`: when Moonblast has
+/// replaced the desktop there is no shell running, and starting Explorer would
+/// bring the taskbar and desktop up behind the launcher. `ActivateApplication` is
+/// the API the shell itself uses and needs no Explorer.
+fn activate_store_app(aumid: &str) -> Result<(), String> {
+    use windows_sys::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+    };
+    use windows_sys::Win32::UI::Shell::ApplicationActivationManager;
+    const IID_IAAM: windows_sys::core::GUID =
+        windows_sys::core::GUID::from_u128(0x2e94_1141_7f97_4756_ba1d_9dec_de89_4a3d);
+
+    let mut id: Vec<u16> = aumid.encode_utf16().collect();
+    id.push(0);
+    unsafe {
+        // May report "already initialized" / "different mode" on a thread Tauri has
+        // set up; either is fine — we just need COM live on this thread.
+        let _ = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        let mut mgr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = CoCreateInstance(
+            &ApplicationActivationManager,
+            std::ptr::null_mut(),
+            CLSCTX_ALL,
+            &IID_IAAM,
+            &mut mgr,
+        );
+        if hr < 0 || mgr.is_null() {
+            return Err(format!("ApplicationActivationManager unavailable (0x{hr:08X})"));
+        }
+        let vtbl = *(mgr as *mut *const ApplicationActivationManagerVtbl);
+        let mut pid: u32 = 0;
+        let hr = ((*vtbl).activate_application)(
+            mgr,
+            id.as_ptr(),
+            std::ptr::null(),
+            0, // AO_NONE
+            &mut pid,
+        );
+        ((*vtbl).release)(mgr);
+        if hr < 0 {
+            return Err(format!("Failed to activate Store app (0x{hr:08X})"));
+        }
+    }
+    Ok(())
+}
+
 /// Launch an app or shortcut. `kind` selects the launch method.
 #[tauri::command]
 fn launch_app(path: String, kind: String) -> Result<(), String> {
     match kind.as_str() {
-        "store" => {
-            // Store apps launch via the AppsFolder (AUMID) virtual namespace.
-            let mut cmd = Command::new("explorer.exe");
-            cmd.arg(format!("shell:AppsFolder\\{path}"));
-            cmd.spawn().map_err(|e| e.to_string())?;
-            Ok(())
-        }
+        "store" => activate_store_app(&path).or_else(|e| {
+            // Last resort: the AppsFolder namespace still works when a desktop is
+            // already up, and a launched app beats a failed one.
+            if shell::desktop_replaced() {
+                return Err(e);
+            }
+            Command::new("explorer.exe")
+                .arg(format!("shell:AppsFolder\\{path}"))
+                .creation_flags(0x0800_0000)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }),
         "steam" => shell_open(&format!("steam://rungameid/{path}")),
         _ => shell_open(&path),
     }
@@ -1647,6 +1729,30 @@ fn set_start_with_windows(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether this process was started by the shell stub at sign-in (as opposed to
+/// launched by hand), i.e. whether Immersive Mode should engage on boot.
+fn is_autostart() -> bool {
+    std::env::args().skip(1).any(|a| a == shell::AUTOSTART_FLAG)
+}
+
+/// Exposed so the frontend only auto-enters Immersive Mode on a real sign-in.
+#[tauri::command]
+fn booted_as_shell() -> bool {
+    is_autostart()
+}
+
+/// Register/remove Moonblast as the Windows shell, so sign-in boots straight into
+/// the launcher instead of the desktop. Per-user, so no elevation is needed.
+#[tauri::command]
+fn set_replace_desktop(enabled: bool) -> Result<(), String> {
+    shell::set_replace_desktop(enabled)?;
+    if enabled {
+        // Arming from the UI is an explicit fresh start, so forgive earlier crashes.
+        shell::reset_crash_count();
+    }
+    Ok(())
+}
+
 /// Enter Immersive Mode: go fullscreen, suppress the desktop shell, and
 /// minimize background windows so only the launcher shows.
 #[tauri::command]
@@ -1669,9 +1775,17 @@ async fn enter_immersive(window: tauri::Window) -> Result<(), String> {
 /// Exit Immersive Mode: restore the Windows shell.
 #[tauri::command]
 async fn exit_immersive() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| suppress_shell(false))
-        .await
-        .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(|| {
+        suppress_shell(false);
+        // When Moonblast is the shell, Explorer was never started at sign-in, so
+        // there's nothing for `suppress_shell` to restore — start it now so
+        // leaving Immersive Mode still hands back a usable desktop.
+        if shell::desktop_replaced() {
+            shell::ensure_desktop();
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1723,15 +1837,38 @@ pub fn run() {
                     let _ = window.set_icon(icon.clone());
                 }
             }
-            // Start suppressing the desktop/background as early as possible at
-            // boot (before the UI even hydrates); fullscreen follows ~a second
-            // later when the hydrated frontend calls `enter_immersive`.
-            let auto = {
+            // Auto Immersive Mode both registers Moonblast as the Windows shell
+            // and enters Immersive Mode — but only on a real sign-in, which the
+            // stub signals with `--autostart`. Toggling the setting mid-session
+            // therefore never yanks the user into Immersive Mode.
+            let autostarted = is_autostart();
+            let want = {
                 let state = app.state::<settings::SettingsState>();
                 let guard = state.0.lock().unwrap();
-                guard.fullscreen.auto_immersive && guard.general.start_with_windows
+                guard.fullscreen.auto_immersive
             };
-            if auto {
+            let armed = shell::desktop_replaced();
+            if want && !armed {
+                // A rescue (Shift at sign-in, or the crash bail-out) already put
+                // the normal shell back. Respect that instead of silently
+                // re-arming, and make the UI reflect it.
+                let state = app.state::<settings::SettingsState>();
+                settings::disable_auto_immersive(app.handle(), &state);
+            } else if want {
+                // Refresh the registered path so moving or updating the app can't
+                // strand a stale Winlogon entry.
+                std::thread::spawn(|| {
+                    let _ = shell::set_replace_desktop(true);
+                    // Surviving this long means we aren't crash-looping, so clear
+                    // the counter the stub uses to bail out.
+                    std::thread::sleep(std::time::Duration::from_secs(shell::CRASH_RESET_SECS));
+                    shell::reset_crash_count();
+                });
+            }
+            // Suppress the desktop/background as early as possible at boot (before
+            // the UI even hydrates); fullscreen follows ~a second later when the
+            // hydrated frontend calls `enter_immersive`.
+            if want && armed && autostarted {
                 tauri::async_runtime::spawn_blocking(|| {
                     minimize_other_windows();
                     suppress_shell(true);
@@ -1758,6 +1895,8 @@ pub fn run() {
             close_app,
             system_power,
             set_start_with_windows,
+            set_replace_desktop,
+            booted_as_shell,
             enter_immersive,
             exit_immersive,
             tailscale_status,

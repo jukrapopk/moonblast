@@ -194,15 +194,17 @@ export function SettingsView({
             <div className="text-base font-medium text-(--color-text)">Auto Immersive Mode</div>
             <div className="mt-0.5 text-sm text-(--color-muted)">
               {startWithWindows
-                ? "Boot straight into Immersive Mode next time Moonblast starts. While active it:"
+                ? "Sign in straight into Moonblast instead of the Windows desktop. Applies from your next sign-in — turning this on won't change anything right now. It:"
                 : 'Requires "Start with Windows" to be enabled.'}
             </div>
             {startWithWindows && (
               <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-(--color-muted)">
-                <li>Starts fullscreen with a clean background</li>
-                <li>Suppresses the desktop & taskbar by hiding the Windows shell</li>
+                <li>Launches Moonblast fullscreen before anything else</li>
+                <li>Never starts the desktop or taskbar, so nothing flashes on the way in</li>
+                <li>Skips your Windows startup apps — the desktop is what launches them</li>
                 <li>Minimizes other open windows so they don't show behind</li>
-                <li>Everything is restored when you exit Immersive Mode</li>
+                <li>Hands the desktop back when you exit Immersive Mode or close Moonblast</li>
+                <li>Hold Shift while signing in to boot to the normal desktop</li>
               </ul>
             )}
           </div>
