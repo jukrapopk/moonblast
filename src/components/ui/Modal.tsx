@@ -30,7 +30,9 @@ export function Modal({ open, onClose, title, subtitle, children, width = "max-w
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          // Close only when the press itself starts on the overlay (not when the
+          // user drags out of the panel and releases here).
+          onMouseDown={onClose}
           className="fixed inset-0 z-50 flex items-center justify-center bg-(--color-overlay) p-6 backdrop-blur-sm"
         >
           <motion.div
@@ -39,6 +41,7 @@ export function Modal({ open, onClose, title, subtitle, children, width = "max-w
             exit={{ scale: 0.96, y: 8, opacity: 0 }}
             transition={{ duration: 0.16 }}
             onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
             className={`w-full ${width} rounded-2xl border border-(--color-border) bg-(--color-surface-2) p-5`}
           >
             {(title || subtitle) && (
