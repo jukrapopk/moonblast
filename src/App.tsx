@@ -203,7 +203,7 @@ export default function App() {
         fullscreen={fullscreen}
         onToggleFullscreen={toggleFullscreen}
         immersive={immersive}
-        onToggleImmersive={enterImmersive}
+        onToggleImmersive={immersive ? exitImmersive : enterImmersive}
         showMoonlight={moonlightEnabled && moonlightDir !== null}
         showApps={appsEnabled}
       />
