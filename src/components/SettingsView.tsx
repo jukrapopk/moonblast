@@ -28,6 +28,11 @@ type TailscaleStatus =
 
   useEffect(() => {
     refresh();
+    // Poll while the Settings page is mounted (it unmounts on navigation, so
+    // the timer stops when you leave). Keeps the status live without any cost
+    // on other pages.
+    const id = setInterval(refresh, 3000);
+    return () => clearInterval(id);
   }, []);
 
   async function toggle(up: boolean) {
