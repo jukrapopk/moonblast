@@ -93,6 +93,8 @@ function AppTile({
   bust,
   focused,
   onLaunch,
+  onHover,
+  onUnhover,
   onContextMenu,
 }: {
   name: string;
@@ -103,6 +105,10 @@ function AppTile({
   bust: number;
   focused: boolean;
   onLaunch: () => void;
+  /** Mouse entered this tile — claim the lift. */
+  onHover: () => void;
+  /** Mouse left this tile — release the lift so keyboard focus (if any) can take it. */
+  onUnhover: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   // Custom file icon > pinned SteamGridDB icon > desktop/auto.
@@ -125,6 +131,8 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
+      onMouseEnter={onHover}
+      onMouseLeave={onUnhover}
       className={`group relative rounded-2xl p-3 transition-all duration-150 hover:z-10 hover:scale-[1.08] hover:bg-(--color-accent-soft) hover:shadow-[0_12px_32px_-12px_var(--color-overlay)] ${
         focused
           ? "z-10 scale-[1.08] bg-(--color-accent-soft) shadow-[0_12px_32px_-12px_var(--color-overlay)]"
@@ -715,6 +723,11 @@ export function AppsView() {
                 bust={bust}
                 focused={i === focusIdx}
                 onLaunch={() => launch(a)}
+                // Mouse hover claims the lift so only one tile is ever lifted;
+                // leaving the tile releases it, letting keyboard focus take
+                // over again on the next grid navigation.
+                onHover={() => setFocusIdx(i)}
+                onUnhover={() => setFocusIdx((cur) => (cur === i ? -1 : cur))}
                 onContextMenu={(e) => openAppMenu(e, a)}
               />
               ))}
