@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
 /// window for the same host+app while one is already running.
@@ -73,7 +75,7 @@ fn is_maximized(window: tauri::Window) -> Result<bool, String> {
 async fn tailscale_status() -> TailscaleInfo {
     // Offload the subprocess wait off the main thread so the UI never freezes.
     tauri::async_runtime::spawn_blocking(|| {
-        let status = match Command::new("tailscale").arg("status").output() {
+        let status = match Command::new("tailscale").arg("status").creation_flags(0x0800_0000).output() {
             Err(_) => "not-found".to_string(),
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -115,7 +117,7 @@ async fn tailscale_status() -> TailscaleInfo {
 async fn tailscale_set(up: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let arg = if up { "up" } else { "down" };
-        let out = Command::new("tailscale").arg(arg).output().map_err(|e| e.to_string())?;
+        let out = Command::new("tailscale").arg(arg).creation_flags(0x0800_0000).output().map_err(|e| e.to_string())?;
         if !out.status.success() {
             let msg = format!(
                 "{}{}",
@@ -385,6 +387,7 @@ fn discover_store_apps() -> Vec<AppEntry> {
     let mut out = Vec::new();
     let Ok(ps) = Command::new("powershell.exe")
         .args(["-NoProfile", "-Command", "Get-StartApps | ConvertTo-Json -Compress"])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW — don't flash a console
         .output()
     else {
         return out;
@@ -1262,7 +1265,7 @@ static EXPLORER_KILLED: AtomicBool = AtomicBool::new(false);
 /// desktop. `suppress_shell(true)` hides; `suppress_shell(false)` restores.
 fn suppress_shell(hidden: bool) {
     if hidden {
-        let _ = Command::new("taskkill.exe").args(["/f", "/im", "explorer.exe"]).spawn();
+        let _ = Command::new("taskkill.exe").args(["/f", "/im", "explorer.exe"]).creation_flags(0x0800_0000).spawn();
         EXPLORER_KILLED.store(true, Ordering::SeqCst);
     } else if EXPLORER_KILLED.swap(false, Ordering::SeqCst) {
         let _ = Command::new("explorer.exe").spawn();
@@ -1349,7 +1352,7 @@ fn system_power(action: String) -> Result<(), String> {
         "shutdown" => ("shutdown.exe", vec!["/s", "/t", "0"]),
         _ => return Err(format!("unknown power action: {action}")),
     };
-    Command::new(prog).args(&args).spawn().map_err(|e| e.to_string())?;
+    Command::new(prog).args(&args).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 
