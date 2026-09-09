@@ -138,26 +138,21 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
-      className={`group relative rounded-2xl ${focused ? "ring-2 ring-(--color-accent)" : ""}`}
+      className={`group ${focused ? "rounded-2xl ring-2 ring-(--color-accent)" : ""}`}
       onContextMenu={onContextMenu}
     >
-      <button
-        onClick={onLaunch}
-        className="flex w-full flex-col gap-2 rounded-2xl px-1.5 pt-1.5 pb-4 text-center transition-colors hover:bg-(--color-surface)"
-      >
+      <button onClick={onLaunch} className="block w-full">
         <div
-          className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl"
-          style={icon ? { background: "var(--color-surface)" } : { background: gradientFor(name) }}
+          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl transition-transform group-hover:scale-[1.02] ${icon ? "" : "text-3xl font-semibold text-white/80"}`}
+          style={icon ? undefined : { background: gradientFor(name) }}
         >
           {icon ? (
-            <img src={icon} alt="" draggable={false} className="h-4/5 w-4/5 object-contain" />
+            <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
           ) : (
-            <span className="text-3xl font-semibold text-white/80">{name.charAt(0)}</span>
+            name.charAt(0)
           )}
         </div>
-        <div className="px-0.5">
-          <div className="truncate text-sm font-medium text-(--color-text)">{name}</div>
-        </div>
+        <div className="mt-3 truncate text-center text-xs font-medium text-(--color-text)">{name}</div>
       </button>
     </motion.div>
   );
@@ -735,7 +730,7 @@ export function AppsView() {
           ref={gridRef}
           tabIndex={-1}
           onKeyDown={onGridKey}
-          className="grid grid-cols-3 gap-4 outline-none sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+          className="grid grid-cols-4 gap-4 outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
         >
           <AnimatePresence>
             {filtered.map((a, i) => (
