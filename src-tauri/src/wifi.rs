@@ -155,32 +155,45 @@ fn current_connection(client: &WlanClient) -> Option<WifiConnection> {
             // First u32 is the interface state (connected = 1).
             let state = *(data_ptr as *const u32);
             if state == 1 {
-                // The WLAN_ASSOCIATION_ATTRIBUTES block starts at offset 8
-                // (after state + u32 mode). Its layout (windows-sys 0.59):
-                //   DOT11_SSID dot11Ssid    (4 + 32 = 36 bytes)
-                //   DOT11_BSS_TYPE dot11BssType (4 bytes)
-                //   u32 dot11PhyType         (4 bytes)
-                //   u32 uDot11PhyIndex       (4 bytes)
-                //   wlanSignalQuality wlanSignalQuality (4 bytes)
-                //   u32 ulRxRate             (4 bytes)
-                //   u32 ulTxRate             (4 bytes)
-                let assoc = (data_ptr as *const u8).add(8);
-                let ssid = *(assoc as *const DOT11_SSID);
-                let signal = *(assoc.add(36 + 4 + 4 + 4) as *const u32);
-                let security_offset = 8 + 36 + 4 + 4 + 4 + 4 + 4 + 4;
-                // The bSecurityEnabled sits in WLAN_SECURITY_ATTRIBUTES which
-                // follows after the association block. We just need its first
-                // u32 if the buffer is large enough.
-                let secured = if data_size as usize >= security_offset + 4 {
-                    *(data_ptr as *const u8).add(security_offset) as u32 != 0
+                // The returned blob is a `WLAN_CONNECTION_ATTRIBUTES`. The
+                // SSID does NOT sit right after the 8-byte header — between
+                // the header and the association block is the profile name
+                // (`strProfileName: [u16; 256]` = 512 bytes), so the SSID
+                // starts at offset 520.
+                //
+                //   0   isState (u32)
+                //   4   wlanConnectionMode (u32)
+                //   8   strProfileName ([u16; 256] = 512 bytes)
+                //   520 wlanAssociationAttributes:
+                //     520   dot11Ssid (36 bytes)
+                //     556   dot11BssType (4)
+                //     560   dot11Bssid (6)
+                //     566   dot11PhyType (4)
+                //     570   uDot11PhyIndex (4)
+                //     574   wlanSignalQuality (4)
+                //     578   ulRxRate (4)
+                //     582   ulTxRate (4)
+                //   590 wlanSecurityAttributes:
+                //     590   bSecurityEnabled (BOOL)
+                const ASSOC_OFFSET: usize = 520;
+                const SSID_OFFSET: usize = ASSOC_OFFSET;
+                const SIGNAL_OFFSET: usize = ASSOC_OFFSET + 36 + 4 + 6 + 4 + 4;
+                const SECURITY_OFFSET: usize = ASSOC_OFFSET + 36 + 4 + 6 + 4 + 4 + 4 + 4 + 4;
+                let required = SECURITY_OFFSET + 4;
+                if data_size as usize >= required {
+                    let ssid = *(data_ptr.add(SSID_OFFSET) as *const DOT11_SSID);
+                    let signal =
+                        (*(data_ptr.add(SIGNAL_OFFSET) as *const u32)).min(100);
+                    let secured =
+                        *(data_ptr.add(SECURITY_OFFSET) as *const u32) != 0;
+                    Some(WifiConnection {
+                        ssid: ssid_to_string(&ssid),
+                        signal,
+                        secured,
+                    })
                 } else {
-                    false
-                };
-                Some(WifiConnection {
-                    ssid: ssid_to_string(&ssid),
-                    signal: signal.min(100),
-                    secured,
-                })
+                    None
+                }
             } else {
                 None
             }
