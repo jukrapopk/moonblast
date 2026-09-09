@@ -114,7 +114,6 @@ export function MoonlightSettings() {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="space-y-6"
     >
       <Section title="Video">
         <Row label="Aspect ratio" description="Filters the available resolution presets">
