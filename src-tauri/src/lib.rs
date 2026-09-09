@@ -1386,6 +1386,45 @@ fn parse_moonlight_ini_hosts(ini: &str) -> Vec<PairedHost> {
     out
 }
 
+#[derive(serde::Serialize)]
+struct MoonlightProbe {
+    reachable: bool,
+    paired: bool,
+}
+
+/// Quick reachability + pairing probe for a specific host (LAN IP or a
+/// Tailscale MagicDNS hostname). Used to show saved machines as online/offline.
+#[tauri::command]
+async fn moonlight_probe(
+    host: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<MoonlightProbe, String> {
+    let exe = moonlight_exe(&state);
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        let reachable = [47984u16, 47989]
+            .iter()
+            .any(|&port| {
+                use std::net::ToSocketAddrs;
+                (host.as_str(), port)
+                    .to_socket_addrs()
+                    .ok()
+                    .and_then(|mut addrs| addrs.next())
+                    .and_then(|addr| {
+                        std::net::TcpStream::connect_timeout(
+                            &addr,
+                            std::time::Duration::from_millis(1500),
+                        )
+                        .ok()
+                    })
+                    .is_some()
+            });
+        let paired = exe.as_deref().is_some_and(|e| probe_listapps(e, &host));
+        MoonlightProbe { reachable, paired }
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
 fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
     let exe = exe.to_path_buf();
     let host = host.to_string();
@@ -1589,6 +1628,7 @@ pub fn run() {
             moonlight_quit,
             discover_hosts,
             moonlight_paired_hosts,
+            moonlight_probe,
             client_display,
             discover_apps,
             launch_app,

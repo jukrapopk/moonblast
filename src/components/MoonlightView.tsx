@@ -30,6 +30,11 @@ interface PairedHost {
   address: string;
 }
 
+interface MoonlightProbe {
+  reachable: boolean;
+  paired: boolean;
+}
+
 interface Session {
   host: Host;
   app: string;
@@ -58,6 +63,7 @@ function MachineCard({
   elapsedLabel,
   onResume,
   onDisconnect,
+  probe,
   onContextMenu,
 }: {
   host: Host;
@@ -70,6 +76,7 @@ function MachineCard({
   elapsedLabel: string;
   onResume: () => void;
   onDisconnect: () => void;
+  probe?: MoonlightProbe;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -98,6 +105,18 @@ function MachineCard({
             <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2 py-0.5 text-xs font-medium text-(--color-accent)">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
               Streaming
+            </span>
+          )}
+          {!streaming && probe && (
+            <span
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+                probe.reachable
+                  ? "bg-(--color-accent-soft) text-(--color-accent)"
+                  : "bg-(--color-muted-soft) text-(--color-muted)"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full bg-current ${probe.reachable ? "" : "opacity-40"}`} />
+              {probe.reachable ? "Online" : "Offline"}
             </span>
           )}
         </div>
@@ -332,7 +351,7 @@ function AddMachineModal({
           value={address}
           onChange={(e) => setAddress(e.currentTarget.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="e.g. 192.168.1.20"
+          placeholder="e.g. 192.168.1.20 or mybox.tailnet.ts.net"
         />
         <div className="flex justify-end gap-2 pt-2">
           <button
@@ -430,6 +449,7 @@ export function MoonlightView() {
   const [toast, setToast] = useState<string | null>(null);
   const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
   const [pairedHosts, setPairedHosts] = useState<PairedHost[]>([]);
+  const [machineProbe, setMachineProbe] = useState<Record<string, MoonlightProbe>>({});
   const [scanning, setScanning] = useState(false);
   const pairingRef = useRef<string | null>(null);
   const ctx = useContextMenu();
@@ -484,6 +504,17 @@ export function MoonlightView() {
       const paired = await invoke<PairedHost[]>("moonlight_paired_hosts").catch(
         () => [] as PairedHost[],
       );
+      // Probe every saved machine (LAN or Tailscale `*.ts.net`) so they show
+      // as online/offline without relying on mDNS.
+      const probes = await Promise.all(
+        machines.map(async (m) => {
+          const p = await invoke<MoonlightProbe>("moonlight_probe", {
+            host: m.address,
+          }).catch(() => ({ reachable: false, paired: false }));
+          return [m.address, p] as const;
+        }),
+      );
+      setMachineProbe(Object.fromEntries(probes));
       setDiscovered(list);
       setPairedHosts(paired);
     } catch {
@@ -491,7 +522,7 @@ export function MoonlightView() {
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [machines]);
 
   useEffect(() => {
     if (sub === "machines") scan();
@@ -696,6 +727,7 @@ export function MoonlightView() {
                             streaming={m.address === streamingAddress}
                             streamApp={session?.app ?? ""}
                             elapsedLabel={elapsedLabel}
+                            probe={machineProbe[m.address]}
                             onResume={resumeSession}
                             onDisconnect={disconnectSession}
                             onApps={() => setAppsHost(m)}
