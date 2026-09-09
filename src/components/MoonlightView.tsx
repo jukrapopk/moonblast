@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -22,6 +22,12 @@ interface DiscoveredHost {
   name: string;
   address: string;
   paired: boolean;
+}
+
+interface PairedHost {
+  name: string;
+  uuid: string;
+  address: string;
 }
 
 interface Session {
@@ -191,17 +197,7 @@ function DiscoveredCard({
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
               Streaming
             </span>
-          ) : (
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
-                host.paired
-                  ? "bg-(--color-accent-soft) text-(--color-accent)"
-                  : "bg-(--color-muted-soft) text-(--color-muted)"
-              }`}
-            >
-              {host.paired ? "Paired" : "Not paired"}
-            </span>
-          )}
+          ) : null}
         </div>
         <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
       </div>
@@ -433,6 +429,7 @@ export function MoonlightView() {
   const [busyAddress, setBusyAddress] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
+  const [pairedHosts, setPairedHosts] = useState<PairedHost[]>([]);
   const [scanning, setScanning] = useState(false);
   const pairingRef = useRef<string | null>(null);
   const ctx = useContextMenu();
@@ -452,18 +449,43 @@ export function MoonlightView() {
 
   // Sort so the currently-streaming host floats to the top of each list.
   const streamingAddress = session ? session.host.address : null;
-  const sortedDiscovered = [...discovered].sort(
-    (a, b) => Number(b.address === streamingAddress) - Number(a.address === streamingAddress)
+  const sortStreamingFirst = (a: { address: string }, b: { address: string }) =>
+    Number(b.address === streamingAddress) - Number(a.address === streamingAddress);
+
+  // "Paired" = persisted moonlight-qt pairings, merged with paired hosts found
+  // by discovery (deduped by address).
+  const pairedGroup = useMemo(() => {
+    const byAddr = new Map<string, DiscoveredHost>();
+    for (const p of pairedHosts) {
+      byAddr.set(p.address, { hostname: p.name, name: p.name, address: p.address, paired: true });
+    }
+    for (const d of discovered) {
+      if (d.paired) byAddr.set(d.address, d);
+    }
+    return [...byAddr.values()].sort(sortStreamingFirst);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairedHosts, discovered, streamingAddress]);
+
+  // "Discovery" = found on the network but not yet paired.
+  const discoveryGroup = useMemo(
+    () => discovered.filter((d) => !d.paired).sort(sortStreamingFirst),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [discovered, streamingAddress],
   );
-  const sortedMachines = [...machines].sort(
-    (a, b) => Number(b.address === streamingAddress) - Number(a.address === streamingAddress)
-  );
+
+  const sortedMachines = [...machines].sort(sortStreamingFirst);
 
   const scan = useCallback(async () => {
     setScanning(true);
     try {
-      const list = await invoke<DiscoveredHost[]>("discover_hosts");
+      const list = await invoke<DiscoveredHost[]>("discover_hosts").catch(
+        () => [] as DiscoveredHost[],
+      );
+      const paired = await invoke<PairedHost[]>("moonlight_paired_hosts").catch(
+        () => [] as PairedHost[],
+      );
       setDiscovered(list);
+      setPairedHosts(paired);
     } catch {
       // ignore discovery errors
     } finally {
@@ -566,6 +588,36 @@ export function MoonlightView() {
     }
   }
 
+  const renderDiscoveredCard = (d: DiscoveredHost) => {
+    const host = { name: d.name, address: d.address };
+    return (
+      <DiscoveredCard
+        key={d.address + d.name}
+        host={d}
+        busy={busyAddress === d.address || sessionBusy}
+        streaming={d.address === streamingAddress}
+        streamApp={session?.app ?? ""}
+        elapsedLabel={elapsedLabel}
+        onResume={resumeSession}
+        onDisconnect={disconnectSession}
+        onApps={() => setAppsHost(host)}
+        onPair={() => pair(host)}
+        onDesktop={() => streamDesktop(host)}
+        onContextMenu={(e) =>
+          ctx.open(e, [
+            ...(d.paired
+              ? [
+                  { label: "Stream Desktop", onClick: () => streamDesktop(host) },
+                  { label: "Apps", onClick: () => setAppsHost(host) },
+                ]
+              : [{ label: "Pair", onClick: () => pair(host) }]),
+            { label: "Remove", danger: true, onClick: () => removeHost(d.address) },
+          ])
+        }
+      />
+    );
+  };
+
   return (
     <>
       <PageShell
@@ -612,7 +664,7 @@ export function MoonlightView() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
             >
-              {discovered.length === 0 && machines.length === 0 ? (
+              {pairedGroup.length === 0 && discoveryGroup.length === 0 && machines.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-(--color-border) p-10 text-center text-sm text-(--color-muted)">
                   {scanning
                     ? "Scanning your network…"
@@ -620,37 +672,16 @@ export function MoonlightView() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {discovered.length > 0 && (
+                  {pairedGroup.length > 0 && (
                     <div>
-                      <SectionHeading>Found on your network</SectionHeading>
-                      <div className="space-y-3">
-                        {sortedDiscovered.map((d) => (
-                          <DiscoveredCard
-                            key={d.address + d.name}
-                            host={d}
-                            busy={busyAddress === d.address || sessionBusy}
-                            streaming={d.address === streamingAddress}
-                            streamApp={session?.app ?? ""}
-                            elapsedLabel={elapsedLabel}
-                            onResume={resumeSession}
-                            onDisconnect={disconnectSession}
-                            onApps={() => setAppsHost({ name: d.name, address: d.address })}
-                            onPair={() => pair({ name: d.name, address: d.address })}
-                            onDesktop={() => streamDesktop({ name: d.name, address: d.address })}
-                            onContextMenu={(e) =>
-                              ctx.open(e, [
-                                ...(d.paired
-                                  ? [
-                                      { label: "Stream Desktop", onClick: () => streamDesktop({ name: d.name, address: d.address }) },
-                                      { label: "Apps", onClick: () => setAppsHost({ name: d.name, address: d.address }) },
-                                    ]
-                                  : [{ label: "Pair", onClick: () => pair({ name: d.name, address: d.address }) }]),
-                                { label: "Remove", danger: true, onClick: () => removeHost(d.address) },
-                              ])
-                            }
-                          />
-                        ))}
-                      </div>
+                      <SectionHeading>Paired</SectionHeading>
+                      <div className="space-y-3">{pairedGroup.map(renderDiscoveredCard)}</div>
+                    </div>
+                  )}
+                  {discoveryGroup.length > 0 && (
+                    <div>
+                      <SectionHeading>Discovery</SectionHeading>
+                      <div className="space-y-3">{discoveryGroup.map(renderDiscoveredCard)}</div>
                     </div>
                   )}
                   {machines.length > 0 && (

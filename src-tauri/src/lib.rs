@@ -1234,6 +1234,158 @@ struct DiscoveredHost {
     paired: bool,
 }
 
+#[derive(serde::Serialize)]
+struct PairedHost {
+    name: String,
+    uuid: String,
+    address: String,
+}
+
+/// Read hosts already paired with the Moonlight client.
+///
+/// moonlight-qt persists known hosts in its QSettings store — the Windows
+/// registry (`HKCU\Software\Moonlight Game Streaming Project\Moonlight\hosts\*`)
+/// for normal installs, or a `Moonlight.conf` INI next to the exe in portable
+/// mode. There is no CLI command that lists pairings, so we read the store
+/// directly. A host is paired if it holds a pinned server certificate (`srvcert`).
+#[tauri::command]
+async fn moonlight_paired_hosts(
+    state: State<'_, settings::SettingsState>,
+) -> Result<Vec<PairedHost>, String> {
+    let exe = moonlight_exe(&state);
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        // Portable installs keep the QSettings store as an INI next to the exe.
+        let portable_ini = exe.as_deref().and_then(|p| {
+            p.parent().and_then(|dir| {
+                if dir.join("portable.dat").exists() {
+                    std::fs::read_to_string(dir.join("Moonlight.conf")).ok()
+                } else {
+                    None
+                }
+            })
+        });
+
+        let mut out = Vec::new();
+        if let Some(ini) = portable_ini {
+            out.extend(parse_moonlight_ini_hosts(&ini));
+        } else {
+            out.extend(read_registry_paired_hosts());
+        }
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
+fn reg_host_get(h: &winreg::RegKey, key: &str) -> Option<String> {
+    h.get_value::<String, _>(key).ok().filter(|s| !s.is_empty())
+}
+
+fn reg_host_from(entry: &winreg::RegKey) -> Option<PairedHost> {
+    let name = reg_host_get(entry, "hostname")?;
+    // The pinned server cert is what marks a host as paired.
+    reg_host_get(entry, "srvcert")?;
+    let address = reg_host_get(entry, "localaddress")
+        .or_else(|| reg_host_get(entry, "manualaddress"))?;
+    Some(PairedHost {
+        name,
+        uuid: reg_host_get(entry, "uuid").unwrap_or_default(),
+        address,
+    })
+}
+
+fn read_registry_paired_hosts() -> Vec<PairedHost> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let mut out = Vec::new();
+    let root = match RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Moonlight Game Streaming Project\Moonlight")
+    {
+        Ok(r) => r,
+        Err(_) => return out,
+    };
+    let hosts = match root.open_subkey("hosts") {
+        Ok(h) => h,
+        Err(_) => return out,
+    };
+    for name in hosts.enum_keys().flatten() {
+        if name.chars().all(|c| c.is_ascii_digit()) {
+            if let Ok(entry) = hosts.open_subkey(&name) {
+                if let Some(host) = reg_host_from(&entry) {
+                    out.push(host);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Portable `Moonlight.conf` (QSettings INI): `[hosts\0]`… sections.
+fn push_ini_paired(
+    out: &mut Vec<PairedHost>,
+    in_host: bool,
+    name: &str,
+    uuid: &str,
+    cert: &str,
+    local: &str,
+    manual: &str,
+) {
+    if !in_host || cert.is_empty() || name.is_empty() {
+        return;
+    }
+    let address = if !local.is_empty() {
+        local.to_string()
+    } else if !manual.is_empty() {
+        manual.to_string()
+    } else {
+        return;
+    };
+    out.push(PairedHost {
+        name: name.to_string(),
+        uuid: uuid.to_string(),
+        address,
+    });
+}
+
+fn parse_moonlight_ini_hosts(ini: &str) -> Vec<PairedHost> {
+    let mut out = Vec::new();
+    let mut in_host = false;
+    let mut name = String::new();
+    let mut uuid = String::new();
+    let mut cert = String::new();
+    let mut local = String::new();
+    let mut manual = String::new();
+
+    for line in ini.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            push_ini_paired(&mut out, in_host, &name, &uuid, &cert, &local, &manual);
+            let section = &line[1..line.len() - 1];
+            in_host = section.starts_with(r"hosts\") && !section.starts_with(r"hostsbackup\");
+            name.clear();
+            uuid.clear();
+            cert.clear();
+            local.clear();
+            manual.clear();
+        } else if in_host {
+            if let Some((k, v)) = line.split_once('=') {
+                let v = v.trim().to_string();
+                match k.trim() {
+                    "hostname" => name = v,
+                    "uuid" => uuid = v,
+                    "srvcert" => cert = v,
+                    "localaddress" => local = v,
+                    "manualaddress" => manual = v,
+                    _ => {}
+                }
+            }
+        }
+    }
+    push_ini_paired(&mut out, in_host, &name, &uuid, &cert, &local, &manual);
+    out
+}
+
 fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
     let exe = exe.to_path_buf();
     let host = host.to_string();
@@ -1436,6 +1588,7 @@ pub fn run() {
             moonlight_stream,
             moonlight_quit,
             discover_hosts,
+            moonlight_paired_hosts,
             client_display,
             discover_apps,
             launch_app,
