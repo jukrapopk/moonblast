@@ -75,7 +75,7 @@ function batteryIcon(percent: number, charging: boolean) {
 }
 
 const chipBase =
-  "flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-(--color-muted) tabular-nums";
+  "flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-(--color-muted) tabular-nums";
 
 function wifiChipIcon(signal: number) {
   const weight = "bold" as const;
@@ -92,7 +92,7 @@ function Status({ onWifiClick, ssid }: { onWifiClick: () => void; ssid: string |
   const battery = useBattery();
   const wifi = useWifi();
   return (
-    <div className="flex items-center gap-1.5 pr-1">
+    <div className="flex items-center">
       <span className={chipBase} title={time.toLocaleString()}>
         {formatClock(time)}
       </span>
@@ -163,7 +163,7 @@ export function TopBar({
 
       <div className="ml-auto" />
 
-      <div className="relative flex items-center gap-2">
+      <div className="relative flex items-center gap-1">
         <Status onWifiClick={() => setWifiOpen(true)} ssid={wifi?.ssid ?? null} />
         {rightItems.map((item) => (
           <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
