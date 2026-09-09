@@ -116,12 +116,12 @@ export default function App() {
     }
   }
 
-  // F11 toggles windowed / fullscreen.
+  // F11 toggles windowed / fullscreen (disabled while immersed).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "F11") {
         e.preventDefault();
-        toggleFullscreen();
+        if (!immersive) toggleFullscreen();
       } else if (e.key === "F10") {
         e.preventDefault();
         if (immersive) exitImmersive();
@@ -215,16 +215,6 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
-      {immersive && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1 }}
-          className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 text-xs text-white/40"
-        >
-          Press Esc to exit Immersive Mode · F10 to toggle
-        </motion.div>
-      )}
       {/* Single global context menu — all views share it. */}
       <ContextMenuHost />
     </div>
