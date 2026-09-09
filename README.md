@@ -59,11 +59,13 @@ src-tauri/                # Rust backend
 
 ## Building for ARM64
 
-Cross-compiling to ARM64 uses the MSVC ARM64 toolchain (installed via VS 2022 C++ build tools):
-`ureq` uses Windows native TLS (`native-tls`/schannel) instead of rustls so no C cross-toolchain (clang) is required.
+Cross-compiling to ARM64 uses the MSVC ARM64 toolchain (installed via VS 2022 C++ build tools).
+`ureq` uses rustls/`ring`; `ring` needs **clang** for the ARM64 target, so install LLVM once (`winget install LLVM.LLVM`) before the first ARM64 build.
 
 ```bash
-# from an x64 developer shell, load the ARM64 cross environment first
+# one-time: install clang for ring's ARM64 assembly
+winget install LLVM.LLVM
+# load the ARM64 cross environment from an x64 developer shell
 "D:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
 npm run tauri build -- --target aarch64-pc-windows-msvc
 ```

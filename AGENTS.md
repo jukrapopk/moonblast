@@ -68,6 +68,6 @@ Streaming/pairing is done by **driving the Moonlight QT client via its CLI**, NO
 ## Build / run
 - `npm run tauri dev` (hot reload; Rust auto-recompiles on `src-tauri` change).
 - `npm run tauri build`.
-- ARM64 cross-build: load MSVC cross env first (`vcvarsall.bat x64_arm64`), then `npm run tauri build -- --target aarch64-pc-windows-msvc`. `ureq` uses Windows native TLS (`native-tls`, no `ring`) so no clang is needed for the ARM64 target.
+- ARM64 cross-build: load MSVC cross env first (`vcvarsall.bat x64_arm64`), then `npm run tauri build -- --target aarch64-pc-windows-msvc`. `ureq` uses rustls/`ring`; `ring` requires **clang** for ARM64 (`winget install LLVM.LLVM` once) — no OpenSSL/Perl needed.
 - Rust compiles via MSVC; needs VS 2022 C++ tools + WebView2.
 - The codebase is purely **CLI-based** for Moonlight; keep it that way (no in-process protocol implementation).
