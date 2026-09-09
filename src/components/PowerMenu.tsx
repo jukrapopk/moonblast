@@ -6,6 +6,7 @@ import {
   Power,
   Moon,
   ArrowClockwise,
+  GameController,
 } from "@phosphor-icons/react";
 import { Modal } from "./ui/Modal";
 
@@ -14,6 +15,8 @@ interface PowerMenuProps {
   onClose: () => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
+  immersive: boolean;
+  onToggleImmersive: () => void;
 }
 
 function MenuItem({
@@ -50,7 +53,14 @@ function Divider() {
   return <div className="mx-4 my-1.5 h-px bg-(--color-border)" />;
 }
 
-export function PowerMenu({ open, onClose, fullscreen, onToggleFullscreen }: PowerMenuProps) {
+export function PowerMenu({
+  open,
+  onClose,
+  fullscreen,
+  onToggleFullscreen,
+  immersive,
+  onToggleImmersive,
+}: PowerMenuProps) {
   async function run(command: string, payload?: Record<string, unknown>) {
     try {
       await invoke(command, payload);
@@ -64,10 +74,17 @@ export function PowerMenu({ open, onClose, fullscreen, onToggleFullscreen }: Pow
     <Modal open={open} onClose={onClose} title="Power">
       <div className="space-y-1">
         <MenuItem
-          icon={fullscreen ? <ArrowsIn size={18} weight="bold" /> : <ArrowsOut size={18} weight="bold" />}
-          label={fullscreen ? "Windowed" : "Fullscreen"}
-          onClick={onToggleFullscreen}
+          icon={<GameController size={18} weight="bold" />}
+          label={immersive ? "Exit Immersive Mode" : "Immersive Mode"}
+          onClick={onToggleImmersive}
         />
+        {!immersive && (
+          <MenuItem
+            icon={fullscreen ? <ArrowsIn size={18} weight="bold" /> : <ArrowsOut size={18} weight="bold" />}
+            label={fullscreen ? "Windowed" : "Fullscreen"}
+            onClick={onToggleFullscreen}
+          />
+        )}
         <MenuItem
           icon={<X size={18} weight="bold" />}
           label="Close Moonblast"

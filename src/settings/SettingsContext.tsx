@@ -50,7 +50,7 @@ export interface Settings {
     reverse_scroll_direction: boolean;
     capture_system_keys: string;
   };
-  fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean };
+  fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean; auto_immersive: boolean };
   machines: { name: string; address: string }[];
   app_shortcuts: { name: string; path: string; source: string; kind: string; display_name: string | null; custom_icon: string | null; use_desktop_icon: boolean; steamgrid_icon: string | null }[];
 }
@@ -95,7 +95,7 @@ export const DEFAULT_SETTINGS: Settings = {
     reverse_scroll_direction: false,
     capture_system_keys: "never",
   },
-  fullscreen: { suppress_explorer: false, auto_fullscreen: false },
+  fullscreen: { suppress_explorer: false, auto_fullscreen: false, auto_immersive: false },
   machines: [],
   app_shortcuts: [],
 };

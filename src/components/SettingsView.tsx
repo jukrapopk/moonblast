@@ -148,6 +148,10 @@ export function SettingsView({
   onToggleApps,
   steamgridKey,
   onSetSteamgridKey,
+  startWithWindows,
+  onToggleStartWithWindows,
+  autoImmersive,
+  onToggleAutoImmersive,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -157,6 +161,10 @@ export function SettingsView({
   onToggleApps: (v: boolean) => void;
   steamgridKey: string | null;
   onSetSteamgridKey: (k: string) => void;
+  startWithWindows: boolean;
+  onToggleStartWithWindows: (v: boolean) => void;
+  autoImmersive: boolean;
+  onToggleAutoImmersive: (v: boolean) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
 
@@ -174,17 +182,31 @@ export function SettingsView({
     <PageShell title="Settings" subtitle="App-level settings.">
       <Section title="General">
         <Row label="Start with Windows" description="Launch Moonblast when you sign in to Windows.">
-          <Toggle />
+          <Toggle checked={startWithWindows} onChange={onToggleStartWithWindows} />
         </Row>
-        <Row
-          label="Suppress Explorer & background processes"
-          description="Similar to Fullscreen Xbox Mode. Planned for v2."
-        >
-          <Toggle disabled />
-        </Row>
-        <Row label="Hide taskbar & auto-fullscreen" description="Enter a clean fullscreen shell on launch.">
-          <Toggle disabled />
-        </Row>
+        <div className="flex items-start justify-between gap-4 py-4">
+          <div className="flex-1">
+            <div className="text-base font-medium text-(--color-text)">Auto Immersive Mode</div>
+            <div className="mt-0.5 text-sm text-(--color-muted)">
+              {startWithWindows
+                ? "Boot straight into Immersive Mode next time Moonblast starts. While active it:"
+                : 'Requires "Start with Windows" to be enabled.'}
+            </div>
+            {startWithWindows && (
+              <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-(--color-muted)">
+                <li>Starts fullscreen with a clean background</li>
+                <li>Hides the app bar for a minimal UI</li>
+                <li>Minimizes other open windows</li>
+                <li>Suppresses the Windows desktop & taskbar (restored on exit)</li>
+              </ul>
+            )}
+          </div>
+          <Toggle
+            checked={autoImmersive}
+            onChange={onToggleAutoImmersive}
+            disabled={!startWithWindows}
+          />
+        </div>
       </Section>
 
       <Section title="Integrations">

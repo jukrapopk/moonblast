@@ -18,6 +18,7 @@ export default function App() {
   const setView = (v: View) =>
     update((s) => ({ ...s, general: { ...s.general, last_view: v } }));
   const [fullscreen, setFullscreen] = useState(false);
+  const [immersive, setImmersive] = useState(false);
 
   const moonlightEnabled = settings.integrations.moonlight_enabled;
   const moonlightDir = settings.integrations.moonlight_folder;
@@ -89,6 +90,17 @@ export default function App() {
       integrations: { ...s.integrations, moonlight_folder: dir },
     }));
   }
+  function setStartWithWindows(v: boolean) {
+    update((s) => ({ ...s, general: { ...s.general, start_with_windows: v } }));
+    void invoke("set_start_with_windows", { enabled: v }).catch(() => {});
+    // Auto Immersive requires Start with Windows, so reset it when that's off.
+    if (!v && settings.fullscreen.auto_immersive) {
+      update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: false } }));
+    }
+  }
+  function setAutoImmersive(v: boolean) {
+    update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: v } }));
+  }
 
   // Sync the initial fullscreen state.
   useEffect(() => {
@@ -110,23 +122,71 @@ export default function App() {
       if (e.key === "F11") {
         e.preventDefault();
         toggleFullscreen();
+      } else if (e.key === "F10") {
+        e.preventDefault();
+        if (immersive) exitImmersive();
+        else enterImmersive();
+      } else if (e.key === "Escape" && immersive) {
+        e.preventDefault();
+        exitImmersive();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [immersive]);
+
+  async function enterImmersive() {
+    try {
+      await invoke("enter_immersive");
+      setImmersive(true);
+      setFullscreen(true);
+    } catch {
+      // ignore
+    }
+  }
+  async function exitImmersive() {
+    try {
+      await invoke("exit_immersive");
+    } catch {
+      // ignore
+    }
+    // Bring the window back to windowed (immersive forced fullscreen).
+    if (fullscreen) {
+      try {
+        await invoke("toggle_fullscreen");
+      } catch {
+        // ignore
+      }
+    }
+    setImmersive(false);
+    setFullscreen(false);
+  }
+
+  // Auto-enter Immersive Mode at launch when enabled (requires Start with Windows).
+  useEffect(() => {
+    if (settings.fullscreen.auto_immersive && settings.general.start_with_windows) {
+      void enterImmersive();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <div className="flex h-full w-full flex-col">
-      {!fullscreen && <TitleBar fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen} />}
-      <TopBar
-        view={view}
-        onNavigate={setView}
-        fullscreen={fullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        showMoonlight={moonlightEnabled && moonlightDir !== null}
-        showApps={appsEnabled}
-      />
+    <div className="relative flex h-full w-full flex-col">
+      {!immersive && (
+        <>
+          {!fullscreen && <TitleBar fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen} />}
+          <TopBar
+            view={view}
+            onNavigate={setView}
+            fullscreen={fullscreen}
+            onToggleFullscreen={toggleFullscreen}
+            immersive={immersive}
+            onToggleImmersive={enterImmersive}
+            showMoonlight={moonlightEnabled && moonlightDir !== null}
+            showApps={appsEnabled}
+          />
+        </>
+      )}
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
           {view === "apps" && (
@@ -150,11 +210,25 @@ export default function App() {
                 onToggleApps={setAppsEnabled}
                 steamgridKey={settings.integrations.steamgrid_key}
                 onSetSteamgridKey={setSteamgridKey}
+                startWithWindows={settings.general.start_with_windows}
+                onToggleStartWithWindows={setStartWithWindows}
+                autoImmersive={settings.fullscreen.auto_immersive}
+                onToggleAutoImmersive={setAutoImmersive}
               />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
+      {immersive && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 text-xs text-white/40"
+        >
+          Press Esc to exit Immersive Mode · F10 to toggle
+        </motion.div>
+      )}
       {/* Single global context menu — all views share it. */}
       <ContextMenuHost />
     </div>

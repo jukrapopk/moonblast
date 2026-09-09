@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
@@ -1248,7 +1249,95 @@ fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
 /// Exit Moonblast entirely.
 #[tauri::command]
 fn close_app(app: AppHandle) {
+    // Always bring the Windows shell back before leaving.
+    suppress_shell(false);
     app.exit(0);
+}
+
+/// Whether Immersive Mode suppressed the Windows shell (Explorer) so we can
+/// restart it on exit.
+static EXPLORER_KILLED: AtomicBool = AtomicBool::new(false);
+
+/// Kill or restart the Windows shell (Explorer) to hide/show the taskbar +
+/// desktop. `suppress_shell(true)` hides; `suppress_shell(false)` restores.
+fn suppress_shell(hidden: bool) {
+    if hidden {
+        let _ = Command::new("taskkill.exe").args(["/f", "/im", "explorer.exe"]).spawn();
+        EXPLORER_KILLED.store(true, Ordering::SeqCst);
+    } else if EXPLORER_KILLED.swap(false, Ordering::SeqCst) {
+        let _ = Command::new("explorer.exe").spawn();
+    }
+}
+
+/// Minimize every visible top-level window except our own, so nothing shows
+/// behind the immersive launcher (approximates Xbox mode's one-app-at-a-time).
+fn minimize_other_windows() {
+    use windows_sys::Win32::Foundation::{BOOL, HWND};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
+    };
+    unsafe extern "system" fn cb(hwnd: HWND, _lparam: isize) -> BOOL {
+        if IsWindowVisible(hwnd) == 0 {
+            return 1;
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == GetCurrentProcessId() {
+            return 1; // leave our own windows alone
+        }
+        ShowWindow(hwnd, SW_MINIMIZE);
+        1
+    }
+    unsafe {
+        EnumWindows(Some(cb), 0);
+    }
+}
+
+/// Register/remove Moonblast in Windows startup (HKCU Run key).
+#[tauri::command]
+fn set_start_with_windows(enabled: bool) -> Result<(), String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+    use winreg::RegKey;
+    let key = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE)
+        .map_err(|e| e.to_string())?;
+    if enabled {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        key.set_value("Moonblast", &exe.to_string_lossy().to_string())
+            .map_err(|e| e.to_string())?;
+    } else {
+        let _ = key.delete_value("Moonblast");
+    }
+    Ok(())
+}
+
+/// Enter Immersive Mode: go fullscreen, suppress the desktop shell, and
+/// minimize background windows so only the launcher shows.
+#[tauri::command]
+async fn enter_immersive(window: tauri::Window) -> Result<(), String> {
+    if !window.is_fullscreen().map_err(|e| e.to_string())? {
+        if window.is_maximized().map_err(|e| e.to_string())? {
+            window.unmaximize().map_err(|e| e.to_string())?;
+        }
+        window.set_fullscreen(true).map_err(|e| e.to_string())?;
+    }
+    tauri::async_runtime::spawn_blocking(|| {
+        minimize_other_windows();
+        suppress_shell(true);
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Exit Immersive Mode: restore the Windows shell.
+#[tauri::command]
+async fn exit_immersive() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| suppress_shell(false))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
@@ -1267,6 +1356,12 @@ fn system_power(action: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|_window, event| {
+            // If the app is closed while in Immersive Mode, bring the shell back.
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                suppress_shell(false);
+            }
+        })
         .setup(|app| {
             app.manage(settings::SettingsState::load(app.handle()));
             app.manage(StreamState::default());
@@ -1290,6 +1385,9 @@ pub fn run() {
             is_maximized,
             close_app,
             system_power,
+            set_start_with_windows,
+            enter_immersive,
+            exit_immersive,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,

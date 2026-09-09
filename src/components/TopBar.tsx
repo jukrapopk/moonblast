@@ -29,6 +29,8 @@ export function TopBar({
   onNavigate,
   fullscreen,
   onToggleFullscreen,
+  immersive,
+  onToggleImmersive,
   showMoonlight,
   showApps,
 }: {
@@ -36,6 +38,8 @@ export function TopBar({
   onNavigate: (v: View) => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
+  immersive: boolean;
+  onToggleImmersive: () => void;
   showMoonlight: boolean;
   showApps: boolean;
 }) {
@@ -80,6 +84,8 @@ export function TopBar({
           onClose={() => setPowerOpen(false)}
           fullscreen={fullscreen}
           onToggleFullscreen={onToggleFullscreen}
+          immersive={immersive}
+          onToggleImmersive={onToggleImmersive}
         />
       </div>
     </header>

@@ -147,6 +147,8 @@ impl Default for MoonlightStreaming {
 pub struct Fullscreen {
     pub suppress_explorer: bool,
     pub auto_fullscreen: bool,
+    #[serde(default)]
+    pub auto_immersive: bool,
 }
 
 impl Default for Settings {
@@ -167,6 +169,7 @@ impl Default for Settings {
             fullscreen: Fullscreen {
                 suppress_explorer: false,
                 auto_fullscreen: false,
+                auto_immersive: false,
             },
             machines: Vec::new(),
             app_shortcuts: Vec::new(),
