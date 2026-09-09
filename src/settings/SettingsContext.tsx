@@ -102,21 +102,28 @@ export const DEFAULT_SETTINGS: Settings = {
 
 interface SettingsContextValue {
   settings: Settings;
+  /** True once persisted settings have been loaded from disk. */
+  ready: boolean;
   /** Enqueue a change: mutator receives current, returns next; persists + syncs. */
   update: (mutate: (current: Settings) => Settings) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
   settings: DEFAULT_SETTINGS,
+  ready: false,
   update: () => {},
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     invoke<Settings>("get_settings")
-      .then(setSettings)
+      .then((s) => {
+        setSettings(s);
+        setReady(true);
+      })
       .catch(() => {});
     const unlisten = listen("settings-changed", (event) => {
       setSettings(event.payload as Settings);
@@ -135,7 +142,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const value = useMemo(() => ({ settings, update }), [settings, update]);
+  const value = useMemo(() => ({ settings, ready, update }), [settings, ready, update]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 

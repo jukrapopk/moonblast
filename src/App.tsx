@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { TopBar, type View } from "./components/TopBar";
@@ -11,7 +11,7 @@ import { useGamepad } from "./hooks/useGamepad";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 
 export default function App() {
-  const { settings, update } = useSettings();
+  const { settings, ready, update } = useSettings();
 
   // Active view is persisted so the last open tab is restored on next launch.
   const view = settings.general.last_view as View;
@@ -162,13 +162,18 @@ export default function App() {
     setFullscreen(false);
   }
 
-  // Auto-enter Immersive Mode at launch when enabled (requires Start with Windows).
+  // Auto-enter Immersive Mode when enabled. Settings hydrate asynchronously, so
+  // wait for `ready` and only ever fire once per session (a later toggle change
+  // mid-session must not yank the user into immersive).
+  const autoEntered = useRef(false);
   useEffect(() => {
+    if (!ready || autoEntered.current) return;
     if (settings.fullscreen.auto_immersive && settings.general.start_with_windows) {
+      autoEntered.current = true;
       void enterImmersive();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready, settings.fullscreen.auto_immersive, settings.general.start_with_windows]);
 
   return (
     <div className="relative flex h-full w-full flex-col">

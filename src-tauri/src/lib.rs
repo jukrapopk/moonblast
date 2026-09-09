@@ -1391,6 +1391,20 @@ pub fn run() {
                     let _ = window.set_icon(icon.clone());
                 }
             }
+            // Start suppressing the desktop/background as early as possible at
+            // boot (before the UI even hydrates); fullscreen follows ~a second
+            // later when the hydrated frontend calls `enter_immersive`.
+            let auto = {
+                let state = app.state::<settings::SettingsState>();
+                let guard = state.0.lock().unwrap();
+                guard.fullscreen.auto_immersive && guard.general.start_with_windows
+            };
+            if auto {
+                tauri::async_runtime::spawn_blocking(|| {
+                    minimize_other_windows();
+                    suppress_shell(true);
+                });
+            }
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
