@@ -120,7 +120,7 @@ function AppTile({
     >
       <button
         onClick={onLaunch}
-        className="flex w-full flex-col gap-1.5 rounded-2xl p-1.5 text-center transition-colors hover:bg-(--color-surface)"
+        className="flex w-full flex-col gap-2 rounded-2xl px-1.5 pt-1.5 pb-4 text-center transition-colors hover:bg-(--color-surface)"
       >
         <div
           className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl"
