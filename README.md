@@ -13,49 +13,76 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 
 ## Features
 
-- **Custom frameless title bar** — drag region + minimize / maximize / close, hiding in fullscreen
-- **Fullscreen + Immersive Mode** — F11 toggles window fullscreen; **Immersive Mode** (Power menu or F10) adds a clean fullscreen surface that suppresses the Windows desktop/taskbar and minimizes background windows (restored on exit)
-- **Auto Immersive Mode** — Settings toggle (requires Start with Windows): boot straight into Immersive Mode on launch
-- **Power menu** — Immersive Mode, Fullscreen, Close, Sleep, Reboot, Shutdown (real Windows actions)
+- **Custom frameless title bar** — drag region + minimize / maximize / close, hiding in fullscreen.
+- **Fullscreen + Immersive Mode** — F11 toggles window fullscreen; **Immersive Mode** (Power menu or F10) adds a clean fullscreen surface that suppresses the Windows desktop/taskbar and minimizes background windows (restored on exit).
+- **Auto Immersive Mode** — Settings toggle (requires Start with Windows): boot straight into Immersive Mode on launch. Rust suppresses the shell as early as `setup`, then the frontend flips to fullscreen once settings have hydrated.
+- **Power menu** — Immersive Mode, Fullscreen ⇄ Windowed, Close, Sleep, Reboot, Shutdown (real Windows actions via `SetSuspendState` / `shutdown.exe`).
 - **Apps tab** — searchable, curated grid of Windows apps:
-  - discovered from the **Start Menu**, **Microsoft Store**, and **Steam** (with source labels); browse any `.exe`/`.lnk`
-  - extracted Windows icons, **SteamGridDB** game icons, and custom images — all cached to disk (`.icons`) for instant, offline reloads
-  - rename apps to a custom display name; reusable search / source-filter / A↔Z sort list
-- **Context menus** everywhere (right-click replaces the native WebView2 menu) with keyboard + gamepad navigation
+  - discovered from the **Start Menu**, **Microsoft Store** (AUMID via `Get-StartApps`), and **Steam** (registry + `appmanifest_*.acf` / `libraryfolders.vdf`, with source labels); browse any `.exe`/`.lnk`.
+  - **icon resolution**: custom file → pinned SteamGridDB icon → SteamGridDB by app name → extracted Windows desktop icon → gradient auto. All non-custom icons are cached on disk in `.icons` for instant, offline reloads.
+  - **Copy From Clipboard** action: pull an image from the clipboard (raw image, `data:` URI, https URL, or raw base64), encode to PNG, cache into `.icons`. Action is grayed out when the clipboard has nothing usable.
+  - rename apps to a custom display name; reusable search / source-filter / A↔Z / Z↔A sort list.
+- **Right-click context menus** everywhere (replacing the native WebView2 menu): per-app, per-host, title bar, text inputs (Undo/Cut/Copy/Paste/Select-All), and a generic page-level Back/Refresh fallback.
 - **Moonlight tab** — machines + streaming:
-  - mDNS **discovery** of Sunshine/GameStream hosts (paired/unpaired)
-  - **Pair / Desktop / Apps** actions per host
-  - Drives the **Moonlight QT client** via its CLI (`list`, `pair`, `stream`, `quit`)
-- **Persistent settings** — all settings survive restarts
-- **Integrations** — auto-detect Tailscale (CLI), select + validate Moonlight install folder
+  - mDNS **discovery** of Sunshine/GameStream hosts (paired/unpaired) — `discover_hosts` browses `_nvstream._tcp.local.` then probes each host.
+  - **Paired hosts** read directly from Moonlight QT's QSettings store (registry for normal installs, `Moonlight.conf` for portable installs).
+  - **Saved machines** — user-added hosts; probed per-scan (TCP 47984/47989 + `moonlight list`) and shown as Online / Offline. Tailscale `*.ts.net` hostnames work.
+  - **Pair / Desktop / Apps** actions per host; **Resume / Disconnect** during a stream. Duplicate stream spawns for the same host+app are blocked.
+  - Drives the **Moonlight QT client** via its CLI (`list`, `pair`, `stream`, `quit`).
+- **Gamepad support** — controller buttons/sticks are bridged to keyboard events in `useGamepad`, so the existing keyboard handlers drive everything: A = Enter, B = Esc, LB/RB = Tab/Shift+Tab (view switching), D-pad / left stick = arrows.
+- **Persistent settings** — all settings survive restarts.
+- **Integrations** — auto-detect Tailscale (CLI, polled while Settings is mounted), select + validate Moonlight install folder, SteamGridDB API key.
 
 ## Architecture
 
-- **Rust backend** (`src-tauri/src/lib.rs`) exposes Tauri commands for window controls, system power, Tailscale, Moonlight CLI (list/pair/stream/quit), host discovery, app launching, immersive mode (`enter_immersive`/`exit_immersive`), startup registration (`set_start_with_windows`), and icon extraction/caching (`app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`).
-- **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON, written atomically; emits a `settings-changed` event.
-- **All persistent data is centralized** in one folder under *Local* AppData: `%LOCALAPPDATA%\com.moonblast.app\` containing `settings.json` and a sibling `.icons\` icon cache. Settings are migrated from the old Roaming (config-dir) location on first run.
-- **Frontend** — a React `SettingsProvider` context (single source of truth, hydrates asynchronously on boot) syncs all views; shared `ui/` primitives keep the UI consistent.
+- **Rust backend** (`src-tauri/src/lib.rs`) exposes Tauri commands for:
+  - window: `toggle_fullscreen`, `is_fullscreen`, `minimize_window`, `toggle_maximize`, `is_maximized`, `close_app`
+  - system power: `system_power(sleep|reboot|shutdown)`, `enter_immersive`, `exit_immersive`
+  - startup: `set_start_with_windows` (HKCU Run key)
+  - Tailscale: `tailscale_status`, `tailscale_set`
+  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps`, `moonlight_pair` (emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`), `moonlight_quit`
+  - host discovery / pairing: `discover_hosts` (mDNS + per-host `list` probe), `moonlight_paired_hosts` (reads QSettings), `moonlight_probe` (TCP + list check, used for online/offline)
+  - apps: `discover_apps` (Start Menu + Store + Steam), `launch_app`
+  - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`
+  - clipboard icons: `clipboard_icon_hint`, `clipboard_icon_import`
+  - SteamGridDB: `check_steamgrid_key`, `steamgrid_search`, `steamgrid_icons`
+- **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON, written atomically (tmp + rename); emits a `settings-changed` event.
+- **All persistent data is centralized** in one folder under *Local* AppData: `%LOCALAPPDATA%\com.moonblast.app\` containing `settings.json` and a sibling `.icons\` icon cache. Settings are migrated from the old Roaming (`app_config_dir`) location on first run.
+- **Frontend** — a React `SettingsProvider` context (single source of truth, hydrates asynchronously on boot — gate on the `ready` flag for mount-time effects) syncs all views; shared `ui/` primitives keep the UI consistent. A single `<ContextMenuHost/>` renders the global right-click menu.
 
 ## Project structure
 
 ```
-src/                      # React frontend
+src/                          # React frontend
   components/
-    ui/                   # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList)
-    TopBar.tsx            # icon nav + power button
-    TitleBar.tsx          # custom window title bar
-    PageShell.tsx         # shared page layout
-    AppsView.tsx          # Apps tab (curated grid, Store/Steam discovery, icons, rename, context menus)
-    MoonlightView.tsx     # Moonlight tab (Machines + Settings)
-    MoonlightSettings.tsx # Moonlight streaming settings
-    SettingsView.tsx      # app-level settings
-    PowerMenu.tsx         # power menu modal
+    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList)
+    TopBar.tsx                # icon nav + power button
+    TitleBar.tsx              # custom window title bar
+    PageShell.tsx             # shared page layout
+    AppsView.tsx              # Apps tab (curated grid, Store/Steam discovery, icons, rename, context menus)
+    MoonlightView.tsx         # Moonlight tab (Machines + Settings sub-tab, discovery, paired, saved, probe)
+    MoonlightSettings.tsx     # Moonlight streaming settings (resolution / fps / codec / display / audio / input / etc.)
+    SettingsView.tsx          # app-level settings (general, integrations, about)
+    PowerMenu.tsx             # power menu modal
   settings/SettingsContext.tsx  # persistent settings provider
-  hooks/useGamepad.ts     # gamepad → keyboard bridge
-src-tauri/                # Rust backend
-  src/lib.rs              # Tauri commands
-  src/settings.rs         # persisted settings
+  hooks/useGamepad.ts         # gamepad → keyboard bridge
+  styles.css                  # design tokens (@theme)
+src-tauri/                    # Rust backend
+  src/lib.rs                  # Tauri commands
+  src/settings.rs             # persisted settings
 ```
+
+## Keyboard & gamepad reference
+
+| Action | Keyboard | Gamepad |
+|---|---|---|
+| Fullscreen | F11 | — |
+| Immersive Mode toggle | F10 | — |
+| Exit Immersive | Esc / F10 | B |
+| Next / prev view | Tab / Shift+Tab | RB / LB |
+| Move | Arrows | D-pad / left stick |
+| Activate | Enter / Space | A |
+| Back / cancel | Escape | B |
 
 ## Building for ARM64
 
