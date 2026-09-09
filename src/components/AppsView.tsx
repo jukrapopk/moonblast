@@ -138,13 +138,24 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
-      className={`group ${focused ? "rounded-2xl ring-2 ring-(--color-accent)" : ""}`}
+      className={`group relative rounded-2xl p-3 transition-all duration-150 ${
+        focused
+          ? "z-10 scale-[1.08] bg-(--color-accent-soft) shadow-[0_12px_32px_-12px_var(--color-overlay)]"
+          : ""
+      }`}
       onContextMenu={onContextMenu}
     >
-      <button onClick={onLaunch} className="block w-full">
+      <button
+        onClick={onLaunch}
+        className="block w-full outline-none focus:outline-none"
+      >
         <div
-          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl transition-transform group-hover:scale-[1.02] ${icon ? "" : "text-3xl font-semibold text-white/80"}`}
-          style={icon ? undefined : { background: gradientFor(name) }}
+          className={`relative flex aspect-square items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold ${icon ? "" : "w-full text-white/80"}`}
+          style={
+            icon
+              ? { width: "calc(100% + 0.75rem)", marginInline: "-0.375rem" }
+              : { background: gradientFor(name) }
+          }
         >
           {icon ? (
             <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
@@ -152,7 +163,9 @@ function AppTile({
             name.charAt(0)
           )}
         </div>
-        <div className="mt-3 truncate text-center text-xs font-medium text-(--color-text)">{name}</div>
+        <div className="mt-2 truncate text-center text-xs font-medium text-(--color-text)">
+          {name}
+        </div>
       </button>
     </motion.div>
   );
