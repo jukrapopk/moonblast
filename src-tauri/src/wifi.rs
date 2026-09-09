@@ -14,10 +14,12 @@
 #![cfg(windows)]
 
 use std::ffi::c_void;
+use std::os::windows::process::CommandExt;
 use std::ptr;
+use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WiFi::{
-    WlanCloseHandle, WlanEnumInterfaces, WlanGetAvailableNetworkList, WlanOpenHandle, WlanQueryInterface,
+    WlanCloseHandle, WlanEnumInterfaces, WlanGetAvailableNetworkList, WlanOpenHandle,
     WlanScan, DOT11_SSID, WLAN_AVAILABLE_NETWORK, WLAN_AVAILABLE_NETWORK_CONNECTED,
     WLAN_AVAILABLE_NETWORK_HAS_PROFILE, WLAN_AVAILABLE_NETWORK_LIST, WLAN_INTERFACE_INFO_LIST,
 };
@@ -53,6 +55,11 @@ pub struct WifiNetwork {
 
 /// RAII wrapper for the WLAN client handle; closes on drop.
 struct WlanClient(HANDLE);
+// The wlanapi.dll API is documented as thread-safe — a single client handle
+// may be used concurrently from multiple threads. The raw HANDLE is `!Send`
+// because the type system doesn't know that, so we declare it ourselves.
+unsafe impl Send for WlanClient {}
+unsafe impl Sync for WlanClient {}
 impl WlanClient {
     fn open() -> Option<Self> {
         unsafe {
@@ -82,6 +89,23 @@ impl Drop for WlanClient {
     }
 }
 
+/// Process-wide cached WLAN client. The wlan service appears to invalidate
+/// the per-client cache when `WlanCloseHandle` is called repeatedly (we get
+/// ERROR_NOT_FOUND for queries that work fine in a single-shot CLI probe).
+/// Keeping one client open for the lifetime of the Tauri process avoids
+/// the open/close churn and makes the cache behave. `WlanClient` is
+/// `Send + Sync` (the wlanapi.dll API is thread-safe).
+static WLAN_CLIENT: OnceLock<WlanClient> = OnceLock::new();
+
+fn shared_client() -> Option<&'static WlanClient> {
+    if let Some(c) = WLAN_CLIENT.get() {
+        return Some(c);
+    }
+    let c = WlanClient::open()?;
+    WLAN_CLIENT.set(c).ok()?;
+    Some(WLAN_CLIENT.get().unwrap())
+}
+
 /// Decode a `DOT11_SSID` into a UTF-8 string. Falls back to the raw bytes
 /// (lossily) if it isn't valid UTF-8 — WiFi SSIDs are nominally UTF-8 but
 /// some routers put garbage in them.
@@ -103,12 +127,9 @@ fn first_interface(client: &WlanClient) -> Option<windows_sys::core::GUID> {
         if ok != 0 || list_ptr.is_null() {
             return None;
         }
-        let result = if (*list_ptr).dwNumberOfItems > 0 {
-            // InterfaceInfo is a flexible array member at the end of the struct.
-            // The first element is at offset sizeof(dwNumberOfItems, dwIndex) = 8.
+        let count = (*list_ptr).dwNumberOfItems;
+        let result = if count > 0 {
             let first = list_ptr.add(1) as *const u8;
-            // Layout: the struct has dwNumberOfItems (u32) + dwIndex (u32),
-            // then the array of WLAN_INTERFACE_INFO. Each entry starts with GUID.
             let guid_ptr = first as *const windows_sys::core::GUID;
             Some(*guid_ptr)
         } else {
@@ -123,99 +144,12 @@ fn first_interface(client: &WlanClient) -> Option<windows_sys::core::GUID> {
     }
 }
 
-/// Read the current connection (SSID + signal + security) for the first
-/// interface. `None` if there's no WiFi adapter or nothing is connected.
-fn current_connection(client: &WlanClient) -> Option<WifiConnection> {
-    let guid = first_interface(client)?;
-    unsafe {
-        let mut data_size: u32 = 0;
-        let mut data_ptr: *mut c_void = ptr::null_mut();
-        let mut value_type: i32 = 0;
-        let ok = WlanQueryInterface(
-            client.handle(),
-            &guid,
-            7, // wlan_intf_opcode_current_connection
-            ptr::null(),
-            &mut data_size,
-            &mut data_ptr,
-            &mut value_type,
-        );
-        if ok != 0 || data_ptr.is_null() {
-            return None;
-        }
-        // The returned blob is a WLAN_CONNECTION_ATTRIBUTES struct. The fields
-        // we care about: isState, wlanAssociationAttributes.dot11Ssid,
-        // wlanAssociationAttributes.wlanSignalQuality,
-        // wlanSecurityAttributes.bSecurityEnabled.
-        //
-        // We only need the SSID (at a known offset) and a few boolean / u32
-        // values, but the struct layout varies by Windows version. Read the
-        // minimum we need from the documented offsets and validate the size.
-        let result = if data_size >= 8 {
-            // First u32 is the interface state (connected = 1).
-            let state = *(data_ptr as *const u32);
-            if state == 1 {
-                // The returned blob is a `WLAN_CONNECTION_ATTRIBUTES`. The
-                // SSID does NOT sit right after the 8-byte header — between
-                // the header and the association block is the profile name
-                // (`strProfileName: [u16; 256]` = 512 bytes), so the SSID
-                // starts at offset 520.
-                //
-                //   0   isState (u32)
-                //   4   wlanConnectionMode (u32)
-                //   8   strProfileName ([u16; 256] = 512 bytes)
-                //   520 wlanAssociationAttributes:
-                //     520   dot11Ssid (36 bytes)
-                //     556   dot11BssType (4)
-                //     560   dot11Bssid (6)
-                //     566   dot11PhyType (4)
-                //     570   uDot11PhyIndex (4)
-                //     574   wlanSignalQuality (4)
-                //     578   ulRxRate (4)
-                //     582   ulTxRate (4)
-                //   590 wlanSecurityAttributes:
-                //     590   bSecurityEnabled (BOOL)
-                const ASSOC_OFFSET: usize = 520;
-                const SSID_OFFSET: usize = ASSOC_OFFSET;
-                const SIGNAL_OFFSET: usize = ASSOC_OFFSET + 36 + 4 + 6 + 4 + 4;
-                const SECURITY_OFFSET: usize = ASSOC_OFFSET + 36 + 4 + 6 + 4 + 4 + 4 + 4 + 4;
-                let required = SECURITY_OFFSET + 4;
-                if data_size as usize >= required {
-                    let ssid = *(data_ptr.add(SSID_OFFSET) as *const DOT11_SSID);
-                    let signal =
-                        (*(data_ptr.add(SIGNAL_OFFSET) as *const u32)).min(100);
-                    let secured =
-                        *(data_ptr.add(SECURITY_OFFSET) as *const u32) != 0;
-                    Some(WifiConnection {
-                        ssid: ssid_to_string(&ssid),
-                        signal,
-                        secured,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        windows_sys::Win32::System::Memory::HeapFree(
-            windows_sys::Win32::System::Memory::GetProcessHeap(),
-            0,
-            data_ptr as *const c_void,
-        );
-        result
-    }
-}
-
-/// wlan_intf_opcode_current_connection = 7 in the Windows SDK enum.
-/// Inlined as a raw value to avoid pulling the whole `WlanIntfOpcode` enum./// Visible network list. `WlanScan` is fire-and-forget — the result list
+/// Visible network list. `WlanScan` is fire-and-forget — the result list
 /// reflects whatever's currently cached plus anything that arrives within
 /// the next ~1s. We request a fresh scan first to get a complete picture.
 pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
-    let client = WlanClient::open()?;
-    let guid = first_interface(&client)?;
+    let client = shared_client()?;
+    let guid = first_interface(client)?;
     unsafe {
         // Best-effort fresh scan. Errors here are non-fatal — the cached
         // list is still useful.
@@ -305,7 +239,57 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
 
 /// Cheap, allocation-light call for the chip's polling. `None` means "no
 /// WiFi adapter at all" — the UI should hide the chip in that case.
+///
+/// The wlanapi path is supposed to be the primary route, but in long-lived
+/// Tauri processes the wlan service returns `ERROR_NOT_FOUND` (1168) for
+/// `WlanGetAvailableNetworkList` even when `netsh` reports an active
+/// connection. As a stopgap, we shell out to `netsh wlan show interfaces`
+/// which always works. Cost is ~200ms per call; the chip polls every 30s
+/// so the overhead is negligible.
 pub fn current() -> Option<WifiConnection> {
-    let client = WlanClient::open()?;
-    current_connection(&client)
+    netsh_current_connection()
+}
+
+fn netsh_current_connection() -> Option<WifiConnection> {
+    let output = std::process::Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut state: Option<String> = None;
+    let mut ssid: Option<String> = None;
+    let mut signal: Option<u32> = None;
+    let mut auth: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("State") {
+            state = rest.split(':').nth(1).map(|s| s.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("SSID") {
+            ssid = rest.split(':').nth(1).map(|s| s.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("Signal") {
+            signal = rest
+                .split(':')
+                .nth(1)
+                .and_then(|s| s.trim().trim_end_matches('%').parse().ok());
+        } else if let Some(rest) = line.strip_prefix("Authentication") {
+            auth = rest.split(':').nth(1).map(|s| s.trim().to_string());
+        }
+    }
+    if state.as_deref() != Some("connected") {
+        return None;
+    }
+    let ssid = ssid?;
+    if ssid.is_empty() {
+        return None;
+    }
+    let signal = signal.unwrap_or(0).min(100);
+    let secured = auth
+        .as_deref()
+        .map(|a| a.to_ascii_lowercase().contains("wpa") || a.contains("802.1X") || a == "WEP")
+        .unwrap_or(false);
+    Some(WifiConnection { ssid, signal, secured })
 }
