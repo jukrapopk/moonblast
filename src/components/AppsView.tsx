@@ -615,15 +615,8 @@ export function AppsView() {
           <div className="rounded-2xl border border-dashed border-(--color-border) p-12 text-center">
             <p className="text-(--color-muted)">No apps yet.</p>
             <p className="mt-1 text-sm text-(--color-muted)/70">
-              Add a few from the installed list or browse to an .exe.
+              Use the Add button to pick something from the installed list or browse to an .exe.
             </p>
-            <button
-              onClick={() => setAddOpen(true)}
-              className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-(--color-accent) px-5 py-2 text-sm font-medium text-white transition hover:brightness-110"
-            >
-              <Plus size={16} weight="bold" />
-              Add an app
-            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-(--color-muted)">No apps match “{query}”.</div>
