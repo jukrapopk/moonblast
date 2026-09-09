@@ -30,13 +30,19 @@ pub struct AppShortcut {
     pub name: String,
     pub path: String,
     #[serde(default)]
-    pub category: String,
+    pub source: String, // "" | "Store" | "Steam"
+    #[serde(default = "default_kind")]
+    pub kind: String, // "exe" | "store" | "steam"
     #[serde(default)]
     pub custom_icon: Option<String>,
     #[serde(default)]
     pub use_desktop_icon: bool,
     #[serde(default)]
     pub steamgrid_icon: Option<String>,
+}
+
+fn default_kind() -> String {
+    "exe".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

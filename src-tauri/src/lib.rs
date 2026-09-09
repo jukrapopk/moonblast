@@ -266,14 +266,14 @@ fn client_display() -> Result<ClientDisplay, String> {
 struct AppEntry {
     id: String,
     name: String,
-    category: String,
+    source: String, // "" | "Store" | "Steam"
     path: String,
+    kind: String, // "exe" | "store" | "steam"
 }
 
-/// Walk a Start Menu directory, collecting `.lnk` shortcuts.
+/// Walk a Start Menu directory, collecting `.lnk` shortcuts (source = "").
 fn walk_programs(
     dir: &std::path::Path,
-    category: &str,
     out: &mut Vec<AppEntry>,
     seen: &mut std::collections::HashSet<String>,
 ) {
@@ -283,14 +283,8 @@ fn walk_programs(
     for entry in entries.flatten() {
         let path = entry.path();
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let name = entry.file_name().to_string_lossy().into_owned();
         if is_dir {
-            let sub = if category.is_empty() {
-                name
-            } else {
-                format!("{category} › {name}")
-            };
-            walk_programs(&path, &sub, out, seen);
+            walk_programs(&path, out, seen);
         } else if path
             .extension()
             .and_then(|e| e.to_str())
@@ -311,14 +305,188 @@ fn walk_programs(
             out.push(AppEntry {
                 id: p.clone(),
                 name: stem,
-                category: category.to_string(),
+                source: String::new(),
                 path: p,
+                kind: "exe".to_string(),
             });
         }
     }
 }
 
-/// Discover installed apps from the Start Menu (system + current user).
+/// Tokenize a Valve VDF/ACF file. Braces are kept as structure markers so
+/// (key, value) pairs align correctly (a key whose value is a block is `{`).
+enum VTok {
+    Str(String),
+    Open,
+    Close,
+}
+
+fn vdf_tokens(content: &str) -> Vec<VTok> {
+    let b = content.as_bytes();
+    let mut toks = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] as char {
+            '"' => {
+                i += 1;
+                let mut s = String::new();
+                while i < b.len() {
+                    let ch = b[i] as char;
+                    if ch == '"' {
+                        i += 1;
+                        break;
+                    }
+                    if ch == '\\' && i + 1 < b.len() {
+                        let n = b[i + 1] as char;
+                        if n == '"' || n == '\\' {
+                            s.push(n);
+                            i += 2;
+                        } else {
+                            s.push(ch);
+                            i += 1;
+                        }
+                    } else {
+                        s.push(ch);
+                        i += 1;
+                    }
+                }
+                toks.push(VTok::Str(s));
+            }
+            '{' => {
+                toks.push(VTok::Open);
+                i += 1;
+            }
+            '}' => {
+                toks.push(VTok::Close);
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    toks
+}
+
+fn parse_vdf_pairs(content: &str) -> Vec<(String, String)> {
+    let toks = vdf_tokens(content);
+    let mut pairs = Vec::new();
+    for i in 0..toks.len().saturating_sub(1) {
+        if let (VTok::Str(k), VTok::Str(v)) = (&toks[i], &toks[i + 1]) {
+            pairs.push((k.clone(), v.clone()));
+        }
+    }
+    pairs
+}
+
+/// Store (UWP) apps, via the built-in PowerShell `Get-StartApps`. We keep only
+/// entries whose AppID is an AUMID (contains `!`), which identifies Store apps
+/// (desktop items have plain paths/empty AppIDs).
+fn discover_store_apps() -> Vec<AppEntry> {
+    let mut out = Vec::new();
+    let Ok(ps) = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", "Get-StartApps | ConvertTo-Json -Compress"])
+        .output()
+    else {
+        return out;
+    };
+    if !ps.status.success() {
+        return out;
+    }
+    let text = String::from_utf8_lossy(&ps.stdout);
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return out,
+    };
+    let arr = match json {
+        serde_json::Value::Array(a) => a,
+        v => vec![v],
+    };
+    for item in arr {
+        let name = item.get("Name").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let appid = item.get("AppID").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        if name.is_empty() || !appid.contains('!') {
+            continue;
+        }
+        out.push(AppEntry {
+            id: format!("store:{appid}"),
+            name,
+            source: "Store".to_string(),
+            path: appid,
+            kind: "store".to_string(),
+        });
+    }
+    out
+}
+
+/// Steam games, from the local Steam metadata (registry + `appmanifest_*.acf`).
+/// Launched via `steam://rungameid/<appid>`; no game exe path required.
+fn discover_steam_games() -> Vec<AppEntry> {
+    let mut out = Vec::new();
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(steam) = hkcu.open_subkey(r"Software\Valve\Steam") else {
+        return out;
+    };
+    let steam_path: String = match steam.get_value::<String, _>("SteamPath") {
+        Ok(p) => p.replace('/', "\\"),
+        Err(_) => return out,
+    };
+
+    let mut steamapps = vec![format!("{steam_path}\\steamapps")];
+    let lf = format!("{steam_path}\\steamapps\\libraryfolders.vdf");
+    if let Ok(content) = std::fs::read_to_string(&lf) {
+        for (k, v) in parse_vdf_pairs(&content) {
+            if k == "path" {
+                steamapps.push(format!("{}\\steamapps", v.replace('/', "\\")));
+            }
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    for dir in steamapps {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            if !fname.starts_with("appmanifest_") || !fname.ends_with(".acf") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&entry.path()) else {
+                continue;
+            };
+            let mut appid = None;
+            let mut name = None;
+            for (k, v) in parse_vdf_pairs(&content) {
+                if k == "appid" && appid.is_none() {
+                    appid = Some(v);
+                } else if k == "name" && name.is_none() {
+                    name = Some(v);
+                }
+            }
+            let (Some(appid), Some(name)) = (appid, name) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            let key = format!("steam:{appid}");
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            out.push(AppEntry {
+                id: key,
+                name,
+                source: "Steam".to_string(),
+                path: appid,
+                kind: "steam".to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Discover installed apps: Start Menu shortcuts + Store apps + Steam games.
 #[tauri::command]
 async fn discover_apps() -> Vec<AppEntry> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -332,8 +500,10 @@ async fn discover_apps() -> Vec<AppEntry> {
             roots.push(format!("{u}\\Microsoft\\Windows\\Start Menu\\Programs"));
         }
         for root in &roots {
-            walk_programs(std::path::Path::new(root), "", &mut out, &mut seen);
+            walk_programs(std::path::Path::new(root), &mut out, &mut seen);
         }
+        out.extend(discover_store_apps());
+        out.extend(discover_steam_games());
         out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         out
     })
@@ -341,14 +511,13 @@ async fn discover_apps() -> Vec<AppEntry> {
     .unwrap_or_default()
 }
 
-/// Launch an app or shortcut via the Windows shell.
-#[tauri::command]
-fn launch_app(path: String) -> Result<(), String> {
+/// Open a target with the default shell action.
+fn shell_open(target: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let mut op: Vec<u16> = "open".encode_utf16().collect();
     op.push(0);
-    let mut pw: Vec<u16> = path.encode_utf16().collect();
+    let mut pw: Vec<u16> = target.encode_utf16().collect();
     pw.push(0);
     let res = unsafe {
         ShellExecuteW(
@@ -363,7 +532,23 @@ fn launch_app(path: String) -> Result<(), String> {
     if res > 32 {
         Ok(())
     } else {
-        Err(format!("Failed to launch app (error {res})"))
+        Err(format!("Failed to launch (error {res})"))
+    }
+}
+
+/// Launch an app or shortcut. `kind` selects the launch method.
+#[tauri::command]
+fn launch_app(path: String, kind: String) -> Result<(), String> {
+    match kind.as_str() {
+        "store" => {
+            // Store apps launch via the AppsFolder (AUMID) virtual namespace.
+            let mut cmd = Command::new("explorer.exe");
+            cmd.arg(format!("shell:AppsFolder\\{path}"));
+            cmd.spawn().map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        "steam" => shell_open(&format!("steam://rungameid/{path}")),
+        _ => shell_open(&path),
     }
 }
 

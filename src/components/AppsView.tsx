@@ -9,19 +9,22 @@ import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
 import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
+import { FilterList } from "./ui/FilterList";
 import { useSettings } from "../settings/SettingsContext";
 
 interface AppEntry {
   id: string;
   name: string;
-  category: string;
+  source: string; // "" | "Store" | "Steam"
   path: string;
+  kind: string; // "exe" | "store" | "steam"
 }
 
 interface Shortcut {
   name: string;
   path: string;
-  category: string;
+  source: string; // "" | "Store" | "Steam"
+  kind: string; // "exe" | "store" | "steam"
   custom_icon: string | null;
   use_desktop_icon: boolean;
   steamgrid_icon: string | null;
@@ -165,30 +168,20 @@ function AddAppModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onAdd: (a: { name: string; path: string; category?: string }) => void;
+  onAdd: (a: { name: string; path: string; source?: string; kind: string }) => void;
   existingPaths: Set<string>;
 }) {
   const [tab, setTab] = useState<"installed" | "browse">("installed");
   const [installed, setInstalled] = useState<AppEntry[]>([]);
-  const [q, setQ] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    setQ("");
     setTab("installed");
     invoke<AppEntry[]>("discover_apps").then(setInstalled).catch(() => setInstalled([]));
-    setTimeout(() => searchRef.current?.focus(), 30);
   }, [open]);
 
-  const shown = installed.filter(
-    (a) =>
-      !existingPaths.has(a.path) &&
-      (!q || `${a.name} ${a.category}`.toLowerCase().includes(q.toLowerCase())),
-  );
-
-  function pick(a: { name: string; path: string; category?: string }) {
-    onAdd({ name: a.name, path: a.path, category: a.category ?? "" });
+  function pick(a: { name: string; path: string; source?: string; kind: string }) {
+    onAdd({ name: a.name, path: a.path, source: a.source ?? "", kind: a.kind });
     onClose();
   }
 
@@ -199,7 +192,7 @@ function AddAppModal({
       filters: [{ name: "Applications", extensions: ["exe", "lnk"] }],
     });
     if (typeof picked === "string" && picked) {
-      pick({ name: nameFromPath(picked), path: picked });
+      pick({ name: nameFromPath(picked), path: picked, kind: "exe" });
     }
   }
 
@@ -218,35 +211,28 @@ function AddAppModal({
       </div>
 
       {tab === "installed" ? (
-        <>
-          <div className="mb-3">
-            <Input
-              ref={searchRef}
-              icon={<MagnifyingGlass size={16} weight="bold" />}
-              value={q}
-              onChange={(e) => setQ(e.currentTarget.value)}
-              placeholder="Search installed apps…"
-            />
-          </div>
-          <div className="max-h-80 space-y-1 overflow-y-auto">
-            {shown.length === 0 ? (
-              <p className="py-8 text-center text-sm text-(--color-muted)">Nothing to add.</p>
-            ) : (
-              shown.map((a) => (
-                <button
-                  key={a.path}
-                  onClick={() => pick(a)}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
-                >
-                  <span className="truncate font-medium">{a.name}</span>
-                  {a.category && (
-                    <span className="ml-auto shrink-0 text-xs text-(--color-muted)">{a.category}</span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </>
+        <FilterList
+          items={installed}
+          options={{
+            getKey: (a) => a.path,
+            getLabel: (a) => a.name,
+            getSource: (a) => a.source ?? "",
+            exclude: (a) => existingPaths.has(a.path),
+          }}
+          searchPlaceholder="Search installed apps…"
+          empty={<p className="py-8 text-center text-sm text-(--color-muted)">Nothing to add.</p>}
+          render={(a) => (
+            <button
+              onClick={() => pick(a)}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
+            >
+              <span className="truncate font-medium">{a.name}</span>
+              {a.source && (
+                <span className="ml-auto shrink-0 text-xs text-(--color-muted)">{a.source}</span>
+              )}
+            </button>
+          )}
+        />
       ) : (
         <div className="py-6 text-center">
           <button
@@ -508,8 +494,8 @@ export function AppsView() {
 
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
-  function addShortcut(a: { name: string; path: string; category?: string }) {
-    const entry: Shortcut = { name: a.name, path: a.path, category: a.category ?? "", custom_icon: null, use_desktop_icon: false, steamgrid_icon: null };
+  function addShortcut(a: { name: string; path: string; source?: string; kind: string }) {
+    const entry: Shortcut = { name: a.name, path: a.path, source: a.source ?? "", kind: a.kind, custom_icon: null, use_desktop_icon: false, steamgrid_icon: null };
     if (existingPaths.has(entry.path.toLowerCase())) return;
     update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, entry] }));
   }
@@ -556,7 +542,7 @@ export function AppsView() {
   }
   async function launch(a: Shortcut) {
     try {
-      await invoke("launch_app", { path: a.path });
+      await invoke("launch_app", { path: a.path, kind: a.kind || "exe" });
     } catch {
       // ignore launch errors
     }
@@ -564,7 +550,7 @@ export function AppsView() {
 
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? shortcuts.filter((a) => `${a.name} ${a.category}`.toLowerCase().includes(q))
+    ? shortcuts.filter((a) => `${a.name} ${a.source}`.toLowerCase().includes(q))
     : shortcuts;
 
   // One-time migration: localize legacy steamgrid URLs and out-of-cache custom
