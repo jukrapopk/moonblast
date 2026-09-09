@@ -6,6 +6,7 @@ import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple,
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
+import { Prompt } from "./ui/Prompt";
 import { Segmented } from "./ui/Segmented";
 import { useContextMenu } from "./ui/ContextMenu";
 import { Toast } from "./ui/Toast";
@@ -451,45 +452,18 @@ function RenameModal({
   onClose: () => void;
   onSave: (path: string, value: string) => void;
 }) {
-  const [val, setVal] = useState("");
-  useEffect(() => setVal(shortcut?.display_name ?? ""), [shortcut]);
-
-  function save() {
-    if (shortcut) onSave(shortcut.path, val);
-    onClose();
-  }
-
   return (
-    <Modal
+    <Prompt
       open={!!shortcut}
       onClose={onClose}
       title="Rename app"
       subtitle={shortcut ? `Original: ${shortcut.name}` : ""}
-      width="max-w-sm"
-    >
-      <Input
-        autoFocus
-        value={val}
-        onChange={(e) => setVal(e.currentTarget.value)}
-        onKeyDown={(e) => e.key === "Enter" && save()}
-        placeholder={shortcut?.name ?? "…"}
-      />
-      <div className="mt-3 flex justify-end gap-2">
-        <button
-          onClick={onClose}
-          className="rounded-full px-4 py-1.5 text-sm text-(--color-muted) transition hover:text-(--color-text)"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={save}
-          className="rounded-full bg-(--color-accent) px-5 py-1.5 text-sm font-medium text-white transition hover:brightness-110"
-        >
-          Save
-        </button>
-      </div>
-      <p className="mt-2 text-xs text-(--color-muted)">Leave empty to use the original name.</p>
-    </Modal>
+      initial={shortcut?.display_name ?? ""}
+      placeholder={shortcut?.name ?? "…"}
+      submitLabel="Save"
+      hint="Leave empty to use the original name."
+      onSubmit={(v) => shortcut && onSave(shortcut.path, v)}
+    />
   );
 }
 

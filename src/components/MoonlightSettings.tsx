@@ -7,8 +7,7 @@ import { Row } from "./ui/Row";
 import { Toggle } from "./ui/Toggle";
 import { Select, type SelectOptionInput } from "./ui/Select";
 import { Segmented } from "./ui/Segmented";
-import { Modal } from "./ui/Modal";
-import { Input } from "./ui/Input";
+import { Prompt } from "./ui/Prompt";
 import { useSettings, type Settings } from "../settings/SettingsContext";
 
 const RATIOS = ["16:9", "16:10", "21:9", "32:9", "4:3", "5:4"];
@@ -42,66 +41,6 @@ function PencilButton({ onClick, label }: { onClick: () => void; label: string }
     >
       <PencilSimple size={15} weight="bold" />
     </button>
-  );
-}
-
-function PromptModal({
-  open,
-  onClose,
-  title,
-  subtitle,
-  initial,
-  placeholder,
-  hint,
-  onSubmit,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  subtitle?: string;
-  initial: string;
-  placeholder?: string;
-  hint?: string;
-  onSubmit: (value: string) => void;
-}) {
-  const [val, setVal] = useState(initial);
-  useEffect(() => {
-    if (open) setVal(initial);
-  }, [open, initial]);
-
-  function submit() {
-    const v = val.trim();
-    if (!v) return;
-    onSubmit(v);
-    onClose();
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title={title} subtitle={subtitle} width="max-w-sm">
-      <Input
-        autoFocus
-        value={val}
-        onChange={(e) => setVal(e.currentTarget.value)}
-        onKeyDown={(e) => e.key === "Enter" && submit()}
-        placeholder={placeholder}
-      />
-      {hint && <p className="mt-2 text-xs text-(--color-muted)">{hint}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <button
-          onClick={onClose}
-          className="rounded-full px-4 py-2 text-sm text-(--color-muted) transition hover:text-(--color-text)"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={submit}
-          disabled={!val.trim()}
-          className="rounded-full bg-(--color-accent) px-5 py-2 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
-        >
-          Apply
-        </button>
-      </div>
-    </Modal>
   );
 }
 
@@ -337,42 +276,55 @@ export function MoonlightSettings() {
         </Row>
       </Section>
 
-      <PromptModal
+      <Prompt
         open={resOpen}
         onClose={() => setResOpen(false)}
         title="Custom resolution"
         subtitle="Enter width × height"
         initial={effectiveRes || detectedRes || ""}
         placeholder="e.g. 1920x1080"
+        validate={(v) => (normRes(v) ? null : "Use the form 1920x1080.")}
         hint="Custom resolutions are used for the stream."
         onSubmit={(v) => {
           const r = normRes(v);
           if (r) set("resolution", r);
         }}
       />
-      <PromptModal
+      <Prompt
         open={fpsOpen}
         onClose={() => setFpsOpen(false)}
         title="Custom refresh rate"
         subtitle="Frames per second (10 – 480)"
         initial={effectiveFps ? String(effectiveFps) : ""}
         placeholder="e.g. 90"
+        validate={(v) => {
+          const n = fpsOf(v);
+          if (n === null) return "Enter a number.";
+          if (n < 10 || n > 480) return "Must be between 10 and 480.";
+          return null;
+        }}
         hint="Custom FPS is applied to the stream."
         onSubmit={(v) => {
           const n = fpsOf(v);
-          if (n !== null && n >= 10 && n <= 480) set("refresh_rate", String(n));
+          if (n !== null) set("refresh_rate", String(n));
         }}
       />
-      <PromptModal
+      <Prompt
         open={bitrateOpen}
         onClose={() => setBitrateOpen(false)}
         title="Custom bitrate"
         subtitle="Megabits per second (0.5 – 500)"
         initial={String(m.bitrate)}
         placeholder="e.g. 100"
+        validate={(v) => {
+          const n = parseFloat(v);
+          if (!Number.isFinite(n)) return "Enter a number.";
+          if (n < 0.5 || n > 500) return "Must be between 0.5 and 500.";
+          return null;
+        }}
         onSubmit={(v) => {
           const n = parseFloat(v);
-          if (Number.isFinite(n) && n >= 0.5 && n <= 500) set("bitrate", n);
+          if (Number.isFinite(n)) set("bitrate", n);
         }}
       />
 
