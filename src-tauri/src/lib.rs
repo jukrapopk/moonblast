@@ -1865,14 +1865,23 @@ pub fn run() {
                     shell::reset_crash_count();
                 });
             }
-            // Suppress the desktop/background as early as possible at boot (before
-            // the UI even hydrates); fullscreen follows ~a second later when the
-            // hydrated frontend calls `enter_immersive`.
-            if want && armed && autostarted {
-                tauri::async_runtime::spawn_blocking(|| {
-                    minimize_other_windows();
-                    suppress_shell(true);
-                });
+            // The window is created with `visible: false` (see tauri.conf.json)
+            // so we can position and (for auto-immersive) fullscreen it before
+            // the first paint — no centered 1280x800 box on a black backdrop.
+            // Suppress the desktop/background as early as possible at boot
+            // (before the UI even hydrates); fullscreen follows on sign-in via
+            // `enter_immersive` for normal launches, and is set right here for
+            // auto-immersive sign-ins.
+            if let Some(window) = app.get_webview_window("main") {
+                if want && armed && autostarted {
+                    let _ = window.set_fullscreen(true);
+                    tauri::async_runtime::spawn_blocking(|| {
+                        minimize_other_windows();
+                        suppress_shell(true);
+                    });
+                }
+                let _ = window.show();
+                let _ = window.set_focus();
             }
             Ok(())
         })
