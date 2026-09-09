@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple } from "@phosphor-icons/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
@@ -25,10 +25,14 @@ interface Shortcut {
   path: string;
   source: string; // "" | "Store" | "Steam"
   kind: string; // "exe" | "store" | "steam"
+  display_name: string | null; // null/empty → use name
   custom_icon: string | null;
   use_desktop_icon: boolean;
   steamgrid_icon: string | null;
 }
+
+/** Effective display label: display_name overrides the original name. */
+const labelOf = (s: { name: string; display_name: string | null }) => s.display_name || s.name;
 
 const PALETTE = [
   "linear-gradient(135deg,#31416b,#2b3a5e)",
@@ -431,6 +435,59 @@ function SteamGridModal({
   );
 }
 
+/* --------------------------- rename modal ----------------------------- */
+
+function RenameModal({
+  shortcut,
+  onClose,
+  onSave,
+}: {
+  shortcut: Shortcut | null;
+  onClose: () => void;
+  onSave: (path: string, value: string) => void;
+}) {
+  const [val, setVal] = useState("");
+  useEffect(() => setVal(shortcut?.display_name ?? ""), [shortcut]);
+
+  function save() {
+    if (shortcut) onSave(shortcut.path, val);
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={!!shortcut}
+      onClose={onClose}
+      title="Rename app"
+      subtitle={shortcut ? `Original: ${shortcut.name}` : ""}
+      width="max-w-sm"
+    >
+      <Input
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.currentTarget.value)}
+        onKeyDown={(e) => e.key === "Enter" && save()}
+        placeholder={shortcut?.name ?? "…"}
+      />
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          onClick={onClose}
+          className="rounded-full px-4 py-1.5 text-sm text-(--color-muted) transition hover:text-(--color-text)"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={save}
+          className="rounded-full bg-(--color-accent) px-5 py-1.5 text-sm font-medium text-white transition hover:brightness-110"
+        >
+          Save
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-(--color-muted)">Leave empty to use the original name.</p>
+    </Modal>
+  );
+}
+
 /* ------------------------------ main ------------------------------ */
 
 export function AppsView() {
@@ -441,6 +498,7 @@ export function AppsView() {
   const [bust, setBust] = useState(0);
   const ctx = useContextMenu();
   const [sgApp, setSgApp] = useState<Shortcut | null>(null);
+  const [renameApp, setRenameApp] = useState<Shortcut | null>(null);
 
   // Keyboard / gamepad grid navigation.
   const gridRef = useRef<HTMLDivElement>(null);
@@ -495,7 +553,7 @@ export function AppsView() {
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; source?: string; kind: string }) {
-    const entry: Shortcut = { name: a.name, path: a.path, source: a.source ?? "", kind: a.kind, custom_icon: null, use_desktop_icon: false, steamgrid_icon: null };
+    const entry: Shortcut = { name: a.name, path: a.path, source: a.source ?? "", kind: a.kind, display_name: null, custom_icon: null, use_desktop_icon: false, steamgrid_icon: null };
     if (existingPaths.has(entry.path.toLowerCase())) return;
     update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, entry] }));
   }
@@ -540,6 +598,15 @@ export function AppsView() {
       ),
     }));
   }
+  function setDisplayName(path: string, value: string) {
+    const d = value.trim();
+    update((s) => ({
+      ...s,
+      app_shortcuts: s.app_shortcuts.map((x) =>
+        x.path === path ? { ...x, display_name: d ? d : null } : x,
+      ),
+    }));
+  }
   async function launch(a: Shortcut) {
     try {
       await invoke("launch_app", { path: a.path, kind: a.kind || "exe" });
@@ -550,7 +617,7 @@ export function AppsView() {
 
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? shortcuts.filter((a) => `${a.name} ${a.source}`.toLowerCase().includes(q))
+    ? shortcuts.filter((a) => `${labelOf(a)} ${a.source}`.toLowerCase().includes(q))
     : shortcuts;
 
   // One-time migration: localize legacy steamgrid URLs and out-of-cache custom
@@ -617,7 +684,7 @@ export function AppsView() {
             {filtered.map((a, i) => (
               <AppTile
                 key={a.path}
-                name={a.name}
+                name={labelOf(a)}
                 path={a.path}
                 customIcon={a.custom_icon}
                 steamgridIcon={a.steamgrid_icon}
@@ -627,6 +694,11 @@ export function AppsView() {
                 onLaunch={() => launch(a)}
                 onContextMenu={(e) =>
                   ctx.open(e, [
+                    {
+                      icon: <PencilSimple size={14} weight="bold" />,
+                      label: "Rename…",
+                      onClick: () => setRenameApp(a),
+                    },
                     {
                       icon: <MagnifyingGlass size={14} weight="bold" />,
                       label: "Search SteamGridDB",
@@ -662,6 +734,8 @@ export function AppsView() {
       />
 
       <SteamGridModal app={sgApp} onClose={() => setSgApp(null)} onSetIcon={setSteamgridIcon} />
+
+      <RenameModal shortcut={renameApp} onClose={() => setRenameApp(null)} onSave={setDisplayName} />
     </>
   );
 }

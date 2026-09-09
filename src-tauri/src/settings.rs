@@ -34,6 +34,8 @@ pub struct AppShortcut {
     #[serde(default = "default_kind")]
     pub kind: String, // "exe" | "store" | "steam"
     #[serde(default)]
+    pub display_name: Option<String>, // None/empty → use `name`
+    #[serde(default)]
     pub custom_icon: Option<String>,
     #[serde(default)]
     pub use_desktop_icon: bool,
