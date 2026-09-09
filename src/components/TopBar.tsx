@@ -137,7 +137,7 @@ export function TopBar({
 
       <div className="ml-auto" />
 
-      <div className="relative flex items-center gap-1">
+      <div className="relative flex items-center gap-2">
         <Status />
         {rightItems.map((item) => (
           <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
@@ -183,7 +183,7 @@ function TopBarButton({
       onClick={() => onNavigate(item.id)}
       title={item.label}
       aria-label={item.label}
-      className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors ${
+      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
         active
           ? "bg-(--color-accent-soft) text-(--color-accent)"
           : "text-(--color-muted) hover:text-(--color-text)"
