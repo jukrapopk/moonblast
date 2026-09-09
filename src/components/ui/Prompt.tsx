@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Modal } from "./Modal";
 import { Input } from "./Input";
+import { Button } from "./Button";
 
 interface PromptProps {
   open: boolean;
@@ -70,19 +71,12 @@ export function Prompt({
         <p className="mt-2 text-xs text-(--color-muted)">{hint}</p>
       ) : null}
       <div className="mt-4 flex justify-end gap-2">
-        <button
-          onClick={onClose}
-          className="rounded-full px-4 py-2 text-sm text-(--color-muted) transition hover:text-(--color-text)"
-        >
+        <Button variant="ghost" size="lg" onClick={onClose} className="px-4 font-normal">
           Cancel
-        </button>
-        <button
-          onClick={submit}
-          disabled={disabled}
-          className="rounded-full bg-(--color-accent) px-5 py-2 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
-        >
+        </Button>
+        <Button size="lg" onClick={submit} disabled={disabled}>
           {submitLabel}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

@@ -8,10 +8,13 @@ import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Prompt } from "./ui/Prompt";
 import { Segmented } from "./ui/Segmented";
+import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
 import { useContextMenu } from "./ui/ContextMenu";
 import { Toast } from "./ui/Toast";
 import { Input } from "./ui/Input";
 import { FilterList } from "./ui/FilterList";
+import { gradientFor } from "./ui/gradients";
 import { useSettings } from "../settings/SettingsContext";
 
 interface AppEntry {
@@ -35,23 +38,6 @@ interface Shortcut {
 
 /** Effective display label: display_name overrides the original name. */
 const labelOf = (s: { name: string; display_name: string | null }) => s.display_name || s.name;
-
-const PALETTE = [
-  "linear-gradient(135deg,#31416b,#2b3a5e)",
-  "linear-gradient(135deg,#3a3f57,#394b45)",
-  "linear-gradient(135deg,#454a75,#3b3f63)",
-  "linear-gradient(135deg,#563b45,#4a3a3a)",
-  "linear-gradient(135deg,#333c4a,#2f4a42)",
-  "linear-gradient(135deg,#3b3b52,#333c4a)",
-  "linear-gradient(135deg,#4a4460,#3f3a52)",
-  "linear-gradient(135deg,#3a3f66,#323c44)",
-];
-
-function gradientFor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length];
-}
 
 const nameFromPath = (p: string) =>
   p
@@ -245,13 +231,13 @@ function AddAppModal({
         />
       ) : (
         <div className="py-6 text-center">
-          <button
+          <Button
             onClick={browse}
-            className="inline-flex items-center gap-2 rounded-full bg-(--color-accent) px-5 py-2.5 text-sm font-medium text-white transition hover:brightness-110"
+            icon={<FolderOpen size={16} weight="bold" />}
+            className="gap-2 px-5 py-2.5"
           >
-            <FolderOpen size={16} weight="bold" />
             Choose an .exe or .lnk…
-          </button>
+          </Button>
           <p className="mt-3 text-xs text-(--color-muted)">Pick any application on disk to add it.</p>
         </div>
       )}
@@ -364,13 +350,15 @@ function SteamGridModal({
             placeholder="Search by name, or enter a game id…"
           />
         </div>
-        <button
+        <Button
+          variant="outline-accent"
+          size="md"
           onClick={search}
           disabled={!query.trim() || busy}
-          className="rounded-full border border-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
+          className="px-4 py-1.5"
         >
           Search
-        </button>
+        </Button>
       </div>
 
       {error && <p className="mt-2 text-sm text-(--color-danger)">{error}</p>}
@@ -689,23 +677,23 @@ export function AppsView() {
                 placeholder="Search apps…"
               />
             </div>
-            <button
+            <Button
               onClick={() => setAddOpen(true)}
-              className="flex h-9 items-center gap-1.5 rounded-full bg-(--color-accent) px-4 text-sm font-medium text-white transition hover:brightness-110"
+              icon={<Plus size={16} weight="bold" />}
+              className="h-9 px-4"
             >
-              <Plus size={16} weight="bold" />
               Add
-            </button>
+            </Button>
           </div>
         }
       >
         {shortcuts.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-(--color-border) p-12 text-center">
+          <Card dashed className="p-12 text-center">
             <p className="text-(--color-muted)">No apps yet.</p>
             <p className="mt-1 text-sm text-(--color-muted)/70">
               Use the Add button to pick something from the installed list or browse to an .exe.
             </p>
-          </div>
+          </Card>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-(--color-muted)">No apps match “{query}”.</div>
         ) : (

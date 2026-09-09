@@ -6,6 +6,7 @@ import { Section } from "./ui/Section";
 import { Row } from "./ui/Row";
 import { Toggle } from "./ui/Toggle";
 import { Input } from "./ui/Input";
+import { Button } from "./ui/Button";
 
 type TailscaleStatus =
   | "not-found"
@@ -132,12 +133,9 @@ function MoonlightRow({
       }
     >
       <div className="flex items-center gap-3">
-        <button
-          onClick={select}
-          className="rounded-full border border-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent) transition hover:bg-(--color-accent-soft)"
-        >
+        <Button variant="outline-accent" size="md" onClick={select} className="px-4 py-1.5">
           Select
-        </button>
+        </Button>
         <Toggle checked={enabled} onChange={onToggle} disabled={!dir} />
       </div>
     </Row>
@@ -233,13 +231,15 @@ export function SettingsView({
                 placeholder="API key"
               />
             </div>
-            <button
+            <Button
+              variant="outline-accent"
+              size="md"
               onClick={checkKey}
               disabled={!steamgridKey || sgStatus === "checking"}
-              className="rounded-full border border-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
+              className="px-4 py-1.5"
             >
               Check
-            </button>
+            </Button>
           </div>
         </Row>
         {sgStatus && (

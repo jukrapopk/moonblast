@@ -8,6 +8,10 @@ import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
 import { Toast } from "./ui/Toast";
+import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
+import { StatusPill } from "./ui/StatusPill";
+import { IconTile } from "./ui/IconTile";
 import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
@@ -85,82 +89,65 @@ function MachineCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       onContextMenu={onContextMenu}
-      className={`flex items-center gap-4 rounded-2xl border bg-(--color-surface) p-4 ${
-        streaming ? "border-(--color-accent)/40" : "border-(--color-border)"
-      }`}
     >
-      <div
-        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-          streaming ? "bg-(--color-accent-soft) text-(--color-accent)" : "text-white/80"
-        }`}
-        style={streaming ? undefined : { background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
-      >
-        {streaming ? <Broadcast size={22} weight="bold" /> : <Monitor size={22} weight="bold" />}
-      </div>
+      <Card streaming={streaming}>
+        <IconTile active={streaming}>
+          {streaming ? <Broadcast size={22} weight="bold" /> : <Monitor size={22} weight="bold" />}
+        </IconTile>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium text-(--color-text)">{host.name}</span>
-          {streaming && (
-            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2 py-0.5 text-xs font-medium text-(--color-accent)">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-              Streaming
-            </span>
-          )}
-          {!streaming && probe && (
-            <span
-              className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                probe.reachable
-                  ? "bg-(--color-accent-soft) text-(--color-accent)"
-                  : "bg-(--color-muted-soft) text-(--color-muted)"
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full bg-current ${probe.reachable ? "" : "opacity-40"}`} />
-              {probe.reachable ? "Online" : "Offline"}
-            </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium text-(--color-text)">{host.name}</span>
+            {streaming && <StatusPill pulse>Streaming</StatusPill>}
+            {!streaming && probe && (
+              <StatusPill tone={probe.reachable ? "accent" : "muted"}>
+                {probe.reachable ? "Online" : "Offline"}
+              </StatusPill>
+            )}
+          </div>
+          <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {streaming ? (
+            <StreamActions
+              app={streamApp}
+              elapsedLabel={elapsedLabel}
+              busy={busy}
+              onResume={onResume}
+              onDisconnect={onDisconnect}
+            />
+          ) : (
+            <>
+              <Button
+                variant="outline-accent"
+                size="md"
+                onClick={onPair}
+                disabled={busy}
+                icon={<LockKey size={14} weight="bold" />}
+              >
+                Pair
+              </Button>
+              <Button
+                size="md"
+                onClick={onApps}
+                disabled={busy}
+                icon={<GameController size={14} weight="bold" />}
+              >
+                Apps
+              </Button>
+              <button
+                onClick={onRemove}
+                title="Remove"
+                aria-label="Remove"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
+              >
+                <Trash size={16} weight="bold" />
+              </button>
+            </>
           )}
         </div>
-        <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2">
-        {streaming ? (
-          <StreamActions
-            app={streamApp}
-            elapsedLabel={elapsedLabel}
-            busy={busy}
-            onResume={onResume}
-            onDisconnect={onDisconnect}
-          />
-        ) : (
-          <>
-            <button
-              onClick={onPair}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-full border border-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
-            >
-              <LockKey size={14} weight="bold" />
-              Pair
-            </button>
-            <button
-              onClick={onApps}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-3 py-1.5 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
-            >
-              <GameController size={14} weight="bold" />
-              Apps
-            </button>
-            <button
-              onClick={onRemove}
-              title="Remove"
-              aria-label="Remove"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
-            >
-              <Trash size={16} weight="bold" />
-            </button>
-          </>
-        )}
-      </div>
+      </Card>
     </motion.div>
   );
 }
@@ -193,73 +180,64 @@ function DiscoveredCard({
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
-    <div
-      className={`flex items-center gap-4 rounded-2xl border bg-(--color-surface) p-4 ${
-        streaming ? "border-(--color-accent)/40" : "border-(--color-border)"
-      }`}
-      onContextMenu={onContextMenu}
-    >
-      <div
-        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-          streaming ? "bg-(--color-accent-soft) text-(--color-accent)" : "text-white/80"
-        }`}
-        style={streaming ? undefined : { background: "linear-gradient(135deg,#31416b,#2b3a5e)" }}
-      >
-        {streaming ? <Broadcast size={22} weight="bold" /> : <Monitor size={22} weight="bold" />}
-      </div>
+    <div onContextMenu={onContextMenu}>
+      <Card streaming={streaming}>
+        <IconTile active={streaming}>
+          {streaming ? <Broadcast size={22} weight="bold" /> : <Monitor size={22} weight="bold" />}
+        </IconTile>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium text-(--color-text)">{host.name}</span>
-          {streaming ? (
-            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2 py-0.5 text-xs font-medium text-(--color-accent)">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-              Streaming
-            </span>
-          ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium text-(--color-text)">{host.name}</span>
+            {streaming ? <StatusPill pulse>Streaming</StatusPill> : null}
+          </div>
+          <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
         </div>
-        <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
-      </div>
 
-      <div className="flex shrink-0 items-center gap-2">
-        {streaming ? (
-          <StreamActions
-            app={streamApp}
-            elapsedLabel={elapsedLabel}
-            busy={busy}
-            onResume={onResume}
-            onDisconnect={onDisconnect}
-          />
-        ) : host.paired ? (
-          <>
-            <button
-              onClick={onDesktop}
+        <div className="flex shrink-0 items-center gap-2">
+          {streaming ? (
+            <StreamActions
+              app={streamApp}
+              elapsedLabel={elapsedLabel}
+              busy={busy}
+              onResume={onResume}
+              onDisconnect={onDisconnect}
+            />
+          ) : host.paired ? (
+            <>
+              <Button
+                size="md"
+                onClick={onDesktop}
+                disabled={busy}
+                icon={<Play size={15} weight="fill" />}
+                className="px-4 py-2 font-semibold"
+              >
+                Desktop
+              </Button>
+              <Button
+                variant="outline"
+                size="md"
+                onClick={onApps}
+                disabled={busy}
+                icon={<GameController size={14} weight="bold" />}
+                className="py-2"
+              >
+                Apps
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outline-accent"
+              size="md"
+              onClick={onPair}
               disabled={busy}
-              className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white transition enabled:hover:brightness-110 disabled:opacity-40"
+              icon={<LockKey size={14} weight="bold" />}
             >
-              <Play size={15} weight="fill" />
-              Desktop
-            </button>
-            <button
-              onClick={onApps}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-full border border-(--color-border) px-3 py-2 text-sm font-medium text-(--color-muted) transition enabled:hover:text-(--color-text) disabled:opacity-40"
-            >
-              <GameController size={14} weight="bold" />
-              Apps
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={onPair}
-            disabled={busy}
-            className="flex items-center gap-1.5 rounded-full border border-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent) transition enabled:hover:bg-(--color-accent-soft) disabled:opacity-40"
-          >
-            <LockKey size={14} weight="bold" />
-            Pair
-          </button>
-        )}
-      </div>
+              Pair
+            </Button>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -281,26 +259,28 @@ function StreamActions({
 }) {
   return (
     <>
-      <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-(--color-accent-soft) px-2.5 py-1 text-xs font-medium text-(--color-accent)">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+      <StatusPill pulse size="md">
         {app} · {elapsedLabel}
-      </span>
-      <button
+      </StatusPill>
+      <Button
+        size="md"
         onClick={onResume}
         disabled={busy}
-        className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white transition enabled:hover:brightness-110 disabled:opacity-40"
+        icon={<ArrowClockwise size={15} weight="bold" />}
+        className="px-4 py-2 font-semibold"
       >
-        <ArrowClockwise size={15} weight="bold" />
         Resume
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="danger"
+        size="md"
         onClick={onDisconnect}
         disabled={busy}
-        className="flex items-center gap-1.5 rounded-full border border-(--color-border) px-3 py-2 text-sm font-medium text-(--color-muted) transition enabled:hover:border-(--color-danger) enabled:hover:text-(--color-danger) disabled:opacity-40"
+        icon={<X size={15} weight="bold" />}
+        className="py-2"
       >
-        <X size={15} weight="bold" />
         Disconnect
-      </button>
+      </Button>
     </>
   );
 }
@@ -354,19 +334,12 @@ function AddMachineModal({
           placeholder="e.g. 192.168.1.20 or mybox.tailnet.ts.net"
         />
         <div className="flex justify-end gap-2 pt-2">
-          <button
-            onClick={onClose}
-            className="rounded-full px-4 py-2 text-sm text-(--color-muted) transition hover:text-(--color-text)"
-          >
+          <Button variant="ghost" size="lg" onClick={onClose} className="px-4 font-normal">
             Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={!address.trim()}
-            className="rounded-full bg-(--color-accent) px-5 py-2 text-sm font-medium text-white transition enabled:hover:brightness-110 disabled:opacity-40"
-          >
+          </Button>
+          <Button size="lg" onClick={submit} disabled={!address.trim()}>
             Add
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>
@@ -657,21 +630,24 @@ export function MoonlightView() {
         actions={
           sub === "machines" ? (
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="outline"
+                size="md"
                 onClick={scan}
                 disabled={scanning}
-                className="flex h-9 items-center gap-1.5 rounded-full border border-(--color-border) bg-(--color-surface) px-4 text-sm font-medium text-(--color-muted) transition enabled:hover:text-(--color-text) disabled:opacity-50"
+                icon={<ArrowsClockwise size={16} weight="bold" className={scanning ? "animate-spin" : ""} />}
+                className="h-9 bg-(--color-surface) px-4 disabled:opacity-50"
               >
-                <ArrowsClockwise size={16} weight="bold" className={scanning ? "animate-spin" : ""} />
                 Scan
-              </button>
-              <button
+              </Button>
+              <Button
+                size="md"
                 onClick={() => setAddOpen(true)}
-                className="flex items-center gap-1.5 rounded-full bg-(--color-accent) px-4 py-2 text-sm font-medium text-white transition hover:brightness-110"
+                icon={<Plus size={16} weight="bold" />}
+                className="px-4 py-2"
               >
-                <Plus size={16} weight="bold" />
                 Add machine
-              </button>
+              </Button>
             </div>
           ) : undefined
         }
@@ -696,11 +672,11 @@ export function MoonlightView() {
               transition={{ duration: 0.18 }}
             >
               {pairedGroup.length === 0 && discoveryGroup.length === 0 && machines.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-(--color-border) p-10 text-center text-sm text-(--color-muted)">
+                <Card dashed className="p-10 text-center text-sm text-(--color-muted)">
                   {scanning
                     ? "Scanning your network…"
                     : "No hosts found. Scan again or add a machine manually."}
-                </div>
+                </Card>
               ) : (
                 <div className="space-y-6">
                   {pairedGroup.length > 0 && (
