@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText } from "@phosphor-icons/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
 import { useContextMenu } from "./ui/ContextMenu";
+import { Toast } from "./ui/Toast";
 import { Input } from "./ui/Input";
 import { FilterList } from "./ui/FilterList";
 import { useSettings } from "../settings/SettingsContext";
@@ -499,6 +500,13 @@ export function AppsView() {
   const ctx = useContextMenu();
   const [sgApp, setSgApp] = useState<Shortcut | null>(null);
   const [renameApp, setRenameApp] = useState<Shortcut | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   // Keyboard / gamepad grid navigation.
   const gridRef = useRef<HTMLDivElement>(null);
@@ -578,6 +586,55 @@ export function AppsView() {
       );
       setCustomIcon(a.path, local ?? picked);
     }
+  }
+  async function applyClipboardIcon(a: Shortcut) {
+    const local = await invoke<string | null>("clipboard_icon_import").catch((e) => {
+      setToast(`Clipboard: ${e}`);
+      return null;
+    });
+    if (local) {
+      setCustomIcon(a.path, local);
+      setToast("Icon copied from clipboard");
+    }
+  }
+  // Clipboard is probed before the menu opens so the action is grayed out when
+  // there's nothing usable (no text / empty / files-only). preventDefault must
+  // happen synchronously to keep the native context menu away during the await.
+  async function openAppMenu(e: React.MouseEvent, a: Shortcut) {
+    e.preventDefault();
+    e.stopPropagation();
+    const hint = await invoke<string>("clipboard_icon_hint").catch(() => "none");
+    ctx.open(e, [
+      {
+        icon: <PencilSimple size={14} weight="bold" />,
+        label: "Rename…",
+        onClick: () => setRenameApp(a),
+      },
+      {
+        icon: <MagnifyingGlass size={14} weight="bold" />,
+        label: "Search SteamGridDB",
+        onClick: () => setSgApp(a),
+      },
+      { icon: <Image size={14} weight="bold" />, label: "Use Custom Icon", onClick: () => pickCustomIcon(a) },
+      {
+        icon: <ClipboardText size={14} weight="bold" />,
+        label: "Copy From Clipboard",
+        disabled: hint === "none",
+        onClick: () => applyClipboardIcon(a),
+      },
+      ...(a.custom_icon
+        ? [{ label: "Clear custom icon", onClick: () => setCustomIcon(a.path, null) }]
+        : []),
+      {
+        icon: <ArrowClockwise size={14} weight="bold" />,
+        label: "Use Desktop Icon",
+        onClick: () => {
+          setUseDesktopIcon(a.path, true);
+          refreshIcon(a);
+        },
+      },
+      { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
+    ]);
   }
   function refreshIcon(a: Shortcut) {
     iconCache.delete(a.path);
@@ -692,33 +749,7 @@ export function AppsView() {
                 bust={bust}
                 focused={i === focusIdx}
                 onLaunch={() => launch(a)}
-                onContextMenu={(e) =>
-                  ctx.open(e, [
-                    {
-                      icon: <PencilSimple size={14} weight="bold" />,
-                      label: "Rename…",
-                      onClick: () => setRenameApp(a),
-                    },
-                    {
-                      icon: <MagnifyingGlass size={14} weight="bold" />,
-                      label: "Search SteamGridDB",
-                      onClick: () => setSgApp(a),
-                    },
-                    { icon: <Image size={14} weight="bold" />, label: "Use Custom Icon", onClick: () => pickCustomIcon(a) },
-                    ...(a.custom_icon
-                      ? [{ label: "Clear custom icon", onClick: () => setCustomIcon(a.path, null) }]
-                      : []),
-                    {
-                      icon: <ArrowClockwise size={14} weight="bold" />,
-                      label: "Use Desktop Icon",
-                      onClick: () => {
-                        setUseDesktopIcon(a.path, true);
-                        refreshIcon(a);
-                      },
-                    },
-                    { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
-                  ])
-                }
+                onContextMenu={(e) => openAppMenu(e, a)}
               />
               ))}
             </AnimatePresence>
@@ -736,6 +767,8 @@ export function AppsView() {
       <SteamGridModal app={sgApp} onClose={() => setSgApp(null)} onSetIcon={setSteamgridIcon} />
 
       <RenameModal shortcut={renameApp} onClose={() => setRenameApp(null)} onSave={setDisplayName} />
+
+      <Toast message={toast} />
     </>
   );
 }

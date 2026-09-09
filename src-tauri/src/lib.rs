@@ -998,6 +998,147 @@ async fn clear_cached_icon(app: tauri::AppHandle, path: String) -> Result<(), St
     Ok(())
 }
 
+/// Classify clipboard content for the "Copy From Clipboard" icon action.
+/// Returns `"image"` | `"url"` | `"base64"` | `"text"` | `"none"` so the UI can
+/// gray the action out when there is nothing usable (empty / binary-only /
+/// files), as requested.
+#[tauri::command]
+async fn clipboard_icon_hint() -> Result<String, String> {
+    Ok(tauri::async_runtime::spawn_blocking(clipboard_icon_hint_sync)
+        .await
+        .map_err(|e| e.to_string())?)
+}
+
+fn clipboard_icon_hint_sync() -> String {
+    let Ok(mut cb) = arboard::Clipboard::new() else {
+        return "none".into();
+    };
+    // An actual image in the clipboard is the most specific/valuable case.
+    if cb.get_image().is_ok() {
+        return "image".into();
+    }
+    let Ok(text) = cb.get_text() else {
+        return "none".into();
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return "none".into();
+    }
+    if text.starts_with("data:image/")
+        || (text.len() >= 32 && looks_like_base64_image(text))
+    {
+        return "base64".into();
+    }
+    if text.starts_with("http://") || text.starts_with("https://") {
+        return "url".into();
+    }
+    "text".into() // plain text: still enabled per UX; apply will reject it.
+}
+
+/// Pull an image out of the clipboard (image data, https URL, `data:` URI, or
+/// raw base64), transcode it to PNG, and stash it in the `.icons` cache.
+/// Returns the local cache path — the same shape as `import_app_icon` — so it
+/// becomes a normal `custom_icon`.
+#[tauri::command]
+async fn clipboard_icon_import(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cb = arboard::Clipboard::new()
+            .map_err(|e| format!("cannot open clipboard: {e}"))?;
+
+        // 1) Real image data (copied from a browser/screenshot tool) → PNG.
+        if let Ok(img) = cb.get_image() {
+            let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
+                .ok_or("clipboard image has invalid dimensions")?;
+            let mut png = Vec::new();
+            image::DynamicImage::ImageRgba8(rgba)
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .map_err(|e| format!("cannot encode clipboard image: {e}"))?;
+            return save_clipboard_icon(&app, &png);
+        }
+
+        // 2) Text: https URL, `data:image/...;base64,....`, or raw base64.
+        let text = cb
+            .get_text()
+            .map_err(|_| "clipboard contains neither an image nor usable text".to_string())?
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            return Err("clipboard is empty".into());
+        }
+        let raw = if let Some(rest) = text.strip_prefix("data:image/") {
+            let b64 = rest.split_once(',').map(|(_, b)| b).unwrap_or(rest);
+            decode_base64(&b64)?
+        } else if text.starts_with("http://") || text.starts_with("https://") {
+            download_image(&text)?
+        } else {
+            decode_base64(&text)?
+        };
+        let png = to_png_bytes(&raw)?;
+        save_clipboard_icon(&app, &png)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Re-encode arbitrary image bytes (png/jpeg/webp/gif/bmp/ico/…) as PNG.
+fn to_png_bytes(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let img =
+        image::load_from_memory(bytes).map_err(|_| "clipboard contents are not a valid image".to_string())?;
+    let mut out = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .map_err(|e| format!("cannot encode PNG: {e}"))?;
+    Ok(out)
+}
+
+fn save_clipboard_icon(app: &tauri::AppHandle, bytes: &[u8]) -> Result<Option<String>, String> {
+    let Some(dir) = icon_cache_dir(app) else {
+        return Ok(None);
+    };
+    let mut h = DefaultHasher::new();
+    bytes.hash(&mut h);
+    let cf = dir.join(format!("clipboard_{:016x}.png", h.finish()));
+    std::fs::write(&cf, bytes).map_err(|e| format!("cannot write icon: {e}"))?;
+    Ok(Some(cf.to_string_lossy().to_string()))
+}
+
+fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    if clean.is_empty() {
+        return Err("clipboard text is not valid base64".into());
+    }
+    // Tolerate missing padding — copied base64 often drops trailing '='.
+    let mut padded = clean.clone();
+    while padded.len() % 4 != 0 {
+        padded.push('=');
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(&padded)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(&padded))
+        .map_err(|_| "clipboard text is not valid base64".to_string())
+}
+
+fn looks_like_base64_image(s: &str) -> bool {
+    if s.chars().any(|c| {
+        !(c.is_ascii_alphanumeric() || "+/=-_".contains(c) || c.is_whitespace())
+    }) {
+        return false; // not pure base64 alphabet
+    }
+    match decode_base64(s) {
+        Ok(bytes) if bytes.len() >= 16 => is_image_bytes(&bytes),
+        _ => false,
+    }
+}
+
+fn is_image_bytes(b: &[u8]) -> bool {
+    b.starts_with(b"\x89PNG")
+        || b.starts_with(b"\xFF\xD8") // JPEG
+        || b.starts_with(b"GIF8")
+        || (b.len() > 12 && b.starts_with(b"RIFF") && &b[8..12] == b"WEBP")
+        || b.starts_with(b"BM") // BMP
+        || (b.len() > 6 && b[0] == 0 && b[1] == 0 && b[2] == 1 && b[3] == 0) // ICO
+}
+
 /// Build the `moonlight stream` CLI flags from the stored streaming prefs.
 fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
@@ -1636,6 +1777,8 @@ pub fn run() {
             cache_steamgrid_icon,
             import_app_icon,
             clear_cached_icon,
+            clipboard_icon_hint,
+            clipboard_icon_import,
             check_steamgrid_key,
             steamgrid_search,
             steamgrid_icons
