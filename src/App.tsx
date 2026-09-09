@@ -172,21 +172,17 @@ export default function App() {
 
   return (
     <div className="relative flex h-full w-full flex-col">
-      {!immersive && (
-        <>
-          {!fullscreen && <TitleBar fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen} />}
-          <TopBar
-            view={view}
-            onNavigate={setView}
-            fullscreen={fullscreen}
-            onToggleFullscreen={toggleFullscreen}
-            immersive={immersive}
-            onToggleImmersive={enterImmersive}
-            showMoonlight={moonlightEnabled && moonlightDir !== null}
-            showApps={appsEnabled}
-          />
-        </>
-      )}
+      {!fullscreen && <TitleBar fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen} />}
+      <TopBar
+        view={view}
+        onNavigate={setView}
+        fullscreen={fullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        immersive={immersive}
+        onToggleImmersive={enterImmersive}
+        showMoonlight={moonlightEnabled && moonlightDir !== null}
+        showApps={appsEnabled}
+      />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
           {view === "apps" && (

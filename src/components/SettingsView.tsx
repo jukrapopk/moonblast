@@ -195,9 +195,9 @@ export function SettingsView({
             {startWithWindows && (
               <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-(--color-muted)">
                 <li>Starts fullscreen with a clean background</li>
-                <li>Hides the app bar for a minimal UI</li>
-                <li>Minimizes other open windows</li>
-                <li>Suppresses the Windows desktop & taskbar (restored on exit)</li>
+                <li>Suppresses the desktop & taskbar by hiding the Windows shell</li>
+                <li>Minimizes other open windows so they don't show behind</li>
+                <li>Everything is restored when you exit Immersive Mode</li>
               </ul>
             )}
           </div>
