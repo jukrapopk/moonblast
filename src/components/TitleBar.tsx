@@ -50,14 +50,55 @@ export function TitleBar({
             { label: "Close", danger: true, onClick: () => close() },
           ])
         }
-        className="flex min-w-0 flex-1 cursor-default items-center gap-2 px-3 text-sm font-medium text-(--color-muted)"
+        className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-3 text-sm font-medium text-(--color-muted)"
       >
-        <img
-          src="/moonblast.svg"
-          alt="Moonblast"
-          draggable={false}
+        <svg
+          viewBox="0 0 1000 1000"
+          aria-hidden="true"
+          style={{
+            fillRule: "evenodd",
+            clipRule: "evenodd",
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+          }}
           className="h-[18px] w-[18px] shrink-0"
-        />
+        >
+          <g transform="matrix(1.26435,0,0,1.26435,-132.175,-132.175)">
+            <circle cx="500" cy="500" r="172.756" fill="currentColor" />
+          </g>
+          <g transform="matrix(2.43731,0,0,2.43731,-718.656,-718.656)">
+            <path
+              d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="56.35"
+            />
+          </g>
+          <g transform="matrix(-2.43731,0,0,2.43731,1718.66,-718.656)">
+            <path
+              d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="56.35"
+            />
+          </g>
+          <g transform="matrix(-2.43731,2.98485e-16,-2.98485e-16,-2.43731,1718.66,1718.7)">
+            <path
+              d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="56.35"
+            />
+          </g>
+          <g transform="matrix(2.43731,-2.98485e-16,-2.98485e-16,-2.43731,-718.656,1718.7)">
+            <path
+              d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="56.35"
+            />
+          </g>
+        </svg>
         <span className="truncate text-[13px]">Moonblast</span>
       </div>
 
