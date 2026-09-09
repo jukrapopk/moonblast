@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { PowerMenu } from "./PowerMenu";
+import { WifiModal } from "./ui/WifiModal";
 import { useTime, formatClock } from "../hooks/useTime";
+import { useWifi } from "../hooks/useWifi";
 
 export type View = "apps" | "moonlight" | "settings";
 
@@ -75,10 +77,20 @@ function batteryIcon(percent: number, charging: boolean) {
 const chipBase =
   "flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-(--color-muted) tabular-nums";
 
-/** Clock + battery chips shown in the TopBar's right cluster. */
-function Status() {
+function wifiChipIcon(signal: number) {
+  const weight = "bold" as const;
+  if (signal >= 75) return <WifiHigh size={16} weight={weight} />;
+  if (signal >= 50) return <WifiMedium size={16} weight={weight} />;
+  if (signal >= 25) return <WifiLow size={16} weight={weight} />;
+  if (signal > 0) return <WifiNone size={16} weight={weight} />;
+  return <WifiSlash size={16} weight={weight} />;
+}
+
+/** Clock + battery + WiFi chips shown in the TopBar's right cluster. */
+function Status({ onWifiClick, ssid }: { onWifiClick: () => void; ssid: string | null }) {
   const time = useTime();
   const battery = useBattery();
+  const wifi = useWifi();
   return (
     <div className="flex items-center gap-1.5 pr-1">
       <span className={chipBase} title={time.toLocaleString()}>
@@ -94,6 +106,16 @@ function Status() {
           {batteryIcon(battery.percent, battery.charging)}
           {battery.percent >= 0 ? `${battery.percent}%` : ""}
         </span>
+      )}
+      {wifi && (
+        <button
+          onClick={onWifiClick}
+          className={`${chipBase} hover:text-(--color-text) cursor-pointer`}
+          title={ssid ? `${ssid} · ${wifi.signal}%` : "WiFi · click to scan"}
+        >
+          {wifiChipIcon(wifi.signal)}
+          {ssid && <span className="max-w-32 truncate">{ssid}</span>}
+        </button>
       )}
     </div>
   );
@@ -126,6 +148,10 @@ export function TopBar({
   });
   const rightItems = items.filter((i) => i.nav === "right");
   const [powerOpen, setPowerOpen] = useState(false);
+  const [wifiOpen, setWifiOpen] = useState(false);
+  // Subscribed separately so the chip and the modal can both render the
+  // current SSID without coordinating state.
+  const wifi = useWifi();
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
@@ -138,7 +164,7 @@ export function TopBar({
       <div className="ml-auto" />
 
       <div className="relative flex items-center gap-2">
-        <Status />
+        <Status onWifiClick={() => setWifiOpen(true)} ssid={wifi?.ssid ?? null} />
         {rightItems.map((item) => (
           <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
         ))}
@@ -163,6 +189,7 @@ export function TopBar({
           immersive={immersive}
           onToggleImmersive={onToggleImmersive}
         />
+        <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} />
       </div>
     </header>
   );

@@ -24,6 +24,7 @@ impl Default for StreamState {
 
 mod settings;
 mod shell;
+mod wifi;
 
 pub use shell::run_shell_stub;
 
@@ -1826,6 +1827,22 @@ fn battery() -> Option<BatteryStatus> {
     })
 }
 
+/// Current WiFi connection for the chip in the TopBar. Returns `None` when
+/// the system has no WiFi adapter, so the UI can simply skip rendering the
+/// chip (same pattern as the battery command).
+#[tauri::command]
+fn wifi_current() -> Option<wifi::WifiConnection> {
+    wifi::current()
+}
+
+/// Visible network list. Called when the user opens the picker modal.
+/// Triggers a fresh scan (~1s) then returns the resulting list. Cost is
+/// paid only on demand, not on every chip poll.
+#[tauri::command]
+fn wifi_scan() -> Vec<wifi::WifiNetwork> {
+    wifi::scan_and_list().unwrap_or_default()
+}
+
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 fn system_power(action: String) -> Result<(), String> {
@@ -1946,6 +1963,8 @@ pub fn run() {
             enter_immersive,
             exit_immersive,
             battery,
+            wifi_current,
+            wifi_scan,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,
