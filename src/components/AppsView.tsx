@@ -125,7 +125,7 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
-      className={`group relative rounded-2xl p-3 transition-all duration-150 ${
+      className={`group relative rounded-2xl p-3 transition-all duration-150 hover:z-10 hover:scale-[1.08] hover:bg-(--color-accent-soft) hover:shadow-[0_12px_32px_-12px_var(--color-overlay)] ${
         focused
           ? "z-10 scale-[1.08] bg-(--color-accent-soft) shadow-[0_12px_32px_-12px_var(--color-overlay)]"
           : ""
