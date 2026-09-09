@@ -13,10 +13,15 @@ import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 export default function App() {
   const { settings, ready, update } = useSettings();
 
-  // Active view is persisted so the last open tab is restored on next launch.
+  // Active view is persisted so the last open tab is restored on next launch —
+  // but Settings is excluded: it never overwrites the stored view, so the app
+  // boots into the last "content" page (apps/moonlight) instead of Settings.
   const view = settings.general.last_view as View;
   const setView = (v: View) =>
-    update((s) => ({ ...s, general: { ...s.general, last_view: v } }));
+    update((s) => ({
+      ...s,
+      general: { ...s.general, last_view: v === "settings" ? s.general.last_view : v },
+    }));
   const [fullscreen, setFullscreen] = useState(false);
   const [immersive, setImmersive] = useState(false);
 
