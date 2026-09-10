@@ -1538,24 +1538,24 @@ fn moonlight_stream(
     Ok(true)
 }
 
-/// Tell the host to stop its currently-running app via `/cancel?uniqueid=<UUID>`,
-/// then kill the local streaming window Moonblast launched. The host stops
-/// the app immediately on receiving `/cancel` — without this, Sunshine
-/// only notices via the RTS socket closing and waits for its stream_timeout
-/// (default ~10s) before reaping the app.
+/// Tell the host to stop its currently-running app via
+/// `GET /cancel?uniqueid=<UUID>&uuid=<req-uuid>` (mirroring Moonlight Qt's
+/// `NvHTTP::quitApp()`), then kill the local streaming window Moonblast
+/// launched. The host stops the app immediately on receiving `/cancel` —
+/// without this, Sunshine only notices via the RTS socket closing and waits
+/// for its stream_timeout (default ~10s) before reaping the app.
 ///
-/// We POST over HTTPS without cert verification. The pinned server cert
-/// (the one we accepted at pairing time) only matters for app listing,
-/// RTS handshake, etc. — `/cancel` is an idempotent host-side abort
-/// signal that doesn't carry sensitive data; verifying the cert adds
-/// complexity (loading the DER → rustls root store) without a real
-/// security gain here. If a MITM is possible on the user's LAN they
-/// already have worse problems than a forged QUIT.
+/// We GET over HTTPS without cert pinning. The pinned server cert (the one
+/// we accepted at pairing time) only matters for app listing, RTS handshake,
+/// etc. — `/cancel` is an idempotent host-side abort signal that doesn't
+/// carry sensitive data; pinning adds complexity (loading the DER → rustls
+/// root store) without a real security gain here. If a MITM is possible on
+/// the user's LAN they already have worse problems than a forged QUIT.
 ///
-/// `moonlight quit <host>` is no longer used here: its polling thread
-/// races with our local kill (by the time it queries /serverinfo,
-/// currentGameId is already 0 and `quitApp()` short-circuits), and it
-/// spawns a visible Qt dialog that we don't want anyway.
+/// `moonlight quit <host>` is no longer used here: its polling thread races
+/// with our local kill (by the time it queries /serverinfo, currentGameId is
+/// already 0 and `quitApp()` short-circuits), and it spawns a visible Qt
+/// dialog that we don't want anyway.
 #[tauri::command]
 fn moonlight_quit(
     host: String,
@@ -1563,12 +1563,17 @@ fn moonlight_quit(
     streams: State<'_, StreamState>,
 ) -> Result<(), String> {
     let key = format!("{host}\u{1f}{app}");
-    let mut map = streams.0.lock().unwrap();
-    let active = map.remove(&key);
+    // Pop the entry from the map FIRST so a second `moonlight_quit` /
+    // `moonlight_stream` call against the same key can proceed immediately
+    // instead of blocking on the mutex while we wait for moonlight.exe to
+    // exit (which can take several seconds during Qt + WebRTC teardown,
+    // and was the cause of the "click Disconnect and Moonblast freezes"
+    // symptom).
+    let active = streams.0.lock().unwrap().remove(&key);
 
     // Send /cancel BEFORE killing the local process so the host sees the
-    // abort signal while the app is still running on its end. Fire-and-
-    // forget: a flaky QUIT shouldn't block the local kill.
+    // abort signal while the app is still running on its end. The local
+    // kill runs after, with bounded waits so we never hang the command.
     if let Some(active) = &active {
         if !active.uuid.is_empty() {
             send_host_cancel(&host, &active.uuid);
@@ -1576,27 +1581,74 @@ fn moonlight_quit(
     }
 
     if let Some(mut active) = active {
+        // TerminateProcess (std::process::Child::kill() on Windows) is
+        // immediate; the wait that follows is for the kernel to finish
+        // DLL-unload notifications + handle cleanup. That can take 1-5s
+        // for a Qt + WebRTC teardown, which is why we can't use plain
+        // `child.wait()` — it would block the command indefinitely.
         let _ = active.child.kill();
-        let _ = active.child.wait();
+        bounded_wait(&mut active.child, std::time::Duration::from_secs(5));
     }
     Ok(())
 }
 
-/// POST `/cancel?uniqueid=<UUID>` to the host over HTTPS. Plain HTTP on
-/// 47989 is also accepted by Sunshine but HTTPS-on-47984 is the default
-/// and what Moonlight itself uses. Best-effort: a failed QUIT just means
-/// the host cleans up via stream-timeout.
+/// Poll `try_wait` until the child exits or the deadline elapses. On
+/// timeout, sends a second `kill()` (in case anything survived the first
+/// one) and waits briefly for the OS to reap. Mirrors the polling pattern
+/// in `run_with_timeout` but without the captured-output plumbing (we
+/// don't need stdout/stderr here).
+///
+/// After this returns the `Child` may still hold an unreaped zombie if
+/// the OS is uncooperative, but Rust's `Drop` for `Child` will issue a
+/// non-blocking final `wait()` so it won't leak past command return.
+fn bounded_wait(child: &mut std::process::Child, deadline: std::time::Duration) {
+    let until = std::time::Instant::now() + deadline;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {
+                if std::time::Instant::now() >= until {
+                    let _ = child.kill();
+                    // Final wait, also bounded — if this hangs, the Drop
+                    // impl on Child is our last line of defense.
+                    let final_until = std::time::Instant::now()
+                        + std::time::Duration::from_secs(2);
+                    while std::time::Instant::now() < final_until {
+                        if let Ok(Some(_)) = child.try_wait() {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+/// `GET /cancel?uniqueid=<UUID>&uuid=<req-uuid>` to the host over HTTPS.
+/// Plain HTTP on 47989 is also accepted by Sunshine but HTTPS-on-47984 is
+/// the default and what Moonlight itself uses.
+///
+/// The `uuid` query parameter is the per-request UUID Moonlight Qt sends
+/// (`QUuid::createUuid().toRfc4122().toHex()`). Sunshine uses it to
+/// identify the cancel within its session log; older versions of GFE 3.x
+/// silently 400 without it. We don't bother generating a fresh one per
+/// call — it's a log-correlation token, not a security value.
 fn send_host_cancel(host: &str, uuid: &str) {
-    let url = format!("https://{host}:47984/cancel?uniqueid={uuid}");
-    // 1.5s timeout is plenty — the QUIT is a tiny request, and we don't
-    // want to delay the local kill if the host is unreachable.
+    let url = format!("https://{host}:47984/cancel?uniqueid={uuid}&uuid=00000000-0000-0000-0000-000000000000");
+    // Total deadline of ~4 s worst case. Connect is bounded separately so a
+    // flapping host doesn't eat the whole timeout in TLS handshakes.
     let agent = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_millis(1500))
+        .timeout_connect(std::time::Duration::from_secs(2))
+        .timeout_read(std::time::Duration::from_secs(2))
         .tls_config(Arc::new(rustls_config_insecure()))
         .build();
     // Ignore the result — the response is empty and the user doesn't need
     // to know. log failures at debug verbosity for diagnosing issues.
-    let _ = agent.post(&url).call();
+    let _ = agent.get(&url).call();
 }
 
 fn rustls_config_insecure() -> rustls::ClientConfig {
