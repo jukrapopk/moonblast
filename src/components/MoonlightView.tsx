@@ -670,8 +670,16 @@ export function MoonlightView() {
 
   function showToast(message: string) {
     setToast(message);
-    setTimeout(() => setToast(null), 2500);
   }
+
+  // Auto-dismiss toast after 2.5s. Bound to `toast` so rapid-fire toasts
+  // (e.g. pair + forget in quick succession) reset the timer instead of
+  // racing multiple setTimeouts that all clear to null.
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   function addHost(host: Host) {
     update((s) => ({ ...s, machines: [...s.machines, host] }));
