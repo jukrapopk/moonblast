@@ -159,6 +159,16 @@ fn first_interface(client: &WlanClient) -> Option<windows_sys::core::GUID> {
 /// connected network are flagged from the interfaces output (run
 /// alongside the scan so the chip and the modal agree on connection state).
 pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
+    // First call populates the wlan service's scan cache (returns only
+    // the currently-connected network, since the rest hasn't been
+    // discovered yet). The second call, ~3s later, returns the full
+    // visible-network list. We kick off the first one (which queues a
+    // scan), sleep, then re-read.
+    let _ = std::process::Command::new("netsh")
+        .args(["wlan", "show", "networks", "mode=bssid"])
+        .creation_flags(0x0800_0000)
+        .output();
+    std::thread::sleep(std::time::Duration::from_secs(3));
     let output = std::process::Command::new("netsh")
         .args(["wlan", "show", "networks", "mode=bssid"])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
