@@ -574,6 +574,12 @@ export function MoonlightView() {
   // quick succession all collapse into one scan). User-initiated scans
   // (manual Refresh button, pair-complete) bypass the debounce.
   const lastScanAt = useRef(0);
+  // Hold machines in a ref so `scan` can be stable across renders. Without
+  // this, every machine edit rebuilds `scan` (because the closure captures
+  // `machines`), which re-runs three downstream effects that depend on it
+  // and re-binds their listeners (focus, visibilitychange, pair-complete).
+  const machinesRef = useRef(machines);
+  machinesRef.current = machines;
 
   const scan = useCallback(async (opts: { force?: boolean } = {}) => {
     if (!opts.force) {
@@ -594,7 +600,7 @@ export function MoonlightView() {
       // Probe every saved machine (LAN or Tailscale `*.ts.net`) so they show
       // as online/offline without relying on mDNS.
       const probes = await Promise.all(
-        machines.map(async (m) => {
+        machinesRef.current.map(async (m) => {
           const p = await invoke<MoonlightProbe>("moonlight_probe", {
             host: m.address,
           }).catch(() => ({ reachable: false, paired: false }));
@@ -621,7 +627,7 @@ export function MoonlightView() {
     } finally {
       setScanning(false);
     }
-  }, [machines]);
+  }, []);
 
   // Run scans only when the window is focused + page is the active view. The
   // scan hammers the network (mDNS + HTTP probes per host); doing it in the
