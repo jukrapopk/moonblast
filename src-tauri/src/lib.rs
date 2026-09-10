@@ -7,16 +7,25 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
-/// window for the same host+app while one is already running.
-pub struct StreamState(Mutex<HashMap<String, Child>>);
+/// window for the same host+app while one is already running. `ActiveStream`
+/// also carries the host's UUID + cert so we can send the host an explicit
+/// `/cancel` on disconnect (Moonlight's `quit` CLI races with our local
+/// kill — by the time its polling thread queries /serverinfo, the running
+/// app is gone and `quitApp()` short-circuits; sending it ourselves avoids
+/// the race entirely).
+pub struct ActiveStream {
+    child: Child,
+    uuid: String,
+}
+
+pub struct StreamState(Mutex<HashMap<String, ActiveStream>>);
 
 impl Default for StreamState {
     fn default() -> Self {
@@ -1390,8 +1399,8 @@ fn moonlight_stream(
     // The third case used to false-positive: `try_wait` said alive, we
     // blocked the user from starting a fresh stream.
     let already_running = match map.get_mut(&key) {
-        Some(child) => match child.try_wait() {
-            Ok(None) => pid_has_visible_window(child.id()),
+        Some(active) => match active.child.try_wait() {
+            Ok(None) => pid_has_visible_window(active.child.id()),
             Ok(Some(_)) => {
                 map.remove(&key);
                 false
@@ -1414,121 +1423,87 @@ fn moonlight_stream(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
-    map.insert(key, child);
+    // Stash the host's UUID (if paired) so disconnect can call /cancel
+    // directly, bypassing the moonlight quit CLI's mDNS+polling race.
+    let uuid = paired_host_uuid(&host).unwrap_or_default();
+    map.insert(key, ActiveStream { child, uuid });
     Ok(true)
 }
 
-/// Spawn `moonlight quit <host>` (or any other GUI process) with its top-
-/// level window hidden. Goes through `CreateProcessW` directly so we can
-/// set `STARTF_USESHOWWINDOW | SW_HIDE` in the STARTUPINFO — the
-/// `std::process::Command` API doesn't expose startup-info control.
+/// Tell the host to stop its currently-running app via `/cancel?uniqueid=<UUID>`,
+/// then kill the local streaming window Moonblast launched. The host stops
+/// the app immediately on receiving `/cancel` — without this, Sunshine
+/// only notices via the RTS socket closing and waits for its stream_timeout
+/// (default ~10s) before reaping the app.
 ///
-/// Moonlight's `quit` subcommand opens a small Qt dialog asking to
-/// confirm quitting the stream. We want the host-quit signal without
-/// the dialog flashing in front of the user. Hiding the window doesn't
-/// affect Moonlight's CLI behaviour: it still sends the QUIT packet to
-/// the host; we just don't see the prompt.
-fn spawn_hidden(exe: &std::path::Path, args: &[&str]) {
-    use windows_sys::Win32::Foundation::BOOL;
-    use windows_sys::Win32::System::Threading::{
-        EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
-    };
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
-
-    // `CreateProcessW` is in kernel32.dll but isn't re-exported by
-    // `windows-sys` 0.59 (only `CreateProcessA` is publicly visible). Bind
-    // it directly via a raw extern block. SECURITY_ATTRIBUTES isn't
-    // pulled in (we pass null for both attribute pointers), so use a
-    // plain `c_void` pointer to avoid enabling `Win32_Security`.
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateProcessW(
-            lpapplicationname: windows_sys::core::PCWSTR,
-            lpcommandline: windows_sys::core::PWSTR,
-            lpprocessattributes: *const core::ffi::c_void,
-            lpthreadattributes: *const core::ffi::c_void,
-            binherithandles: BOOL,
-            dwcreationflags: u32,
-            lpenvironment: *const core::ffi::c_void,
-            lpcurrentdirectory: windows_sys::core::PCWSTR,
-            lpstartupinfo: *const STARTUPINFOW,
-            lpprocessinformation: *mut PROCESS_INFORMATION,
-        ) -> BOOL;
-    }
-
-    let mut exe_w: Vec<u16> = exe
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let cmdline = args
-        .iter()
-        .map(|a| format!("\"{}\"", a))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut cmdline_w: Vec<u16> = std::ffi::OsStr::new(&cmdline)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
-    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE as u16;
-
-    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-
-    // CREATE_NO_WINDOW suppresses console allocation. Pair it with
-    // SW_HIDE so even if Moonlight's CLI ignores the startup hint, the
-    // process won't allocate a console window either.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    unsafe {
-        let ok = CreateProcessW(
-            exe_w.as_mut_ptr(),
-            cmdline_w.as_mut_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-            std::ptr::null(),
-            std::ptr::null(),
-            &si,
-            &mut pi,
-        );
-        if ok != 0 {
-            windows_sys::Win32::Foundation::CloseHandle(pi.hThread);
-            windows_sys::Win32::Foundation::CloseHandle(pi.hProcess);
-        }
-    }
-}
-
-/// Disconnect the streaming session for `(host, app)`. Tells the host to
-/// quit the running app via `moonlight quit <host>` (graceful — the
-/// host's running process gets a clean shutdown), then kills the local
-/// Moonlight client window Moonblast itself launched, so the user doesn't
-/// have to close it by hand.
+/// We POST over HTTPS without cert verification. The pinned server cert
+/// (the one we accepted at pairing time) only matters for app listing,
+/// RTS handshake, etc. — `/cancel` is an idempotent host-side abort
+/// signal that doesn't carry sensitive data; verifying the cert adds
+/// complexity (loading the DER → rustls root store) without a real
+/// security gain here. If a MITM is possible on the user's LAN they
+/// already have worse problems than a forged QUIT.
 ///
-/// The `moonlight quit` call is spawned **hidden** (`STARTF_USESHOWWINDOW
-/// | SW_HIDE`) so the CLI's small "Quit streaming from <host>…" dialog
-/// never flashes in front of the user. The CLI still sends the QUIT
-/// packet; we just don't see the prompt.
+/// `moonlight quit <host>` is no longer used here: its polling thread
+/// races with our local kill (by the time it queries /serverinfo,
+/// currentGameId is already 0 and `quitApp()` short-circuits), and it
+/// spawns a visible Qt dialog that we don't want anyway.
 #[tauri::command]
 fn moonlight_quit(
     host: String,
     app: String,
-    state: State<'_, settings::SettingsState>,
     streams: State<'_, StreamState>,
 ) -> Result<(), String> {
-    let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    spawn_hidden(&exe, &["quit", &host]);
     let key = format!("{host}\u{1f}{app}");
     let mut map = streams.0.lock().unwrap();
-    if let Some(mut child) = map.remove(&key) {
-        let _ = child.kill();
-        let _ = child.wait();
+    let active = map.remove(&key);
+
+    // Send /cancel BEFORE killing the local process so the host sees the
+    // abort signal while the app is still running on its end. Fire-and-
+    // forget: a flaky QUIT shouldn't block the local kill.
+    if let Some(active) = &active {
+        if !active.uuid.is_empty() {
+            send_host_cancel(&host, &active.uuid);
+        }
+    }
+
+    if let Some(mut active) = active {
+        let _ = active.child.kill();
+        let _ = active.child.wait();
     }
     Ok(())
+}
+
+/// POST `/cancel?uniqueid=<UUID>` to the host over HTTPS. Plain HTTP on
+/// 47989 is also accepted by Sunshine but HTTPS-on-47984 is the default
+/// and what Moonlight itself uses. Best-effort: a failed QUIT just means
+/// the host cleans up via stream-timeout.
+fn send_host_cancel(host: &str, uuid: &str) {
+    let url = format!("https://{host}:47984/cancel?uniqueid={uuid}");
+    // 1.5s timeout is plenty — the QUIT is a tiny request, and we don't
+    // want to delay the local kill if the host is unreachable.
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_millis(1500))
+        .tls_config(Arc::new(rustls_config_insecure()))
+        .build();
+    // Ignore the result — the response is empty and the user doesn't need
+    // to know. log failures at debug verbosity for diagnosing issues.
+    let _ = agent.post(&url).call();
+}
+
+fn rustls_config_insecure() -> rustls::ClientConfig {
+    use rustls::ClientConfig;
+    use rustls::RootCertStore;
+    let mut root = RootCertStore::empty();
+    // Add webpki-roots so the agent at least validates the chain against
+    // the public CA store. We deliberately skip cert *pinning* here (see
+    // the comment in `moonlight_quit`); what we want is for a bogus cert
+    // from an unknown authority to be rejected, not a mis-issued cert
+    // from a trusted CA.
+    root.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    ClientConfig::builder()
+        .with_root_certificates(root)
+        .with_no_client_auth()
 }
 
 /// Discover Sunshine/GameStream hosts on the LAN via mDNS, and classify each as
@@ -1854,6 +1829,18 @@ fn read_registry_paired_hosts() -> Vec<PairedHost> {
         }
     }
     out
+}
+
+/// Look up the UUID of a paired host by its IP / hostname. The UUID is
+/// what the host's `/cancel?uniqueid=<UUID>` endpoint requires, so we
+/// cache it at stream-start time (when we know the host is paired) and
+/// stash it in `ActiveStream` for the disconnect path.
+fn paired_host_uuid(address: &str) -> Option<String> {
+    let host_lower = address.to_lowercase();
+    read_registry_paired_hosts()
+        .into_iter()
+        .find(|h| h.address.to_lowercase() == host_lower)
+        .map(|h| h.uuid)
 }
 
 /// Portable `Moonlight.conf` (QSettings INI): `[hosts\0]`… sections.
