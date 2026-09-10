@@ -205,7 +205,7 @@ async fn moonlight_list_apps(
 
 /// Launch Moonlight's pairing flow for a host and notify when it completes.
 #[tauri::command]
-fn moonlight_pair(
+async fn moonlight_pair(
     app: tauri::AppHandle,
     host: String,
     state: State<'_, settings::SettingsState>,
@@ -213,19 +213,44 @@ fn moonlight_pair(
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
     let child = Command::new(&exe)
         .args(["pair", &host])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x0800_0000)
         .spawn()
         .map_err(|e| e.to_string())?;
-    // Wait for Moonlight's pairing process to finish (it exits once the user
-    // completes pairing), then notify the frontend.
-    std::thread::spawn(move || {
-        let success = child
-            .wait_with_output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let full_host = host.clone();
+    // Wait on a blocking task so the Tauri command thread isn't held for
+    // the (potentially long) pairing session. The previous detached-thread
+    // version called `wait_with_output()` with no timeout — a hung
+    // moonlight.exe pair would leak a thread forever.
+    //
+    // Pairing is interactive: the user reads the PIN off Moonlight's dialog
+    // and types it into the host. 10 minutes is comfortably longer than any
+    // real pairing session.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut child = child;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+        let success = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status.success(),
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break false;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break false;
+                }
+            }
+        };
         let _ = app.emit(
             "pair-complete",
-            serde_json::json!({ "host": full_host, "success": success }),
+            serde_json::json!({ "host": host, "success": success }),
         );
     });
     Ok(())
