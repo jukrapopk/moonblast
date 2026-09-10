@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useEffect, useState } from "react";
 import { PageShell } from "./PageShell";
-import { Section } from "./ui/Section";
-import { Row } from "./ui/Row";
-import { Toggle } from "./ui/Toggle";
-import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
+import { Row } from "./ui/Row";
+import { Section } from "./ui/Section";
+import { Toggle } from "./ui/Toggle";
 
 type TailscaleStatus =
   | "not-found"
@@ -14,87 +14,87 @@ type TailscaleStatus =
   | "starting"
   | "logged-out"
   | "connected"
-  | "disconnected";function TailscaleRow() {
-  const [status, setStatus] = useState<TailscaleStatus | null>(null);
-  const [busy, setBusy] = useState(false);
+  | "disconnected"; function TailscaleRow() {
+    const [status, setStatus] = useState<TailscaleStatus | null>(null);
+    const [busy, setBusy] = useState(false);
 
-  async function refresh() {
-    try {
-      const info = await invoke<{ status: TailscaleStatus }>("tailscale_status");
-      setStatus(info.status);
-    } catch {
-      setStatus("not-found");
+    async function refresh() {
+      try {
+        const info = await invoke<{ status: TailscaleStatus }>("tailscale_status");
+        setStatus(info.status);
+      } catch {
+        setStatus("not-found");
+      }
     }
-  }
 
-  useEffect(() => {
-    refresh();
-    // Poll while the Settings page is mounted (it unmounts on navigation, so
-    // the timer stops when you leave). Keeps the status live without any cost
-    // on other pages.
-    const id = setInterval(refresh, 3000);
-    return () => clearInterval(id);
-  }, []);
+    useEffect(() => {
+      refresh();
+      // Poll while the Settings page is mounted (it unmounts on navigation, so
+      // the timer stops when you leave). Keeps the status live without any cost
+      // on other pages.
+      const id = setInterval(refresh, 3000);
+      return () => clearInterval(id);
+    }, []);
 
-  async function toggle(up: boolean) {
-    setBusy(true);
-    try {
-      await invoke("tailscale_set", { up });
-    } catch {
-      // keep current status; refresh below reflects reality
+    async function toggle(up: boolean) {
+      setBusy(true);
+      try {
+        await invoke("tailscale_set", { up });
+      } catch {
+        // keep current status; refresh below reflects reality
+      }
+      await refresh();
+      setBusy(false);
     }
-    await refresh();
-    setBusy(false);
-  }
 
-  if (status === null) {
+    if (status === null) {
+      return (
+        <Row label="Tailscale">
+          <span className="text-sm text-(--color-muted)">Checking…</span>
+        </Row>
+      );
+    }
+
+    if (status === "not-found") {
+      return (
+        <Row label="Tailscale">
+          <span className="text-sm text-(--color-muted)/60">Tailscale not found.</span>
+        </Row>
+      );
+    }
+
+    if (status === "not-running") {
+      return (
+        <Row label="Tailscale" description="Tailscale isn't running">
+          <span className="text-sm text-(--color-muted)/60">Start the Tailscale app to use it.</span>
+        </Row>
+      );
+    }
+
+    if (status === "starting") {
+      return (
+        <Row label="Tailscale" description="Tailscale is starting…">
+          <span className="text-sm text-(--color-muted)/60">Please wait.</span>
+        </Row>
+      );
+    }
+
+    if (status === "logged-out") {
+      return (
+        <Row label="Tailscale" description="Logged out">
+          <span className="text-sm text-(--color-muted)/60">Sign in to Tailscale to connect.</span>
+        </Row>
+      );
+    }
+
+    const up = status === "connected";
+
     return (
-      <Row label="Tailscale">
-        <span className="text-sm text-(--color-muted)">Checking…</span>
+      <Row label="Tailscale" description={up ? "Connected" : "Disconnected"}>
+        <Toggle checked={up} onChange={toggle} disabled={busy} />
       </Row>
     );
   }
-
-  if (status === "not-found") {
-    return (
-      <Row label="Tailscale">
-        <span className="text-sm text-(--color-muted)/60">Tailscale not found.</span>
-      </Row>
-    );
-  }
-
-  if (status === "not-running") {
-    return (
-      <Row label="Tailscale" description="Tailscale isn't running">
-        <span className="text-sm text-(--color-muted)/60">Start the Tailscale app to use it.</span>
-      </Row>
-    );
-  }
-
-  if (status === "starting") {
-    return (
-      <Row label="Tailscale" description="Tailscale is starting…">
-        <span className="text-sm text-(--color-muted)/60">Please wait.</span>
-      </Row>
-    );
-  }
-
-  if (status === "logged-out") {
-    return (
-      <Row label="Tailscale" description="Logged out">
-        <span className="text-sm text-(--color-muted)/60">Sign in to Tailscale to connect.</span>
-      </Row>
-    );
-  }
-
-  const up = status === "connected";
-
-  return (
-    <Row label="Tailscale" description={up ? "Connected" : "Disconnected"}>
-      <Toggle checked={up} onChange={toggle} disabled={busy} />
-    </Row>
-  );
-}
 
 function MoonlightRow({
   enabled,
@@ -250,9 +250,6 @@ export function SettingsView({
         <Row label="Show Time" description="Show the clock in the TopBar.">
           <Toggle checked={showTime} onChange={onToggleShowTime} />
         </Row>
-        <Row label="Show WiFi" description="Show the WiFi status icon in the TopBar.">
-          <Toggle checked={showWifi} onChange={onToggleShowWifi} />
-        </Row>
         <Row
           label="Show Battery"
           description={
@@ -262,6 +259,9 @@ export function SettingsView({
           }
         >
           <Toggle checked={showBattery} onChange={onToggleShowBattery} disabled={hasBattery !== true} />
+        </Row>
+        <Row label="Show WiFi" description="Show the WiFi status icon in the TopBar.">
+          <Toggle checked={showWifi} onChange={onToggleShowWifi} />
         </Row>
         <Row label="Show Audio" description="Show the volume control in the TopBar.">
           <Toggle checked={showAudio} onChange={onToggleShowAudio} />
@@ -298,13 +298,12 @@ export function SettingsView({
         </Row>
         {sgStatus && (
           <div
-            className={`px-1 py-2 text-sm ${
-              sgStatus === "valid"
+            className={`px-1 py-2 text-sm ${sgStatus === "valid"
                 ? "text-(--color-accent)"
                 : sgStatus === "checking"
                   ? "text-(--color-muted)"
                   : "text-(--color-danger)"
-            }`}
+              }`}
           >
             {sgStatus === "checking"
               ? "Checking…"
@@ -326,7 +325,7 @@ export function SettingsView({
       <Button
         variant="outline"
         size="lg"
-        onClick={() => void invoke("open_windows_settings").catch(() => {})}
+        onClick={() => void invoke("open_windows_settings").catch(() => { })}
         className="w-full min-h-12"
       >
         Open Windows Settings
