@@ -8,6 +8,7 @@ import { AudioModal } from "./ui/AudioModal";
 import { useTime, formatClock, formatDate } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
 import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
+import { usePowerMenuTrigger, resetPowerMenu } from "../hooks/usePowerMenuTrigger";
 
 export type View = "apps" | "moonlight" | "settings";
 
@@ -170,6 +171,17 @@ export function TopBar({
   const [powerOpen, setPowerOpen] = useState(false);
   const [wifiOpen, setWifiOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
+  // Rust intercepts Alt+F4 (and taskbar-Close) while in Immersive Mode
+  // and asks us to open the Power menu via the global trigger. Sync our
+  // local state to it; reset on close so the next request works.
+  const powerTriggered = usePowerMenuTrigger();
+  useEffect(() => {
+    if (powerTriggered) setPowerOpen(true);
+  }, [powerTriggered]);
+  const closePower = () => {
+    setPowerOpen(false);
+    resetPowerMenu();
+  };
   // One subscription shared by the chip (Status) and the modal prop.
   // `refreshWifi` is also called on modal open/close so the chip picks
   // up any state change the user made in the modal right away.
@@ -258,7 +270,7 @@ export function TopBar({
         </button>
         <PowerMenu
           open={powerOpen}
-          onClose={() => setPowerOpen(false)}
+          onClose={closePower}
           fullscreen={fullscreen}
           onToggleFullscreen={onToggleFullscreen}
           immersive={immersive}

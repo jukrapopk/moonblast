@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
 import { TopBar, type View } from "./components/TopBar";
 import { TitleBar } from "./components/TitleBar";
@@ -8,6 +9,7 @@ import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView } from "./components/SettingsView";
 import { useSettings } from "./settings/SettingsContext";
 import { useGamepad } from "./hooks/useGamepad";
+import { openPowerMenu } from "./hooks/usePowerMenuTrigger";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 
 export default function App() {
@@ -39,6 +41,18 @@ export default function App() {
   const appsEnabled = settings.integrations.apps_enabled;
 
   useGamepad();
+
+  // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
+  // asks the frontend to open the Power menu via this event. The
+  // interception lives in `on_window_event` in lib.rs.
+  useEffect(() => {
+    const unlisten = listen("request-power-menu", () => {
+      openPowerMenu();
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
 
   // Kill the WebView's native context menu and provide our own "Back/Refresh" menu
   // for any right-click not handled by a more specific menu.

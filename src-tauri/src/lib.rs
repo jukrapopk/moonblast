@@ -2540,10 +2540,25 @@ fn exit_windows(reboot: bool) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .on_window_event(|_window, event| {
+        .on_window_event(|window, event| {
             // If the app is closed while in Immersive Mode, bring the shell back.
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 suppress_shell(false);
+            } else if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Only intercept Alt+F4 / taskbar-Close while in Immersive
+                // Mode. Outside Immersive, the window can close normally —
+                // the user just wants to quit the launcher. EXPLORER_KILLED
+                // tracks Immersive state (set by `suppress_shell(true)`,
+                // cleared by `suppress_shell(false)`).
+                if !EXPLORER_KILLED.load(Ordering::SeqCst) {
+                    return;
+                }
+                // Don't destroy the window — pop the Power menu so the
+                // user makes a deliberate choice. The menu's "Close
+                // Moonblast" item calls `close_app`, which uses
+                // `app.exit(0)` and bypasses this hook on its way out.
+                api.prevent_close();
+                let _ = window.emit("request-power-menu", ());
             }
         })
         .setup(|app| {
