@@ -492,7 +492,7 @@ export function AppsView() {
 
   useEffect(() => {
     gridRef.current?.focus();
-  }, [query, shortcuts.length]);
+  }, [shortcuts.length]);
 
   useEffect(() => {
     if (focusIdx >= 0 && gridRef.current) {
