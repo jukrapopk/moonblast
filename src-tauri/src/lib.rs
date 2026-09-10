@@ -10,6 +10,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 #[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
@@ -1438,13 +1440,101 @@ fn moonlight_stream(
     Ok(true)
 }
 
-/// Disconnect the streaming session for `(host, app)`. Tells the host to quit
-/// the running app via `moonlight quit <host>` (graceful — the host's running
-/// process gets a clean shutdown), then kills the local Moonlight client
-/// window Moonblast itself launched, so the user doesn't have to close it
-/// by hand. Without the second step the local window often lingers — the CLI
-/// `quit` runs in a *separate* Moonlight process and only signals the host,
-/// not the existing client.
+/// Spawn `moonlight quit <host>` (or any other GUI process) with its top-
+/// level window hidden. Goes through `CreateProcessW` directly so we can
+/// set `STARTF_USESHOWWINDOW | SW_HIDE` in the STARTUPINFO — the
+/// `std::process::Command` API doesn't expose startup-info control.
+///
+/// Moonlight's `quit` subcommand opens a small Qt dialog asking to
+/// confirm quitting the stream. We want the host-quit signal without
+/// the dialog flashing in front of the user. Hiding the window doesn't
+/// affect Moonlight's CLI behaviour: it still sends the QUIT packet to
+/// the host; we just don't see the prompt.
+fn spawn_hidden(exe: &std::path::Path, args: &[&str]) {
+    use windows_sys::Win32::Foundation::BOOL;
+    use windows_sys::Win32::System::Threading::{
+        EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    // `CreateProcessW` is in kernel32.dll but isn't re-exported by
+    // `windows-sys` 0.59 (only `CreateProcessA` is publicly visible). Bind
+    // it directly via a raw extern block. SECURITY_ATTRIBUTES isn't
+    // pulled in (we pass null for both attribute pointers), so use a
+    // plain `c_void` pointer to avoid enabling `Win32_Security`.
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateProcessW(
+            lpapplicationname: windows_sys::core::PCWSTR,
+            lpcommandline: windows_sys::core::PWSTR,
+            lpprocessattributes: *const core::ffi::c_void,
+            lpthreadattributes: *const core::ffi::c_void,
+            binherithandles: BOOL,
+            dwcreationflags: u32,
+            lpenvironment: *const core::ffi::c_void,
+            lpcurrentdirectory: windows_sys::core::PCWSTR,
+            lpstartupinfo: *const STARTUPINFOW,
+            lpprocessinformation: *mut PROCESS_INFORMATION,
+        ) -> BOOL;
+    }
+
+    let mut exe_w: Vec<u16> = exe
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let cmdline = args
+        .iter()
+        .map(|a| format!("\"{}\"", a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut cmdline_w: Vec<u16> = std::ffi::OsStr::new(&cmdline)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE as u16;
+
+    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+    // CREATE_NO_WINDOW suppresses console allocation. Pair it with
+    // SW_HIDE so even if Moonlight's CLI ignores the startup hint, the
+    // process won't allocate a console window either.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    unsafe {
+        let ok = CreateProcessW(
+            exe_w.as_mut_ptr(),
+            cmdline_w.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+            std::ptr::null(),
+            std::ptr::null(),
+            &si,
+            &mut pi,
+        );
+        if ok != 0 {
+            windows_sys::Win32::Foundation::CloseHandle(pi.hThread);
+            windows_sys::Win32::Foundation::CloseHandle(pi.hProcess);
+        }
+    }
+}
+
+/// Disconnect the streaming session for `(host, app)`. Tells the host to
+/// quit the running app via `moonlight quit <host>` (graceful — the
+/// host's running process gets a clean shutdown), then kills the local
+/// Moonlight client window Moonblast itself launched, so the user doesn't
+/// have to close it by hand.
+///
+/// The `moonlight quit` call is spawned **hidden** (`STARTF_USESHOWWINDOW
+/// | SW_HIDE`) so the CLI's small "Quit streaming from <host>…" dialog
+/// never flashes in front of the user. The CLI still sends the QUIT
+/// packet; we just don't see the prompt.
 #[tauri::command]
 fn moonlight_quit(
     host: String,
@@ -1453,16 +1543,7 @@ fn moonlight_quit(
     streams: State<'_, StreamState>,
 ) -> Result<(), String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    // 1) Tell the host to terminate the running app. Spawned fire-and-forget;
-    //    failures here don't block the local kill below — the local window
-    //    should close either way.
-    let _ = Command::new(&exe)
-        .args(["quit", &host])
-        .spawn();
-    // 2) Kill the local streaming window Moonblast launched for this
-    //    host+app. `Child::kill` is a no-op if the process already exited
-    //    (e.g. the host terminated the stream so quickly the window closed
-    //    on its own), so this is safe even when the two race.
+    spawn_hidden(&exe, &["quit", &host]);
     let key = format!("{host}\u{1f}{app}");
     let mut map = streams.0.lock().unwrap();
     if let Some(mut child) = map.remove(&key) {
