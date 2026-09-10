@@ -2381,12 +2381,24 @@ async fn exit_immersive() -> Result<(), String> {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(non_snake_case)]
 struct BatteryStatus {
     /// 0–100. Returns -1 when the OS reports "unknown" (laptop with a battery
     /// that hasn't reported a level yet, or a percentage the API couldn't read).
     percent: i32,
-    /// True when plugged in / charging.
+    /// True when the battery is actively accepting current. Uses the hardware
+    /// `BatteryFlag & 0x08` bit rather than `ACLineStatus == 1` so a fully-
+    /// charged laptop on the charger is "plugged in but not charging", not
+    /// "charging".
     charging: bool,
+    /// True when the system is on wall power (regardless of charge state).
+    /// Drives the Power Source line in the modal.
+    pluggedIn: bool,
+    /// Estimated seconds until empty (on battery) or until full (charging),
+    /// when the OS knows it. `0` means the OS explicitly reports no estimate
+    /// rather than "0 seconds left"; the modal renders "Calculating…" then.
+    /// `None` when the OS reports `BatteryLifeTime == -1` (unknown).
+    timeRemainingSec: Option<u32>,
 }
 
 /// Report the current battery state, or `None` when the system has no battery
@@ -2409,10 +2421,21 @@ fn battery() -> Option<BatteryStatus> {
         // BatteryLifePercent is 0–100, or 255 when unknown. We surface -1 for
         // unknown so the UI can fall back to a charging icon without a percent.
         percent: if s.BatteryLifePercent == 255 { -1 } else { s.BatteryLifePercent as i32 },
-        // ACLineStatus: 1 = online, 0 = offline, 255 = unknown. Treat 1 as
-        // charging (matches Windows' own "plugged in, not necessarily charging"
-        // semantics — the OS updates the icon either way).
-        charging: s.ACLineStatus == 1,
+        // BatteryFlag & 0x08 = "charging" hardware bit. Falls back to
+        // ACLineStatus == 1 only when the BatteryFlag is the "unknown" sentinel
+        // (255), so we still report "plugged in" correctly in that edge case.
+        charging: if s.BatteryFlag != 255 { s.BatteryFlag & 0x08 != 0 } else { s.ACLineStatus == 1 },
+        // ACLineStatus: 1 = online, 0 = offline, 255 = unknown.
+        pluggedIn: s.ACLineStatus == 1,
+        // BatteryLifeTime: seconds until empty on battery; 0 = charging /
+        // not supported; -1 (cast to DWORD = 0xFFFFFFFF) = unknown.
+        // The charging-while-no-rate case surfaces as Some(0), which the
+        // modal renders as "Calculating…" — distinct from None (the OS
+        // reporting an honest "I don't know").
+        timeRemainingSec: match s.BatteryLifeTime {
+            0xFFFFFFFF => None,
+            v => Some(v),
+        },
     })
 }
 

@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
 import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
+import { BatteryModal, type BatteryStatus } from "./ui/BatteryModal";
 import { useTime, formatClock, formatDate } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
 import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
@@ -18,11 +20,14 @@ const items: { id: View; label: string; nav: "left" | "right"; icon: ReactNode }
   { id: "settings", label: "Settings", nav: "right", icon: <Gear size={24} weight="bold" /> },
 ];
 
-interface BatteryStatus {
-  /** 0–100, or -1 when the OS reports "unknown". */
-  percent: number;
-  /** True when plugged in / charging. */
-  charging: boolean;
+/** "1 h 42 min" / "12 min" / "—" — used for the chip's hover tooltip. */
+function formatDurationShort(sec: number | null): string {
+  if (sec === null || sec === 0) return "calculating…";
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
 }
 
 /**
@@ -89,6 +94,8 @@ function audioChipFallback() {
 function Status({
   onWifiClick,
   onAudioClick,
+  onBatteryClick,
+  batteryOpen,
   wifi,
   audio,
   showWifi,
@@ -97,6 +104,8 @@ function Status({
 }: {
   onWifiClick: () => void;
   onAudioClick: () => void;
+  onBatteryClick: () => void;
+  batteryOpen: boolean;
   wifi: WifiConnection | null | undefined;
   audio: AudioMaster | undefined;
   showWifi: boolean;
@@ -104,15 +113,30 @@ function Status({
   showAudio: boolean;
 }) {
   const battery = useBattery();
+  // Tooltip doubles as the aria-label: status · percent · time-remaining.
+  const batteryLabel = battery
+    ? battery.charging
+      ? `Charging · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDurationShort(battery.timeRemainingSec)} to full`
+      : `On battery · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDurationShort(battery.timeRemainingSec)} left`
+    : "Battery";
+  // Critical flash at ≤5% on battery (the OS-driven warning band). Below the
+  // static `danger` red threshold so the chip never doubles up.
+  const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
   return (
     <div className="flex items-center">
       {showBattery && battery && (
-        <TopBarButton
-          label={battery.charging ? `Charging · ${battery.percent}%` : `On battery · ${battery.percent}%`}
-          icon={batteryIcon(battery.percent, battery.charging)}
-          onClick={() => {/* TODO: open battery details */}}
-          danger={!battery.charging && battery.percent >= 0 && battery.percent <= 10}
-        />
+        <motion.div
+          animate={critical ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
+          transition={critical ? { repeat: Infinity, duration: 1.4, ease: "easeInOut" } : { duration: 0 }}
+        >
+          <TopBarButton
+            label={batteryLabel}
+            icon={batteryIcon(battery.percent, battery.charging)}
+            onClick={onBatteryClick}
+            active={batteryOpen}
+            danger={!battery.charging && battery.percent >= 0 && battery.percent <= 10}
+          />
+        </motion.div>
       )}
       {showWifi && wifi && (
         <TopBarButton
@@ -171,6 +195,7 @@ export function TopBar({
   const [powerOpen, setPowerOpen] = useState(false);
   const [wifiOpen, setWifiOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
+  const [batteryOpen, setBatteryOpen] = useState(false);
   // Rust intercepts Alt+F4 (and taskbar-Close) while in Immersive Mode
   // and asks us to open the Power menu via the global trigger. Subscribe
   // directly so every request reaches us even if the menu is already
@@ -236,6 +261,8 @@ export function TopBar({
         <Status
           onWifiClick={() => setWifiOpen(true)}
           onAudioClick={() => setAudioOpen(true)}
+          onBatteryClick={() => setBatteryOpen(true)}
+          batteryOpen={batteryOpen}
           wifi={wifi}
           audio={audio}
           showWifi={showWifi}
@@ -274,6 +301,7 @@ export function TopBar({
         />
         <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} radioOn={wifi?.radioOn ?? null} />
         <AudioModal open={audioOpen} onClose={() => setAudioOpen(false)} onChanged={refreshAudio} />
+        <BatteryModal open={batteryOpen} onClose={() => setBatteryOpen(false)} />
       </div>
     </header>
   );
