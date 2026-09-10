@@ -161,6 +161,8 @@ export function SettingsView({
   onToggleShowWifi,
   showBattery,
   onToggleShowBattery,
+  showAudio,
+  onToggleShowAudio,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -180,6 +182,8 @@ export function SettingsView({
   onToggleShowWifi: (v: boolean) => void;
   showBattery: boolean;
   onToggleShowBattery: (v: boolean) => void;
+  showAudio: boolean;
+  onToggleShowAudio: (v: boolean) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
   // Battery hardware presence — one-shot read on mount. `undefined`
@@ -258,6 +262,9 @@ export function SettingsView({
           }
         >
           <Toggle checked={showBattery} onChange={onToggleShowBattery} disabled={hasBattery !== true} />
+        </Row>
+        <Row label="Show Audio" description="Show the volume control in the TopBar.">
+          <Toggle checked={showAudio} onChange={onToggleShowAudio} />
         </Row>
       </Section>
 

@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SpeakerHigh, SpeakerLow, SpeakerNone, SpeakerX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
+import { AudioModal } from "./ui/AudioModal";
 import { useTime, formatClock } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
+import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
 
 export type View = "apps" | "moonlight" | "settings";
 
@@ -71,17 +73,36 @@ function wifiChipIcon(wifi: WifiConnection) {
   return <WifiSlash size={24} weight={weight} />;
 }
 
-/** Battery / WiFi icon buttons shown in the TopBar's right cluster. */
+/** Speaker glyph matching the main mixer level + mute state. */
+function audioChipIcon(master: AudioMaster) {
+  const weight = "bold" as const;
+  if (master.muted || master.volume === 0) return <SpeakerX size={24} weight={weight} />;
+  if (master.volume < 50) return <SpeakerLow size={24} weight={weight} />;
+  return <SpeakerHigh size={24} weight={weight} />;
+}
+
+/** Placeholder while the master read is in flight — avoids icon pop-in. */
+function audioChipFallback() {
+  return <SpeakerNone size={24} weight="bold" />;
+}
+
+/** Battery / WiFi / audio icon buttons shown in the TopBar's right cluster. */
 function Status({
   onWifiClick,
+  onAudioClick,
   wifi,
+  audio,
   showWifi,
   showBattery,
+  showAudio,
 }: {
   onWifiClick: () => void;
+  onAudioClick: () => void;
   wifi: WifiConnection | null | undefined;
+  audio: AudioMaster | undefined;
   showWifi: boolean;
   showBattery: boolean;
+  showAudio: boolean;
 }) {
   const battery = useBattery();
   return (
@@ -101,6 +122,13 @@ function Status({
           onClick={onWifiClick}
         />
       )}
+      {showAudio && (
+        <TopBarButton
+          label={audio ? (audio.muted ? "Muted" : `Volume · ${audio.volume}%`) : "Audio"}
+          icon={audio ? audioChipIcon(audio) : audioChipFallback()}
+          onClick={onAudioClick}
+        />
+      )}
     </div>
   );
 }
@@ -117,6 +145,7 @@ export function TopBar({
   showTime,
   showWifi,
   showBattery,
+  showAudio,
 }: {
   view: View;
   onNavigate: (v: View) => void;
@@ -129,6 +158,7 @@ export function TopBar({
   showTime: boolean;
   showWifi: boolean;
   showBattery: boolean;
+  showAudio: boolean;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
   const visibleLeft = leftItems.filter((i) => {
@@ -139,6 +169,7 @@ export function TopBar({
   const rightItems = items.filter((i) => i.nav === "right");
   const [powerOpen, setPowerOpen] = useState(false);
   const [wifiOpen, setWifiOpen] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
   // One subscription shared by the chip (Status) and the modal prop.
   // `refreshWifi` is also called on modal open/close so the chip picks
   // up any state change the user made in the modal right away.
@@ -146,6 +177,13 @@ export function TopBar({
   useEffect(() => {
     refreshWifi();
   }, [wifiOpen, refreshWifi]);
+  // Master mixer level for the speaker chip. Refreshed on modal close
+  // (plus focus + a slow poll inside the hook) so the icon tracks
+  // volume-key / external-mixer changes.
+  const { master: audio, refresh: refreshAudio } = useAudioMaster();
+  useEffect(() => {
+    if (!audioOpen) refreshAudio();
+  }, [audioOpen, refreshAudio]);
   const time = useTime();
 
   return (
@@ -176,7 +214,15 @@ export function TopBar({
       )}
 
       <div className="relative flex items-center gap-1">
-        <Status onWifiClick={() => setWifiOpen(true)} wifi={wifi} showWifi={showWifi} showBattery={showBattery} />
+        <Status
+          onWifiClick={() => setWifiOpen(true)}
+          onAudioClick={() => setAudioOpen(true)}
+          wifi={wifi}
+          audio={audio}
+          showWifi={showWifi}
+          showBattery={showBattery}
+          showAudio={showAudio}
+        />
         {rightItems.map((item) => (
           <TopBarButton
             key={item.id}
@@ -208,6 +254,7 @@ export function TopBar({
           onToggleImmersive={onToggleImmersive}
         />
         <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} radioOn={wifi?.radioOn ?? null} />
+        <AudioModal open={audioOpen} onClose={() => setAudioOpen(false)} onChanged={refreshAudio} />
       </div>
     </header>
   );
@@ -215,7 +262,7 @@ export function TopBar({
 
 /**
  * Shared circular icon button used for every TopBar control — nav items
- * (Apps / Moonlight / Settings), system status (battery, WiFi), and the
+ * (Apps / Moonlight / Settings), system status (battery, WiFi, audio), and the
  * power button. Two visual states:
  *   - `active` (default false): the current nav view — soft accent
  *     background + accent icon.

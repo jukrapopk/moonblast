@@ -45,6 +45,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - apps: `discover_apps` (Start Menu + Store + Steam), `launch_app`
   - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`
   - WiFi: `wifi_current` (netsh-based, no 1168 bug; exposes `radioOn`), `wifi_scan` (WlanScan + 2.5s + netsh, `async`+`spawn_blocking`), `wifi_connect(ssid)`, `wifi_connect_with_password(ssid, password, auth)`, `wifi_disconnect`, `wifi_forget(ssid)` (idempotent), `open_wifi_settings` (radio on/off lives in the OS)
+  - audio: `audio_devices`, `audio_set_default_device(id)` (all roles, like the Sound panel), `audio_master`, `audio_set_master_volume`, `audio_set_master_mute`, `audio_sessions` (grouped by exe), `audio_set_session_volume/mute`, `audio_reset_sessions` (all to max + unmuted), `open_sound_settings` — Core Audio COM via hand-declared vtables in `audio.rs`, all `async`+`spawn_blocking`
   - clipboard icons: `clipboard_icon_hint`, `clipboard_icon_import`
   - SteamGridDB: `check_steamgrid_key`, `steamgrid_search`, `steamgrid_icons`
 - **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON, written atomically (tmp + rename); emits a `settings-changed` event.
@@ -56,7 +57,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 ```
 src/                          # React frontend
   components/
-    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList, Button, Card, Prompt, WifiModal, StatusPill, IconTile)
+    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList, Button, Card, Prompt, WifiModal, AudioModal, Slider, StatusPill, IconTile)
     TopBar.tsx                # icon nav + power button
     TitleBar.tsx              # custom window title bar
     PageShell.tsx             # shared page layout

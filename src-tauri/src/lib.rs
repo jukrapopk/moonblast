@@ -25,6 +25,7 @@ impl Default for StreamState {
 mod settings;
 mod shell;
 mod wifi;
+mod audio;
 
 pub use shell::run_shell_stub;
 
@@ -1912,10 +1913,85 @@ fn open_wifi_settings() -> Result<(), String> {
     open_settings_uri("ms-settings:network-wifi")
 }
 
+/// Open the Windows Sound settings app.
+#[tauri::command]
+fn open_sound_settings() -> Result<(), String> {
+    open_settings_uri("ms-settings:sound")
+}
+
 /// Open the Windows Settings app (root page).
 #[tauri::command]
 fn open_windows_settings() -> Result<(), String> {
     open_settings_uri("ms-settings:")
+}
+
+/// Output devices for the TopBar audio picker (default render endpoint first
+/// by `is_default`; the UI sorts alphabetically and marks the default).
+#[tauri::command]
+async fn audio_devices() -> Result<audio::AudioDeviceList, String> {
+    tauri::async_runtime::spawn_blocking(audio::devices)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Set the default output device (all roles, like the Sound control panel).
+#[tauri::command]
+async fn audio_set_default_device(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || audio::set_default_device(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Main mixer level for the TopBar chip + modal.
+#[tauri::command]
+async fn audio_master() -> Result<audio::AudioMaster, String> {
+    tauri::async_runtime::spawn_blocking(audio::master)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn audio_set_master_volume(volume: u8) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || audio::set_master_volume(volume))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn audio_set_master_mute(muted: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || audio::set_master_mute(muted))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Per-app mixer rows, grouped by exe like the Windows mixer.
+#[tauri::command]
+async fn audio_sessions() -> Result<Vec<audio::AudioSession>, String> {
+    tauri::async_runtime::spawn_blocking(audio::sessions)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn audio_set_session_volume(id: String, volume: u8) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || audio::set_session_volume(&id, volume))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn audio_set_session_mute(id: String, muted: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || audio::set_session_mute(&id, muted))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Reset every app channel to max + unmuted. Returns sessions touched.
+#[tauri::command]
+async fn audio_reset_sessions() -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(audio::reset_sessions)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
@@ -2045,7 +2121,17 @@ pub fn run() {
             wifi_disconnect,
             wifi_forget,
             open_wifi_settings,
+            open_sound_settings,
             open_windows_settings,
+            audio_devices,
+            audio_set_default_device,
+            audio_master,
+            audio_set_master_volume,
+            audio_set_master_mute,
+            audio_sessions,
+            audio_set_session_volume,
+            audio_set_session_mute,
+            audio_reset_sessions,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,

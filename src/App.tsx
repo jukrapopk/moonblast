@@ -130,6 +130,9 @@ export default function App() {
   function setShowBattery(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_battery: v } }));
   }
+  function setShowAudio(v: boolean) {
+    update((s) => ({ ...s, customization: { ...s.customization, show_audio: v } }));
+  }
 
   // Sync the initial fullscreen state.
   useEffect(() => {
@@ -218,6 +221,7 @@ export default function App() {
         showTime={settings.customization.show_time}
         showWifi={settings.customization.show_wifi}
         showBattery={settings.customization.show_battery}
+        showAudio={settings.customization.show_audio}
       />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
@@ -252,6 +256,8 @@ export default function App() {
                 onToggleShowWifi={setShowWifi}
                 showBattery={settings.customization.show_battery}
                 onToggleShowBattery={setShowBattery}
+                showAudio={settings.customization.show_audio}
+                onToggleShowAudio={setShowAudio}
               />
             </motion.div>
           )}

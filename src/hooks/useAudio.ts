@@ -1,0 +1,118 @@
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+  /** True for the current default output. */
+  is_default: boolean;
+}
+
+export interface AudioDeviceList {
+  devices: AudioDevice[];
+  default_id: string;
+}
+
+export interface AudioMaster {
+  /** 0–100. */
+  volume: number;
+  muted: boolean;
+}
+
+export interface AudioSession {
+  /** Lowercased exe name — the key for set-volume/mute. */
+  id: string;
+  /** Display name (`chrome.exe`). */
+  name: string;
+  /** 0–100. */
+  volume: number;
+  muted: boolean;
+}
+
+/**
+ * Main mixer level for the TopBar chip: the system volume doesn't change
+ * on its own (outside of hardware keys), so we read on mount, window
+ * `focus` / visible, explicit `refresh()`, plus a slow 5s poll to catch
+ * external changes (keyboard volume keys, other mixers). The COM read is
+ * ~1ms on a blocking thread.
+ */
+export function useAudioMaster(): {
+  master: AudioMaster | undefined;
+  refresh: () => void;
+} {
+  const [master, setMaster] = useState<AudioMaster | undefined>(undefined);
+
+  const refresh = useCallback(async () => {
+    try {
+      setMaster(await invoke<AudioMaster>("audio_master"));
+    } catch {
+      // No audio device (or COM hiccup) — leave the last state alone.
+    }
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const safe = () => {
+      if (alive) void refresh();
+    };
+    safe();
+    const id = setInterval(safe, 5000);
+    function onFocus() {
+      safe();
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") safe();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refresh]);
+
+  return { master, refresh };
+}
+
+export async function fetchAudioDevices(): Promise<AudioDeviceList> {
+  return await invoke<AudioDeviceList>("audio_devices");
+}
+
+export async function fetchAudioMaster(): Promise<AudioMaster> {
+  return await invoke<AudioMaster>("audio_master");
+}
+
+export async function fetchAudioSessions(): Promise<AudioSession[]> {
+  return await invoke<AudioSession[]>("audio_sessions");
+}
+
+export async function setDefaultDevice(id: string): Promise<void> {
+  await invoke("audio_set_default_device", { id });
+}
+
+export async function setMasterVolume(volume: number): Promise<void> {
+  await invoke("audio_set_master_volume", { volume: Math.round(volume) });
+}
+
+export async function setMasterMute(muted: boolean): Promise<void> {
+  await invoke("audio_set_master_mute", { muted });
+}
+
+export async function setSessionVolume(id: string, volume: number): Promise<void> {
+  await invoke("audio_set_session_volume", { id, volume: Math.round(volume) });
+}
+
+export async function setSessionMute(id: string, muted: boolean): Promise<void> {
+  await invoke("audio_set_session_mute", { id, muted });
+}
+
+/** Reset every app channel to max + unmuted. Resolves with sessions touched. */
+export async function resetSessionVolumes(): Promise<number> {
+  return await invoke<number>("audio_reset_sessions");
+}
+
+export async function openSoundSettings(): Promise<void> {
+  await invoke("open_sound_settings");
+}
