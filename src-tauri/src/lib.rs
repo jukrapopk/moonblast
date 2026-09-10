@@ -1843,6 +1843,36 @@ fn wifi_scan() -> Vec<wifi::WifiNetwork> {
     wifi::scan_and_list().unwrap_or_default()
 }
 
+/// Connect to a WiFi network by SSID. Returns `Ok(())` on success, or an
+/// `Err` with a human-readable reason — the UI can surface this to the
+/// user (e.g. "profile required" for secured-no-saved-profile networks).
+#[tauri::command]
+fn wifi_connect(ssid: String) -> Result<(), String> {
+    wifi::connect(&ssid)
+}
+
+/// Disconnect from the current WiFi network. No-op if already disconnected.
+#[tauri::command]
+fn wifi_disconnect() -> Result<(), String> {
+    wifi::disconnect()
+}
+
+/// Enable (`true`) or disable (`false`) the WiFi radio. Returns the new
+/// state — `true` = radio on, `false` = radio off, `None` if the
+/// adapter isn't reachable.
+#[tauri::command]
+fn wifi_radio_set(enabled: bool) -> Result<Option<bool>, String> {
+    wifi::set_radio(enabled)?;
+    Ok(wifi::radio_state())
+}
+
+/// Read the current WiFi radio state. `true` = on, `false` = off,
+/// `None` if the adapter isn't reachable.
+#[tauri::command]
+fn wifi_radio_get() -> Option<bool> {
+    wifi::radio_state()
+}
+
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 fn system_power(action: String) -> Result<(), String> {
@@ -1965,6 +1995,10 @@ pub fn run() {
             battery,
             wifi_current,
             wifi_scan,
+            wifi_connect,
+            wifi_disconnect,
+            wifi_radio_set,
+            wifi_radio_get,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,

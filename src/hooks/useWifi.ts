@@ -71,3 +71,31 @@ export function useWifiScan(): {
   }
   return { networks, loading, scan };
 }
+
+/**
+ * Connect to a network by SSID. Resolves on success; rejects with the
+ * netsh error message (e.g. "no wireless network profile" for secured
+ * networks the user has never connected to — the UI should fall back
+ * to opening Windows WiFi settings in that case).
+ */
+export async function wifiConnect(ssid: string): Promise<void> {
+  await invoke("wifi_connect", { ssid });
+}
+
+/** Disconnect from the current network. No-op if already disconnected. */
+export async function wifiDisconnect(): Promise<void> {
+  await invoke("wifi_disconnect");
+}
+
+/**
+ * Enable (`true`) or disable (`false`) the WiFi radio. Returns the new
+ * state as reported by the OS — `null` if the adapter isn't reachable.
+ */
+export async function wifiRadioSet(enabled: boolean): Promise<boolean | null> {
+  return await invoke<boolean | null>("wifi_radio_set", { enabled });
+}
+
+/** Read the current WiFi radio state. `true` = on, `false` = off. */
+export async function wifiRadioGet(): Promise<boolean | null> {
+  return await invoke<boolean | null>("wifi_radio_get");
+}
