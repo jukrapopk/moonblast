@@ -286,6 +286,12 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   useEffect(() => {
     if (!open) setPasswordTarget(null);
   }, [open]);
+  // Clear in-flight state when the modal closes so a fresh open doesn't
+  // show stale "Connecting…" / "Disconnecting…" subtitles. The chip
+  // picks up the real state immediately via the parent's refresh effect.
+  useEffect(() => {
+    if (!open) setBusy(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
