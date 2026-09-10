@@ -7,9 +7,8 @@ import {
   ArrowCounterClockwise,
   ArrowsClockwise,
   Check,
-  SpeakerHigh,
-  SpeakerX,
 } from "@phosphor-icons/react";
+import { SpeakerIcon } from "./SpeakerIcon";
 import {
   fetchAudioDevices,
   fetchAudioMaster,
@@ -225,11 +224,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
           aria-label={master.muted ? "Unmute" : "Mute"}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
         >
-          {master.muted || master.volume === 0 ? (
-            <SpeakerX size={20} weight="bold" />
-          ) : (
-            <SpeakerHigh size={20} weight="bold" />
-          )}
+          <SpeakerIcon volume={master.volume} muted={master.muted} size={20} />
         </button>
         <div className="min-w-0 flex-1">
           <Slider
@@ -268,11 +263,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
                 aria-label={s.muted ? `Unmute ${s.name}` : `Mute ${s.name}`}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
               >
-                {s.muted || s.volume === 0 ? (
-                  <SpeakerX size={16} weight="bold" />
-                ) : (
-                  <SpeakerHigh size={16} weight="bold" />
-                )}
+                <SpeakerIcon volume={s.volume} muted={s.muted} size={16} />
               </button>
               <div className="min-w-0 flex-1">
                 <Slider

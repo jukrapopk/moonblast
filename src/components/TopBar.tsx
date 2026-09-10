@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SpeakerHigh, SpeakerLow, SpeakerNone, SpeakerX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
@@ -75,15 +76,12 @@ function wifiChipIcon(wifi: WifiConnection) {
 
 /** Speaker glyph matching the main mixer level + mute state. */
 function audioChipIcon(master: AudioMaster) {
-  const weight = "bold" as const;
-  if (master.muted || master.volume === 0) return <SpeakerX size={24} weight={weight} />;
-  if (master.volume < 50) return <SpeakerLow size={24} weight={weight} />;
-  return <SpeakerHigh size={24} weight={weight} />;
+  return <SpeakerIcon volume={master.volume} muted={master.muted} size={24} />;
 }
 
 /** Placeholder while the master read is in flight — avoids icon pop-in. */
 function audioChipFallback() {
-  return <SpeakerNone size={24} weight="bold" />;
+  return <SpeakerIcon volume={100} muted={false} size={24} />;
 }
 
 /** Battery / WiFi / audio icon buttons shown in the TopBar's right cluster. */
