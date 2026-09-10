@@ -3,11 +3,19 @@
 # Loads the MSVC cross env first (vcvarsall x64_arm64), then invokes Tauri's
 # build command targeting aarch64-pc-windows-msvc. The cargo-built binary
 # (tauri-app.exe, named after [package].name in src-tauri/Cargo.toml) lands
-# in src-tauri\target\aarch64-pc-windows-msvc\release\ and is copied to
-# the desktop as moonblast.exe.
+# in src-tauri\target\aarch64-pc-windows-msvc\release\ and is copied to the
+# destination as moonblast.exe.
 #
 # Run from a regular PowerShell:
 #   pwsh -ExecutionPolicy Bypass -File scripts\build-arm64.ps1
+#   pwsh -ExecutionPolicy Bypass -File scripts\build-arm64.ps1 -Destination 'Z:\'
+
+[CmdletBinding()]
+param(
+  # Full path to a destination directory OR a full path ending in moonblast.exe.
+  # Default: the user's Desktop (moonblast.exe).
+  [string]$Destination
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -36,10 +44,21 @@ $target   = "aarch64-pc-windows-msvc"
 # ("tauri-app"), NOT after `productName` in tauri.conf.json ("Moonblast").
 # tauri.conf.json's productName only affects bundle metadata (installer file
 # names, Windows resource strings). Copy the real binary as moonblast.exe
-# so the desktop has a stable, recognisable name.
+# so the destination has a stable, recognisable name.
 $exe      = Join-Path $repo "src-tauri\target\$target\release\tauri-app.exe"
-$desktop  = [Environment]::GetFolderPath("Desktop")
-$dest     = Join-Path $desktop "moonblast.exe"
+
+# Resolve the destination: default to desktop. Accept either a full file path
+# (used as-is) or a directory path (we append the canonical moonblast.exe name).
+# Anything ending in a path separator is treated as a directory.
+if (-not $Destination) {
+  $Destination = Join-Path ([Environment]::GetFolderPath("Desktop")) "moonblast.exe"
+} elseif ($Destination.EndsWith('\') -or $Destination.EndsWith('/')) {
+  $Destination = Join-Path $Destination.TrimEnd('\','/') "moonblast.exe"
+} elseif (-not ($Destination.EndsWith('moonblast.exe', [System.StringComparison]::OrdinalIgnoreCase))) {
+  # Looks like a path without a filename — append the canonical name.
+  $Destination = Join-Path $Destination "moonblast.exe"
+}
+$dest = $Destination
 
 if (-not (Test-Path $vcvars)) {
   throw "vcvarsall.bat not found at $vcvars (update `$vcvars in this script if VS is elsewhere)"
