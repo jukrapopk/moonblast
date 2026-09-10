@@ -171,14 +171,9 @@ export async function wifiDisconnect(): Promise<void> {
 }
 
 /**
- * Enable (`true`) or disable (`false`) the WiFi radio. Returns the new
- * state as reported by the OS — `null` if the adapter isn't reachable.
+ * Open the Windows Wi-Fi settings app. Radio on/off lives there —
+ * toggling it from Moonblast needs elevation.
  */
-export async function wifiRadioSet(enabled: boolean): Promise<boolean | null> {
-  return await invoke<boolean | null>("wifi_radio_set", { enabled });
-}
-
-/** Read the current WiFi radio state. `true` = on, `false` = off. */
-export async function wifiRadioGet(): Promise<boolean | null> {
-  return await invoke<boolean | null>("wifi_radio_get");
+export async function openWifiSettings(): Promise<void> {
+  await invoke("open_wifi_settings");
 }

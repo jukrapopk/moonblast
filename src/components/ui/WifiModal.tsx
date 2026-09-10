@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
-import { Toggle } from "./Toggle";
+import { Gear } from "@phosphor-icons/react";
 import {
   WifiHigh,
   WifiLow,
@@ -17,12 +17,11 @@ import {
 } from "@phosphor-icons/react";
 import {
   fetchWifiCurrent,
+  openWifiSettings,
   useWifiScan,
   wifiConnect,
   wifiConnectWithPassword,
   wifiDisconnect,
-  wifiRadioGet,
-  wifiRadioSet,
   type WifiNetwork,
 } from "../../hooks/useWifi";
 
@@ -271,12 +270,9 @@ function NetworkRow({
 export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   const { networks, loading, scan } = useWifiScan();
   // Per-row in-flight state (the row that the user is currently acting
-  // on). `null` when nothing is happening. The radio toggle has its own
-  // `radioBusy` flag since it doesn't correspond to a row.
+  // on). `null` when nothing is happening.
   const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" } | null>(null);
-  const [radioBusy, setRadioBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [radioOn, setRadioOn] = useState<boolean | null>(null);
   // Local copy of the current SSID so connect/disconnect reflect
   // immediately, without waiting for the parent chip's 30s poll.
   // Seeded from the prop on open; re-fetched from the OS after every
@@ -302,10 +298,6 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     if (!open) return;
     scan();
     setError(null);
-    // Probe the radio state so the toggle reflects reality.
-    void wifiRadioGet()
-      .then((v) => setRadioOn(v ?? true))
-      .catch(() => setRadioOn(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -368,19 +360,6 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     }
   }
 
-  async function handleRadioToggle(next: boolean) {
-    setRadioBusy(true);
-    setError(null);
-    try {
-      const result = await wifiRadioSet(next);
-      setRadioOn(result ?? next);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setRadioBusy(false);
-    }
-  }
-
   return (
     <Modal open={open} onClose={onClose} title="WiFi" width="max-w-sm">
       {passwordTarget ? (
@@ -407,7 +386,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
               <p className="py-6 text-center text-sm text-(--color-muted)">Scanning…</p>
             ) : networks.length === 0 ? (
               <p className="py-6 text-center text-sm text-(--color-muted)">
-                No networks found. {radioOn === false ? "Wi-Fi is off — turn it on to scan." : "Make sure WiFi is on and try again."}
+                No networks found
               </p>
             ) : (
               networks.map((net) => {
@@ -441,11 +420,14 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
             >
               Rescan
             </Button>
-            <Toggle
-              checked={radioOn ?? true}
-              onChange={handleRadioToggle}
-              disabled={radioBusy}
-            />
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={() => void openWifiSettings()}
+              icon={<Gear size={14} weight="bold" />}
+            >
+              WiFi Settings
+            </Button>
           </div>
         </>
       )}

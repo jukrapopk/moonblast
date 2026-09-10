@@ -3,17 +3,18 @@
 //! The wlanapi path (Win32 `WlanEnumInterfaces` / `WlanQueryInterface` /
 //! `WlanGetAvailableNetworkList`) is the "proper" way to read WiFi state on
 //! Windows. In a long-lived Tauri process it returns `ERROR_NOT_FOUND` (1168)
-//! for read opcodes — the wlan service's per-client cache goes stale. The
-//! writes (`WlanSetInterface`) work fine, so the radio on/off still uses
-//! that path.
+//! for read opcodes — the wlan service's per-client cache goes stale. Only
+//! the `WlanScan` write opcode is reliable; the read opcodes don't survive
+//! multiple opens, so we shell out to `netsh` for everything that reads.
+//! Radio on/off is the user's job — the modal opens Windows Wi-Fi settings
+//! (`ms-settings:network-wifi`) for that.
 //!
-//! For reads, we shell out to `netsh wlan ...`, which always works:
+//! `netsh wlan ...` — the reliable read path:
 //! - `netsh wlan show interfaces`     → current connection (chip)
 //! - `netsh wlan show networks`       → visible networks (modal scan)
 //! - `netsh wlan connect name=...`    → join a network with a saved profile
 //!   or an open network
 //! - `netsh wlan disconnect`          → leave the current network
-//! - `netsh interface set interface`  → enable / disable the radio
 //!
 //! No UWP manifest, no permissions grant needed. Returns `None` from the
 //! public commands when no WiFi adapter is present so the UI can skip the
@@ -27,8 +28,7 @@ use std::ptr;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WiFi::{
-    WlanCloseHandle, WlanEnumInterfaces, WlanOpenHandle, WlanQueryInterface, WlanScan,
-    WlanSetInterface, WLAN_INTERFACE_INFO_LIST,
+    WlanCloseHandle, WlanEnumInterfaces, WlanOpenHandle, WlanScan, WLAN_INTERFACE_INFO_LIST,
 };
 // `WLAN_INTF_OPCODE` is `type WLAN_INTF_OPCODE = i32` in windows-sys 0.59, and
 // the constants are also `i32` — just pass the integer directly.
@@ -168,8 +168,6 @@ fn first_interface(client: &WlanClient) -> Option<windows_sys::core::GUID> {
 ///          ...
 /// ```
 ///
-/// We keep the strongest BSSID per SSID. Saved profiles and the currently
-/// connected network are flagged from the interfaces output (run
 /// Ask the wlan driver to refresh its visible-network cache. Fire-and-forget:
 /// `WlanScan` returns immediately and the scan runs asynchronously; the cache
 /// is updated within ~1-2s. Errors are ignored — if the scan can't be
@@ -188,7 +186,8 @@ fn trigger_scan() {
     }
 }
 
-/// alongside the scan so the chip and the modal agree on connection state).
+/// alongside the scan so the chip and the modal agree on connection state.
+/// Each entry is deduplicated by SSID, keeping the strongest BSSID.
 pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
     // `netsh wlan show networks` only returns whatever the wlan service
     // already has in its cache — it doesn't trigger a scan itself. The
@@ -661,84 +660,3 @@ fn rand_suffix() -> String {
     format!("{:016x}", nanos & 0xFFFFFFFFFFFFFFFF)
 }
 
-/// Current radio state — reads via wlanapi (which works for the
-/// radio-state opcode, even when other opcodes return 1168).
-pub fn radio_state() -> Option<bool> {
-    let client = shared_client()?;
-    let guid = first_interface(client)?;
-    unsafe {
-        let mut data_size: u32 = 0;
-        let mut data_ptr: *mut c_void = ptr::null_mut();
-        let mut value_type: i32 = 0;
-        let ok = WlanQueryInterface(
-            client.handle(),
-            &guid,
-            4, // wlan_intf_opcode_radio_state
-            ptr::null(),
-            &mut data_size,
-            &mut data_ptr,
-            &mut value_type,
-        );
-        if ok != 0 || data_ptr.is_null() || data_size < 4 {
-            return None;
-        }
-        let v = *(data_ptr as *const u32);
-        windows_sys::Win32::System::Memory::HeapFree(
-            windows_sys::Win32::System::Memory::GetProcessHeap(),
-            0,
-            data_ptr as *const c_void,
-        );
-        // 1 = on, 2 = off, 0 = unknown. Treat unknown as "on" so the UI
-        // shows the right state by default.
-        if v == 2 {
-            Some(false)
-        } else {
-            Some(true)
-        }
-    }
-}
-
-/// Enable / disable the WiFi radio. Tries wlanapi first, falls back to
-/// netsh interface admin if that fails (e.g. on Windows editions where
-/// `WlanSetInterface` returns "access denied" to non-administrative
-/// users — `netsh interface set interface "Wi-Fi" admin=...` works
-/// without elevation for the user's own adapter).
-pub fn set_radio(enabled: bool) -> Result<(), String> {
-    if let Some(client) = shared_client() {
-        if let Some(guid) = first_interface(client) {
-            let value: u32 = if enabled { 1 } else { 2 };
-            unsafe {
-                let ok = WlanSetInterface(
-                    client.handle(),
-                    &guid,
-                    4, // wlan_intf_opcode_radio_state
-                    std::mem::size_of::<u32>() as u32,
-                    &value as *const u32 as *const c_void,
-                    ptr::null(),
-                );
-                if ok == 0 {
-                    return Ok(());
-                }
-            }
-        }
-    }
-    // Fallback: disable the network adapter via netsh. "Wi-Fi" is the
-    // default interface name; the user can rename it, but for the common
-    // case this works.
-    let admin = if enabled { "enable" } else { "disable" };
-    let output = std::process::Command::new("netsh")
-        .args(["interface", "set", "interface", "Wi-Fi", &format!("admin={admin}")])
-        .creation_flags(0x0800_0000)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Err(if msg.is_empty() {
-            format!("radio toggle failed (exit {:?})", output.status.code())
-        } else {
-            msg
-        })
-    }
-}

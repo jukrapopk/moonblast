@@ -1877,20 +1877,24 @@ fn wifi_disconnect() -> Result<(), String> {
     wifi::disconnect()
 }
 
-/// Enable (`true`) or disable (`false`) the WiFi radio. Returns the new
-/// state — `true` = radio on, `false` = radio off, `None` if the
-/// adapter isn't reachable.
+/// Open the Windows Wi-Fi settings app. The user manages radio on/off
+/// there — radio toggling from Moonblast needs elevation to write
+/// `WlanSetInterface` and most `netsh interface set` calls, so we
+/// just hand the user off to the OS.
 #[tauri::command]
-fn wifi_radio_set(enabled: bool) -> Result<Option<bool>, String> {
-    wifi::set_radio(enabled)?;
-    Ok(wifi::radio_state())
-}
-
-/// Read the current WiFi radio state. `true` = on, `false` = off,
-/// `None` if the adapter isn't reachable.
-#[tauri::command]
-fn wifi_radio_get() -> Option<bool> {
-    wifi::radio_state()
+fn open_wifi_settings() -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    let status = Command::new("cmd")
+        .args(["/c", "start", "", "ms-settings:network-wifi"])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("could not open Wi-Fi settings (exit {:?})", status.code()))
+    }
 }
 
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
@@ -2018,8 +2022,7 @@ pub fn run() {
             wifi_connect,
             wifi_connect_with_password,
             wifi_disconnect,
-            wifi_radio_set,
-            wifi_radio_get,
+            open_wifi_settings,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,
