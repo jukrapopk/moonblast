@@ -44,6 +44,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - host discovery / pairing: `discover_hosts` (mDNS + per-host `list` probe), `moonlight_paired_hosts` (reads QSettings), `moonlight_probe` (TCP + list check, used for online/offline)
   - apps: `discover_apps` (Start Menu + Store + Steam), `launch_app`
   - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`
+  - WiFi: `wifi_current` (netsh-based, no 1168 bug), `wifi_scan` (WlanScan + 2.5s + netsh, `async`+`spawn_blocking`), `wifi_connect(ssid)`, `wifi_connect_with_password(ssid, password, auth)`, `wifi_disconnect`, `wifi_radio_get`, `wifi_radio_set(enabled)`
   - clipboard icons: `clipboard_icon_hint`, `clipboard_icon_import`
   - SteamGridDB: `check_steamgrid_key`, `steamgrid_search`, `steamgrid_icons`
 - **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON, written atomically (tmp + rename); emits a `settings-changed` event.
@@ -55,7 +56,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 ```
 src/                          # React frontend
   components/
-    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList)
+    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList, Button, Card, Prompt, WifiModal, StatusPill, IconTile)
     TopBar.tsx                # icon nav + power button
     TitleBar.tsx              # custom window title bar
     PageShell.tsx             # shared page layout
