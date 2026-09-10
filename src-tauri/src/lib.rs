@@ -2247,32 +2247,86 @@ async fn audio_reset_sessions() -> Result<usize, String> {
 
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
-fn system_power(action: String) -> Result<(), String> {
-    match action.as_str() {
+async fn system_power(action: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || match action.as_str() {
         // Use SetSuspendState directly — `rundll32 powrprof.dll,SetSuspendState`
         // is unreliable on Windows 10/11 (may hibernate or silently no-op).
         "sleep" => {
             use windows_sys::Win32::System::Power::SetSuspendState;
             let ok = unsafe { SetSuspendState(0, 0, 0) };
-            return if ok != 0 { Ok(()) } else { Err("SetSuspendState failed".to_string()) };
+            if ok == 0 {
+                // Surface the real reason — a denied request, missing
+                // privilege, or no power-management driver all return 0 with
+                // different last-errors. The user can look up the code
+                // instead of guessing.
+                let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+                Err(format!(
+                    "SetSuspendState failed (Win32 error {code}). See https://learn.microsoft.com/windows/win32/debug/system-error-codes"
+                ))
+            } else {
+                Ok(())
+            }
         }
-        "reboot" => {
-            let _ = Command::new("shutdown.exe")
-                .args(["/r", "/t", "0"])
-                .creation_flags(0x0800_0000)
-                .spawn()
-                .map_err(|e| e.to_string())?;
+        "reboot" => run_shutdown(&["/r", "/t", "0", "/c", "Moonblast: restart requested"]).or_else(|e| {
+            // Fall back to the Win32 API. `shutdown.exe` can fail when the
+            // user lacks `SeShutdownPrivilege` (some GPOs strip it) or when
+            // the binary is missing/corrupted. ExitWindowsEx on the same
+            // session sid works in those cases.
+            exit_windows(true).map_err(|win| {
+                format!("shutdown.exe failed ({e}); ExitWindowsEx also failed ({win})")
+            })
+        }),
+        "shutdown" => run_shutdown(&["/s", "/t", "0", "/c", "Moonblast: shutdown requested"]).or_else(|e| {
+            exit_windows(false).map_err(|win| {
+                format!("shutdown.exe failed ({e}); ExitWindowsEx also failed ({win})")
+            })
+        }),
+        _ => Err(format!("unknown power action: {action}")),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Run `shutdown.exe <args>` and wait for it. `spawn()` alone wouldn't tell
+/// us if `shutdown.exe` itself failed (e.g. privileged operation blocked);
+/// we need its exit code to surface a real error to the user.
+fn run_shutdown(args: &[&str]) -> Result<(), String> {
+    let out = Command::new("shutdown.exe")
+        .args(args)
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|e| format!("could not launch shutdown.exe: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        // `shutdown.exe` writes useful diagnostics to stderr when it
+        // refuses (e.g. "Access is denied. (5)"). Surface it verbatim.
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let trimmed = stderr.trim();
+        if trimmed.is_empty() {
+            Err(format!("shutdown.exe exited with status {}", out.status))
+        } else {
+            Err(format!("shutdown.exe: {trimmed}"))
         }
-        "shutdown" => {
-            let _ = Command::new("shutdown.exe")
-                .args(["/s", "/t", "0"])
-                .creation_flags(0x0800_0000)
-                .spawn()
-                .map_err(|e| e.to_string())?;
-        }
-        _ => return Err(format!("unknown power action: {action}")),
     }
-    Ok(())
+}
+
+/// Win32 fallback for shutdown / reboot when `shutdown.exe` is unavailable.
+/// `EWX_SHUTDOWN` / `EWX_REBOOT` need no special privilege for the calling
+/// user (unlike `EWX_FORCE`); we leave the force flag off so apps can
+/// cleanly save state and the user gets a clean shutdown.
+fn exit_windows(reboot: bool) -> Result<(), String> {
+    use windows_sys::Win32::System::Shutdown::{
+        ExitWindowsEx, EWX_REBOOT, EWX_SHUTDOWN, SHTDN_REASON_FLAG_PLANNED,
+    };
+    let flags = if reboot { EWX_REBOOT } else { EWX_SHUTDOWN } | SHTDN_REASON_FLAG_PLANNED;
+    let ok = unsafe { ExitWindowsEx(flags, 0) };
+    if ok == 0 {
+        let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        Err(format!("ExitWindowsEx failed (Win32 error {code})"))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
