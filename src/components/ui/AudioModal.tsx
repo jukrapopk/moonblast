@@ -12,7 +12,6 @@ import {
   fetchAudioDevices,
   fetchAudioMaster,
   fetchAudioSessions,
-  openSoundSettings,
   resetSessionVolumes,
   setDefaultDevice,
   setMasterMute,
@@ -340,11 +339,6 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
         )}
       </div>
 
-      <div className="mt-5 flex items-center justify-end gap-2 border-t border-(--color-border) pt-4">
-        <Button variant="ghost" size="md" onClick={() => void openSoundSettings()}>
-          Sound Settings
-        </Button>
-      </div>
-    </Modal>
+      </Modal>
   );
 }

@@ -180,11 +180,3 @@ export async function wifiDisconnect(): Promise<void> {
 export async function wifiForget(ssid: string): Promise<void> {
   await invoke("wifi_forget", { ssid });
 }
-
-/**
- * Open the Windows Wi-Fi settings app. Radio on/off lives there —
- * toggling it from Moonblast needs elevation.
- */
-export async function openWifiSettings(): Promise<void> {
-  await invoke("open_wifi_settings");
-}

@@ -2319,46 +2319,6 @@ fn wifi_forget(ssid: String) -> Result<(), String> {
     wifi::forget(&ssid)
 }
 
-/// Open a Windows Settings page via its `ms-settings:` URI.
-fn open_settings_uri(uri: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
-    let status = Command::new("cmd")
-        .args(["/c", "start", "", uri])
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .status()
-        .map_err(|e| e.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "could not open Windows settings (exit {:?})",
-            status.code()
-        ))
-    }
-}
-
-/// Open the Windows Wi-Fi settings app. The user manages radio on/off
-/// there — radio toggling from Moonblast needs elevation to write
-/// `WlanSetInterface` and most `netsh interface set` calls, so we
-/// just hand the user off to the OS.
-#[tauri::command]
-fn open_wifi_settings() -> Result<(), String> {
-    open_settings_uri("ms-settings:network-wifi")
-}
-
-/// Open the Windows Sound settings app.
-#[tauri::command]
-fn open_sound_settings() -> Result<(), String> {
-    open_settings_uri("ms-settings:sound")
-}
-
-/// Open the Windows Settings app (root page).
-#[tauri::command]
-fn open_windows_settings() -> Result<(), String> {
-    open_settings_uri("ms-settings:")
-}
-
 /// Output devices for the TopBar audio picker (default render endpoint first
 /// by `is_default`; the UI sorts alphabetically and marks the default).
 /// Also arms the `audio-changed` push notifications (idempotent).
@@ -2635,9 +2595,6 @@ pub fn run() {
             wifi_connect_with_password,
             wifi_disconnect,
             wifi_forget,
-            open_wifi_settings,
-            open_sound_settings,
-            open_windows_settings,
             audio_devices,
             audio_set_default_device,
             audio_master,

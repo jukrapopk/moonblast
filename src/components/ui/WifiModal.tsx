@@ -16,7 +16,6 @@ import {
 } from "@phosphor-icons/react";
 import {
   fetchWifiCurrent,
-  openWifiSettings,
   useWifiScan,
   wifiConnect,
   wifiConnectWithPassword,
@@ -507,13 +506,6 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
               icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
             >
               Rescan
-            </Button>
-            <Button
-              variant="ghost"
-              size="md"
-              onClick={() => void openWifiSettings()}
-            >
-              WiFi Settings
             </Button>
           </div>
         </>

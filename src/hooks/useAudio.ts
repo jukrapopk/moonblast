@@ -117,7 +117,3 @@ export async function setSessionMute(id: string, muted: boolean): Promise<void> 
 export async function resetSessionVolumes(): Promise<number> {
   return await invoke<number>("audio_reset_sessions");
 }
-
-export async function openSoundSettings(): Promise<void> {
-  await invoke("open_sound_settings");
-}

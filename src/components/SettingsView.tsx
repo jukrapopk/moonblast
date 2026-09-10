@@ -329,15 +329,6 @@ export function SettingsView({
         />
       </Section>
 
-      <Button
-        variant="outline"
-        size="lg"
-        onClick={() => void invoke("open_windows_settings").catch(() => { })}
-        className="w-full min-h-12"
-      >
-        Open Windows Settings
-      </Button>
-
       <Section title="About">
         <div className="py-4 text-base text-(--color-muted)">
           Moonblast is a lightweight Fullscreen Mode alternative built on Tauri + Rust.
