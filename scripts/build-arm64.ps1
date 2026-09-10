@@ -73,7 +73,17 @@ try {
   # the whole target dir and re-downloading every dependency. The manifest
   # path is required because Cargo.toml lives in src-tauri/, not the repo
   # root.
-  $cleanCmd = "`"$vcvars`" x64_arm64 && cargo clean --manifest-path src-tauri/Cargo.toml --target $target -p windows -p windows-sys -p windows-targets"
+  # `aws-lc-sys` (pulled in transitively by `ureq` → `rustls`) needs
+  # `clang.exe` to compile its C/asm for ARM64 cross-builds. The
+  # system's PATH doesn't include LLVM by default — only the registry
+  # tells us it's at `C:\Program Files\LLVM`. Inject it into both the
+  # `cargo clean` and `cargo tauri build` invocations.
+  $llvmBin = "C:\Program Files\LLVM\bin"
+  if (-not (Test-Path (Join-Path $llvmBin "clang.exe"))) {
+    throw "clang.exe not found at $llvmBin - install LLVM (winget install LLVM.LLVM) before building ARM64"
+  }
+
+  $cleanCmd = "set PATH=$llvmBin;%PATH% && `"$vcvars`" x64_arm64 && cargo clean --manifest-path src-tauri/Cargo.toml --target $target -p windows -p windows-sys -p windows-targets"
   Write-Host ">>> $cleanCmd"
   cmd /c $cleanCmd
   # Don't bail if clean fails — some crate names may not resolve.
@@ -90,7 +100,7 @@ try {
   # the call atomic; `&&` short-circuits if vcvarsall fails.
   # `cargo tauri` doesn't exist — `tauri` is the npm script alias for the
   # @tauri-apps/cli binary. Invoke via npm so PATH resolves correctly.
-  $cmd = "set NODE_OPTIONS=$nodeOpts && `"$vcvars`" x64_arm64 && npm.cmd run tauri -- build --target $target"
+  $cmd = "set NODE_OPTIONS=$nodeOpts && set PATH=$llvmBin;%PATH% && `"$vcvars`" x64_arm64 && npm.cmd run tauri -- build --target $target"
   Write-Host ">>> $cmd"
   cmd /c $cmd
   if ($LASTEXITCODE -ne 0) { throw "tauri build failed (exit $LASTEXITCODE)" }
