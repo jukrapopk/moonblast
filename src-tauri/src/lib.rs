@@ -1400,7 +1400,23 @@ fn moonlight_stream(
     // blocked the user from starting a fresh stream.
     let already_running = match map.get_mut(&key) {
         Some(active) => match active.child.try_wait() {
-            Ok(None) => pid_has_visible_window(active.child.id()),
+            Ok(None) => {
+                // Prior child is alive but may not own a visible window
+                // (connection lost, user closed it, stuck cleanup thread).
+                // If it does have a window, treat as already-running and
+                // bail. Otherwise, kill the orphan and fall through to
+                // spawn a fresh one — otherwise `map.insert` later would
+                // silently overwrite and drop the prior `Child` without
+                // killing it, leaving a moonlight.exe running invisibly.
+                if pid_has_visible_window(active.child.id()) {
+                    true
+                } else {
+                    let _ = active.child.kill();
+                    let _ = active.child.wait();
+                    map.remove(&key);
+                    false
+                }
+            }
             Ok(Some(_)) => {
                 map.remove(&key);
                 false
@@ -2099,9 +2115,27 @@ fn serverinfo_probe(address: &str, port: u16) -> bool {
     text.contains("status_code=\"200\"")
 }
 
+/// Kill every active streaming child we've spawned, so they don't outlive
+/// Moonblast as invisible processes (StreamState's Child::drop only closes
+/// the process handle on Windows — it does not kill). Bounded by the
+/// user's active stream count, which is small.
+fn kill_all_streams(streams: &StreamState) {
+    let mut map = match streams.0.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    for (_key, mut active) in map.drain() {
+        let _ = active.child.kill();
+        let _ = active.child.wait();
+    }
+}
+
 /// Exit Moonblast entirely.
 #[tauri::command]
-fn close_app(app: AppHandle) {
+fn close_app(app: AppHandle, streams: State<'_, StreamState>) {
+    // Kill any in-flight streaming windows so they don't outlive the
+    // launcher as zombies.
+    kill_all_streams(&streams);
     // Always bring the Windows shell back before leaving.
     suppress_shell(false);
     app.exit(0);
@@ -2490,6 +2524,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             // If the app is closed while in Immersive Mode, bring the shell back.
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                // Also kill any streaming children — without this, the OS
+                // would keep them alive as invisible processes (Child::drop
+                // on Windows only closes the handle, doesn't kill).
+                if let Some(streams) = window.try_state::<StreamState>() {
+                    kill_all_streams(&streams);
+                }
                 suppress_shell(false);
             } else if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Only intercept Alt+F4 / taskbar-Close while in Immersive
