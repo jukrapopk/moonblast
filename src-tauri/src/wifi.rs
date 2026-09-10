@@ -54,6 +54,9 @@ pub struct WifiNetwork {
     /// 0–100.
     pub signal: u32,
     pub secured: bool,
+    /// Raw auth string from the netsh scan, e.g. "WPA2-Personal" or
+    /// "WEP". `None` for open networks.
+    pub auth: Option<String>,
     /// True if the current connection is to this network.
     pub connected: bool,
     /// True if Windows already has a saved profile for it (auto-join on sight).
@@ -234,6 +237,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
                         ssid,
                         signal: current_signal.min(100),
                         secured,
+                        auth: current_auth.clone(),
                         connected,
                         known,
                     });
@@ -281,6 +285,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
                 ssid,
                 signal: current_signal.min(100),
                 secured,
+                auth: current_auth.clone(),
                 connected,
                 known,
             });
@@ -447,6 +452,160 @@ pub fn disconnect() -> Result<(), String> {
         return Ok(());
     }
     Err(out.trim().to_string())
+}
+
+/// Connect to a secured network that needs a fresh password. We build a
+/// temporary profile XML, register it with `netsh wlan add profile`, then
+/// `netsh wlan connect` to that profile. The profile sticks around after
+/// connect — that's the point: next time the user opens the picker, the
+/// SSID is in the "Saved" set.
+pub fn connect_with_password(
+    ssid: &str,
+    password: &str,
+    auth: &str,
+) -> Result<(), String> {
+    if ssid.is_empty() {
+        return Err("empty SSID".into());
+    }
+    if password.is_empty() {
+        return Err("empty password".into());
+    }
+
+    // Map our auth-string to the profile XML's <authentication>. Only
+    // Personal / PSK networks take a single password. Anything else
+    // (Enterprise, OWE) needs a different flow that the user can
+    // complete in the Windows Wi-Fi settings.
+    let auth_xml = match auth.to_ascii_lowercase().as_str() {
+        "wpa2-personal" | "wpa2psk" => "WPA2PSK",
+        "wpa3-personal" | "wpa3sae" => "WPA3SAE",
+        "wpa-personal" | "wpapsk" => "WPAPSK",
+        "wep" => "shared",
+        _ => {
+            return Err(format!(
+                "auth '{}' not supported in-app; open Windows Wi-Fi settings",
+                auth
+            ));
+        }
+    };
+    let encryption = match auth_xml {
+        "WPA3SAE" | "WPA2PSK" | "WPAPSK" => "AES",
+        "shared" => "WEP",
+        _ => "AES",
+    };
+
+    // SSID hex encoding (each byte → two hex chars). Windows stores the
+    // SSID both in hex (canonical) and as the human-readable name.
+    let mut ssid_hex = String::with_capacity(ssid.len() * 2);
+    for b in ssid.as_bytes() {
+        ssid_hex.push_str(&format!("{:02X}", b));
+    }
+
+    // Escape XML special chars in the password and the human-readable SSID.
+    // (Hex form is safe — it's only hex digits.)
+    fn xml_escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    }
+
+    let xml = format!(
+        r#"<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>{name}</name>
+    <SSIDConfig>
+        <SSID>
+            <hex>{hex}</hex>
+            <name>{name}</name>
+        </SSID>
+    </SSIDConfig>
+    <connectionType>ESS</connectionType>
+    <connectionMode>auto</connectionMode>
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>{auth}</authentication>
+                <encryption>{enc}</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+            <sharedKey>
+                <keyType>passPhrase</keyType>
+                <protected>false</protected>
+                <keyMaterial>{pw}</keyMaterial>
+            </sharedKey>
+        </security>
+    </MSM>
+</WLANProfile>
+"#,
+        name = xml_escape(ssid),
+        hex = ssid_hex,
+        auth = auth_xml,
+        enc = encryption,
+        pw = xml_escape(password),
+    );
+
+    // Write the profile to a temp file. Use a unique suffix so
+    // concurrent calls don't collide.
+    let path = std::env::temp_dir()
+        .join(format!("moonblast-wifi-{}.xml", rand_suffix()));
+    if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+        return Err(format!("could not write profile xml: {e}"));
+    }
+
+    // Register the profile. netsh expects `filename=`; quoting the
+    // path handles spaces.
+    let add = std::process::Command::new("netsh")
+        .args([
+            "wlan",
+            "add",
+            "profile",
+            &format!("filename=\"{}\"", path.display()),
+        ])
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !add.status.success() {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!(
+            "could not register profile: {}",
+            String::from_utf8_lossy(&add.stdout).trim()
+        ));
+    }
+
+    // Now actually connect. The profile is now discoverable by name.
+    let connect = std::process::Command::new("netsh")
+        .args(["wlan", "connect", &format!("name={ssid}")])
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&path);
+    if connect.status.success() {
+        return Ok(());
+    }
+    // netsh reported failure. The most common case is wrong password,
+    // which it surfaces as a generic "Connection request was not
+    // completed" message. We don't try to interpret the message —
+    // the UI shows it as-is.
+    let mut msg = String::from_utf8_lossy(&connect.stdout).trim().to_string();
+    if msg.is_empty() {
+        msg = String::from_utf8_lossy(&connect.stderr).trim().to_string();
+    }
+    if msg.is_empty() {
+        msg = format!("connect failed (exit {:?})", connect.status.code());
+    }
+    Err(msg)
+}
+
+/// Random 16-char hex suffix for temp file names. Not cryptographic —
+/// just enough to avoid collisions between concurrent calls.
+fn rand_suffix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{:016x}", nanos & 0xFFFFFFFFFFFFFFFF)
 }
 
 /// Current radio state — reads via wlanapi (which works for the

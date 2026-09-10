@@ -1851,6 +1851,18 @@ fn wifi_connect(ssid: String) -> Result<(), String> {
     wifi::connect(&ssid)
 }
 
+/// Connect to a secured WiFi network using a password. Builds a profile
+/// XML, registers it, and connects. The profile sticks around after
+/// connect so the SSID appears as "Saved" in the picker next time.
+#[tauri::command]
+fn wifi_connect_with_password(
+    ssid: String,
+    password: String,
+    auth: String,
+) -> Result<(), String> {
+    wifi::connect_with_password(&ssid, &password, &auth)
+}
+
 /// Disconnect from the current WiFi network. No-op if already disconnected.
 #[tauri::command]
 fn wifi_disconnect() -> Result<(), String> {
@@ -1996,6 +2008,7 @@ pub fn run() {
             wifi_current,
             wifi_scan,
             wifi_connect,
+            wifi_connect_with_password,
             wifi_disconnect,
             wifi_radio_set,
             wifi_radio_get,

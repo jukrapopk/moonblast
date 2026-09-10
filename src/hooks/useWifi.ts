@@ -14,6 +14,8 @@ export interface WifiNetwork {
   ssid: string;
   signal: number;
   secured: boolean;
+  /** Raw auth string from the netsh scan, e.g. "WPA2-Personal" or "WEP". */
+  auth: string | null;
   connected: boolean;
   /** True if Windows already has a saved profile for this network. */
   known: boolean;
@@ -93,6 +95,20 @@ export function useWifiScan(): {
  */
 export async function wifiConnect(ssid: string): Promise<void> {
   await invoke("wifi_connect", { ssid });
+}
+
+/**
+ * Connect to a secured network that needs a fresh password. `auth` is
+ * the raw string from the netsh scan, e.g. "WPA2-Personal", "WEP".
+ * On success the profile is saved so the network shows up as
+ * "Saved" in subsequent scans.
+ */
+export async function wifiConnectWithPassword(
+  ssid: string,
+  password: string,
+  auth: string,
+): Promise<void> {
+  await invoke("wifi_connect_with_password", { ssid, password, auth });
 }
 
 /** Disconnect from the current network. No-op if already disconnected. */

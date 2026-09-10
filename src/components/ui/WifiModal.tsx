@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Toggle } from "./Toggle";
@@ -12,11 +11,15 @@ import {
   Lock,
   ArrowsClockwise,
   ArrowsOutSimple,
+  ArrowLeft,
+  Eye,
+  EyeSlash,
 } from "@phosphor-icons/react";
 import {
   fetchWifiCurrent,
   useWifiScan,
   wifiConnect,
+  wifiConnectWithPassword,
   wifiDisconnect,
   wifiRadioGet,
   wifiRadioSet,
@@ -63,16 +66,108 @@ function signalTone(signal: number) {
   return "text-(--color-danger)";
 }
 
+/**
+ * In-app password entry for a secured network with no saved profile.
+ * Replaces the network list while open — the user is focused on one
+ * SSID until they either back out or the connect succeeds.
+ */
+function PasswordForm({
+  network,
+  busy,
+  error,
+  onSubmit,
+  onBack,
+}: {
+  network: WifiNetwork;
+  busy: boolean;
+  error: string | null;
+  onSubmit: (net: WifiNetwork, password: string) => void;
+  onBack: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const canSubmit = !busy && password.length > 0;
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          onClick={onBack}
+          disabled={busy}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:bg-(--color-surface) hover:text-(--color-text) disabled:opacity-40"
+          aria-label="Back to network list"
+        >
+          <ArrowLeft size={14} weight="bold" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-(--color-text)">{network.ssid}</div>
+          <div className="text-xs text-(--color-muted)">
+            {network.auth ?? "Secured"} · {network.signal}%
+          </div>
+        </div>
+        <Lock size={14} weight="bold" className="shrink-0 text-(--color-muted)" />
+      </div>
+      <div className="space-y-2">
+        <div className="relative">
+          <input
+            type={show ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && canSubmit) {
+                onSubmit(network, password);
+              }
+            }}
+            autoFocus
+            disabled={busy}
+            placeholder="Network security key"
+            className="h-10 w-full rounded-full border border-(--color-border) bg-(--color-surface-2) px-4 pr-12 text-sm text-(--color-text) placeholder:text-(--color-muted) outline-none transition focus:border-(--color-accent) disabled:opacity-40"
+          />
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) hover:text-(--color-text)"
+            aria-label={show ? "Hide password" : "Show password"}
+            tabIndex={-1}
+          >
+            {show ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
+          </button>
+        </div>
+        {error && (
+          <p className="rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
+            {error}
+          </p>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" size="md" onClick={onBack} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            size="md"
+            onClick={() => canSubmit && onSubmit(network, password)}
+            disabled={!canSubmit}
+          >
+            {busy ? "Connecting…" : "Connect"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NetworkRow({
   net,
   currentSsid,
   onConnect,
+  onNeedsPassword,
   onDisconnect,
   busy,
 }: {
   net: WifiNetwork;
   currentSsid: string | null;
   onConnect: (ssid: string) => void;
+  /** Click on a secured network with no saved profile — show the
+   *  in-app password prompt instead of opening Windows settings. */
+  onNeedsPassword: (net: WifiNetwork) => void;
   onDisconnect: () => void;
   busy: boolean;
 }) {
@@ -129,10 +224,13 @@ function NetworkRow({
   return (
     <button
       type="button"
-      onClick={() => onConnect(net.ssid)}
+      onClick={() => {
+        if (needsSignIn) onNeedsPassword(net);
+        else onConnect(net.ssid);
+      }}
       disabled={busy}
       aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
-      title={needsSignIn ? "Sign in (opens Wi-Fi settings)" : "Connect"}
+      title={needsSignIn ? "Sign in" : "Connect"}
       className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none disabled:opacity-40"
     >
       {rowBody}
@@ -153,6 +251,12 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   useEffect(() => {
     if (open) setLiveSsid(currentSsid);
   }, [open, currentSsid]);
+  // When set, the modal shows the password-entry form for this network
+  // instead of the list. Cleared on submit-success / back / modal close.
+  const [passwordTarget, setPasswordTarget] = useState<WifiNetwork | null>(null);
+  useEffect(() => {
+    if (!open) setPasswordTarget(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -179,14 +283,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
       const c = await fetchWifiCurrent();
       setLiveSsid(c?.ssid ?? null);
     } catch (e) {
-      const msg = String(e);
-      setError(msg);
-      // netsh can't connect to a secured network without a saved profile.
-      // Surface a hint and open the Windows WiFi settings so the user can
-      // enter the password. (Same fallback the modal footer used to have.)
-      if (/profile/i.test(msg)) {
-        await invoke("opener:open", { path: "ms-settings:network-wifi" }).catch(() => {});
-      }
+      setError(String(e));
     } finally {
       setBusy(null);
     }
@@ -210,6 +307,27 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     }
   }
 
+  async function handleConnectWithPassword(
+    net: WifiNetwork,
+    password: string,
+  ) {
+    setBusy("connect");
+    setError(null);
+    try {
+      await wifiConnectWithPassword(net.ssid, password, net.auth ?? "");
+      await waitForState(net.ssid);
+      setPasswordTarget(null);
+      await scan();
+      const c = await fetchWifiCurrent();
+      setLiveSsid(c?.ssid ?? null);
+    } catch (e) {
+      // Stay on the form so the user can correct the password.
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleRadioToggle(next: boolean) {
     setBusy("radio");
     setError(null);
@@ -225,49 +343,65 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
 
   return (
     <Modal open={open} onClose={onClose} title="WiFi" width="max-w-sm">
-      {error && (
-        <p className="mb-3 rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
-          {error}
-        </p>
-      )}
-
-      <div className="max-h-72 space-y-1 overflow-y-auto">
-        {loading && networks.length === 0 ? (
-          <p className="py-6 text-center text-sm text-(--color-muted)">Scanning…</p>
-        ) : networks.length === 0 ? (
-          <p className="py-6 text-center text-sm text-(--color-muted)">
-            No networks found. {radioOn === false ? "Wi-Fi is off — turn it on to scan." : "Make sure WiFi is on and try again."}
-          </p>
-        ) : (
-          networks.map((net) => (
-            <NetworkRow
-              key={net.ssid}
-              net={net}
-              currentSsid={liveSsid}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-              busy={busy === "connect"}
-            />
-          ))
-        )}
-      </div>
-
-      <div className="mt-4 flex items-center justify-between gap-2 border-t border-(--color-border) pt-3">
-        <Button
-          variant="ghost"
-          size="md"
-          onClick={scan}
-          disabled={loading || busy !== null}
-          icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
-        >
-          Rescan
-        </Button>
-        <Toggle
-          checked={radioOn ?? true}
-          onChange={handleRadioToggle}
-          disabled={busy !== null}
+      {passwordTarget ? (
+        <PasswordForm
+          network={passwordTarget}
+          busy={busy === "connect"}
+          error={error}
+          onSubmit={handleConnectWithPassword}
+          onBack={() => {
+            setPasswordTarget(null);
+            setError(null);
+          }}
         />
-      </div>
+      ) : (
+        <>
+          {error && (
+            <p className="mb-3 rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
+              {error}
+            </p>
+          )}
+
+          <div className="max-h-72 space-y-1 overflow-y-auto">
+            {loading && networks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-(--color-muted)">Scanning…</p>
+            ) : networks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-(--color-muted)">
+                No networks found. {radioOn === false ? "Wi-Fi is off — turn it on to scan." : "Make sure WiFi is on and try again."}
+              </p>
+            ) : (
+              networks.map((net) => (
+                <NetworkRow
+                  key={net.ssid}
+                  net={net}
+                  currentSsid={liveSsid}
+                  onConnect={handleConnect}
+                  onNeedsPassword={setPasswordTarget}
+                  onDisconnect={handleDisconnect}
+                  busy={busy === "connect"}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-(--color-border) pt-3">
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={scan}
+              disabled={loading || busy !== null}
+              icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
+            >
+              Rescan
+            </Button>
+            <Toggle
+              checked={radioOn ?? true}
+              onChange={handleRadioToggle}
+              disabled={busy !== null}
+            />
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
