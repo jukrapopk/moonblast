@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "./Modal";
-import { BatteryChargingVertical, Plug } from "@phosphor-icons/react";
 
 export interface BatteryStatus {
   /** 0–100, or -1 when the OS reports "unknown". */
@@ -45,7 +44,8 @@ function formatDuration(sec: number | null): string {
 }
 
 /**
- * "Battery" modal — opens from the TopBar chip. Read-on-open (no polling),
+ * "Battery" modal — opens from the TopBar chip. Read-on-open plus a 2s
+ * refresh while open (so the percent / time-remaining tick down live),
  * mirrors the AudioModal/WifiModal vocabulary: STATUS section with a big
  * percent + horizontal fill bar + time-remaining, POWER SOURCE line, no
  * footer action.
@@ -58,16 +58,23 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
     if (!open) return;
     setError(null);
     let cancelled = false;
-    void invoke<BatteryStatus | null>("battery").then(
-      (s) => {
+    async function read() {
+      try {
+        const s = await invoke<BatteryStatus | null>("battery");
         if (!cancelled) setStatus(s);
-      },
-      (e) => {
+      } catch (e) {
         if (!cancelled) setError(String(e));
-      },
-    );
+      }
+    }
+    void read();
+    // Refresh every 2s while the modal is open so the user sees the
+    // percent / time-remaining tick down live. The hook in the TopBar
+    // already handles focus + visibility for the chip; the modal just
+    // wants the numbers to keep moving.
+    const id = setInterval(read, 2_000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [open]);
 
@@ -124,12 +131,7 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
       <SectionLabel>Power source</SectionLabel>
       <div className="mb-1 flex items-center justify-between rounded-xl px-1 py-2">
         <span className="text-sm text-(--color-muted)">Status</span>
-        <span className="flex items-center gap-1.5 text-sm text-(--color-text)">
-          {pluggedIn ? (
-            <Plug size={14} weight="bold" />
-          ) : (
-            <BatteryChargingVertical size={14} weight="bold" />
-          )}
+        <span className="text-sm text-(--color-text)">
           {pluggedIn ? "Wall power" : "Battery"}
         </span>
       </div>

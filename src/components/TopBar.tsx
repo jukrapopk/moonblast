@@ -1,14 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
-import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { BatteryCharging, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
-import { BatteryModal, type BatteryStatus } from "./ui/BatteryModal";
+import { BatteryModal } from "./ui/BatteryModal";
 import { useTime, formatClock, formatDate } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
+import { useBattery, type BatteryStatus } from "../hooks/useBattery";
 import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
 import { usePowerMenuTrigger } from "../hooks/usePowerMenuTrigger";
 
@@ -30,38 +30,11 @@ function formatDurationShort(sec: number | null): string {
   return `${m}m`;
 }
 
-/**
- * Polls the `battery` Rust command every 60s. Returns `null` while the
- * command is loading or when the system has no battery (desktop / VM), so
- * callers can simply skip rendering the chip.
- */
-function useBattery(): BatteryStatus | null {
-  const [status, setStatus] = useState<BatteryStatus | null>(null);
-  useEffect(() => {
-    let alive = true;
-    async function read() {
-      try {
-        const s = await invoke<BatteryStatus | null>("battery");
-        if (alive) setStatus(s);
-      } catch {
-        if (alive) setStatus(null);
-      }
-    }
-    void read();
-    const id = setInterval(read, 60_000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
-  return status;
-}
-
 /** Pick the right battery glyph for the current level + charging state. */
 function batteryIcon(percent: number, charging: boolean) {
   const size = 24;
   const weight = "bold" as const;
-  if (charging) return <BatteryChargingVertical size={size} weight={weight} />;
+  if (charging) return <BatteryCharging size={size} weight={weight} />;
   if (percent < 0) return <BatteryWarning size={size} weight={weight} />;
   if (percent <= 10) return <BatteryEmpty size={size} weight={weight} />;
   if (percent <= 35) return <BatteryLow size={size} weight={weight} />;
@@ -96,6 +69,7 @@ function Status({
   onAudioClick,
   onBatteryClick,
   batteryOpen,
+  battery,
   wifi,
   audio,
   showWifi,
@@ -106,13 +80,13 @@ function Status({
   onAudioClick: () => void;
   onBatteryClick: () => void;
   batteryOpen: boolean;
+  battery: BatteryStatus | null;
   wifi: WifiConnection | null | undefined;
   audio: AudioMaster | undefined;
   showWifi: boolean;
   showBattery: boolean;
   showAudio: boolean;
 }) {
-  const battery = useBattery();
   // Tooltip doubles as the aria-label: status · percent · time-remaining.
   const batteryLabel = battery
     ? battery.charging
@@ -217,6 +191,13 @@ export function TopBar({
   useEffect(() => {
     if (!audioOpen) refreshAudio();
   }, [audioOpen, refreshAudio]);
+  // Battery: hook drives the chip and the modal. On modal close we
+  // force-refresh so the chip reflects the latest state (same pattern
+  // as WiFi — the hook's 5s poll is the steady-state refresh path).
+  const { status: battery, refresh: refreshBattery } = useBattery();
+  useEffect(() => {
+    if (!batteryOpen) refreshBattery();
+  }, [batteryOpen, refreshBattery]);
   const time = useTime();
 
   return (
@@ -263,6 +244,7 @@ export function TopBar({
           onAudioClick={() => setAudioOpen(true)}
           onBatteryClick={() => setBatteryOpen(true)}
           batteryOpen={batteryOpen}
+          battery={battery}
           wifi={wifi}
           audio={audio}
           showWifi={showWifi}
