@@ -430,7 +430,8 @@ function AppsModal({
     let alive = true;
     setApps([]);
     setError(null);
-    invoke<string[]>("moonlight_list_apps", { host: host.address })
+    const address = host.address;
+    invoke<string[]>("moonlight_list_apps", { host: address })
       .then((list) => {
         if (alive) setApps(list);
       })
@@ -440,7 +441,10 @@ function AppsModal({
     return () => {
       alive = false;
     };
-  }, [open, host]);
+    // Primitive deps so unrelated parent re-renders (e.g. the per-second
+    // elapsed-time clock tick during an active stream) don't refire the
+    // moon-light list call. Same host = same address = same fetch.
+  }, [open, host?.address, host?.name]);
 
   return (
     <Modal open={open} onClose={onClose} title={host ? `${host.name}` : ""} subtitle="Choose an app to stream.">
