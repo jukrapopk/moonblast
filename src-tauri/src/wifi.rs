@@ -405,6 +405,40 @@ pub fn current() -> Option<WifiConnection> {
 /// they look like "ASCII chars with a null between each" (every odd
 /// byte is 0 in the first ~256 bytes), decode as UTF-16LE. Otherwise
 /// treat as UTF-8. The ASCII-with-nulls test catches the case where
+/// Trim `netsh wlan show interfaces` output to just the primary
+/// (first) interface block. Multi-radio adapters (e.g.Qualcomm
+/// FastConnect 6900 DBS) report two interfaces — `Wi-Fi` (primary)
+/// and `Wi-Fi 3` (secondary) — and our parser walks every line in
+/// sequence. If the secondary interface is disconnected, its
+/// `State    : disconnected` line overwrites the primary's
+/// `State    : connected` and the chip shows "not connected".
+///
+/// The interface blocks are separated by a blank line and each
+/// starts with `Name :`. The preamble before the first block
+/// (`There is N interface on the system:`) doesn't contain any field
+/// lines we'd match against, so it's safe to include.
+fn primary_interface_block(text: &str) -> &str {
+    let mut count = 0usize;
+    let mut cut_byte = text.len();
+    for (i, line) in text.lines().enumerate() {
+        if line.trim_start().starts_with("Name ") && line.contains(':') {
+            count += 1;
+            if count == 2 {
+                // Sum the byte lengths of all lines before `i`, plus
+                // the newlines that `.lines()` consumed. This gives
+                // us a stable byte offset into `text`.
+                cut_byte = text
+                    .lines()
+                    .take(i)
+                    .map(|l| l.len() + 1) // +1 for the '\n' .lines() ate
+                    .sum();
+                break;
+            }
+        }
+    }
+    &text[..cut_byte]
+}
+
 /// `netsh` doesn't emit a BOM but is still UTF-16LE (which it does on
 /// some Windows builds).
 fn decode_netsh(bytes: &[u8]) -> String {
@@ -442,7 +476,8 @@ fn netsh_current_connection() -> Option<WifiConnection> {
     if !output.status.success() {
         return None;
     }
-    let text = decode_netsh(&output.stdout);
+    let decoded = decode_netsh(&output.stdout);
+    let text = primary_interface_block(&decoded);
     let mut state: Option<String> = None;
     let mut ssid: Option<String> = None;
     let mut signal: Option<u32> = None;
