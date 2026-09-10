@@ -1927,11 +1927,15 @@ fn open_windows_settings() -> Result<(), String> {
 
 /// Output devices for the TopBar audio picker (default render endpoint first
 /// by `is_default`; the UI sorts alphabetically and marks the default).
+/// Also arms the `audio-changed` push notifications (idempotent).
 #[tauri::command]
-async fn audio_devices() -> Result<audio::AudioDeviceList, String> {
-    tauri::async_runtime::spawn_blocking(audio::devices)
-        .await
-        .map_err(|e| e.to_string())?
+async fn audio_devices(app: AppHandle) -> Result<audio::AudioDeviceList, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        audio::ensure_watch(app);
+        audio::devices()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Set the default output device (all roles, like the Sound control panel).
@@ -1943,11 +1947,15 @@ async fn audio_set_default_device(id: String) -> Result<(), String> {
 }
 
 /// Main mixer level for the TopBar chip + modal.
+/// Also arms the `audio-changed` push notifications (idempotent).
 #[tauri::command]
-async fn audio_master() -> Result<audio::AudioMaster, String> {
-    tauri::async_runtime::spawn_blocking(audio::master)
-        .await
-        .map_err(|e| e.to_string())?
+async fn audio_master(app: AppHandle) -> Result<audio::AudioMaster, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        audio::ensure_watch(app);
+        audio::master()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1965,11 +1973,15 @@ async fn audio_set_master_mute(muted: bool) -> Result<(), String> {
 }
 
 /// Per-app mixer rows, grouped by exe like the Windows mixer.
+/// Also arms the `audio-changed` push notifications (idempotent).
 #[tauri::command]
-async fn audio_sessions() -> Result<Vec<audio::AudioSession>, String> {
-    tauri::async_runtime::spawn_blocking(audio::sessions)
-        .await
-        .map_err(|e| e.to_string())?
+async fn audio_sessions(app: AppHandle) -> Result<Vec<audio::AudioSession>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        audio::ensure_watch(app);
+        audio::sessions()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

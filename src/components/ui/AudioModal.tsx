@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Slider } from "./Slider";
@@ -72,6 +73,13 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
     setError(null);
     setSwitching(null);
     void refresh();
+    // Push channel — external volume/session/device changes re-read
+    // automatically while the modal is open. No polling, no Refresh.
+    let unlisten: (() => void) | undefined;
+    void listen("audio-changed", () => void refresh()).then((f) => {
+      unlisten = f;
+    });
+    return () => unlisten?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open ]);
 
@@ -289,16 +297,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-2 border-t border-(--color-border) pt-3">
-        <Button
-          variant="ghost"
-          size="md"
-          onClick={() => void refresh()}
-          disabled={loading || switching !== null}
-          icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
-        >
-          Refresh
-        </Button>
+      <div className="mt-4 flex items-center justify-end gap-2 border-t border-(--color-border) pt-3">
         <Button variant="ghost" size="md" onClick={() => void openSoundSettings()}>
           Sound Settings
         </Button>

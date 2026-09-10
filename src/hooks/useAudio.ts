@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export interface AudioDevice {
   id: string;
@@ -30,11 +31,11 @@ export interface AudioSession {
 }
 
 /**
- * Main mixer level for the TopBar chip: the system volume doesn't change
- * on its own (outside of hardware keys), so we read on mount, window
- * `focus` / visible, explicit `refresh()`, plus a slow 5s poll to catch
- * external changes (keyboard volume keys, other mixers). The COM read is
- * ~1ms on a blocking thread.
+ * Main mixer level for the TopBar chip. Event-driven, no polling: the Rust
+ * side registers Core Audio callbacks (volume / sessions / devices) and
+ * emits `audio-changed`; we just re-read on receipt, on mount, on window
+ * `focus` / visible, and on explicit `refresh()`. The COM read is ~1ms on
+ * a blocking thread.
  */
 export function useAudioMaster(): {
   master: AudioMaster | undefined;
@@ -52,11 +53,15 @@ export function useAudioMaster(): {
 
   useEffect(() => {
     let alive = true;
+    let unlisten: (() => void) | undefined;
     const safe = () => {
       if (alive) void refresh();
     };
     safe();
-    const id = setInterval(safe, 5000);
+    // Push channel — volume keys, other mixers, device switches.
+    void listen("audio-changed", safe).then((f) => {
+      unlisten = f;
+    });
     function onFocus() {
       safe();
     }
@@ -67,7 +72,7 @@ export function useAudioMaster(): {
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
-      clearInterval(id);
+      unlisten?.();
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };

@@ -13,12 +13,17 @@
 use serde::Serialize;
 use std::ffi::c_void;
 use std::ptr::null_mut;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter};
 use windows_sys::core::GUID;
 
 type HRESULT = i32;
 
 // --- IDs -----------------------------------------------------------------
-// Well-known Core Audio IDs (mmdeviceapi.h / policyconfig.h / propkey.h).
+// Well-known Core Audio IDs (mmdeviceapi.h / audiopolicy.h / endpointvolume.h
+// / policyconfig.h / functiondiscoverykeys_devpkey.h — verified against the
+// Windows SDK headers; a wrong IID fails as E_NOINTERFACE/CLASSNOTREG even
+// though the CLSID resolves).
 const CLSID_MM_DEVICE_ENUMERATOR: GUID =
     GUID::from_u128(0xbcde0395_e52f_467c_8e3d_c4579291692e);
 const IID_IMM_DEVICE_ENUMERATOR: GUID =
@@ -29,6 +34,10 @@ const IID_IAUDIO_SESSION_MANAGER2: GUID =
     GUID::from_u128(0x77aa99a0_1bd6_484f_8bc7_2c654c9a9b6f);
 const IID_ISIMPLE_AUDIO_VOLUME: GUID =
     GUID::from_u128(0x87ce5498_68d6_44e5_9215_6da47ef883d8);
+const IID_IAUDIO_ENDPOINT_VOLUME_CALLBACK: GUID =
+    GUID::from_u128(0x657804fa_d6ad_4496_8a60_352752af4f89);
+const IID_IMM_NOTIFICATION_CLIENT: GUID =
+    GUID::from_u128(0x7991eec9_7e89_4d85_8390_6c703cec60c0);
 const CLSID_POLICY_CONFIG: GUID =
     GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
 const IID_IPOLICY_CONFIG: GUID =
@@ -73,8 +82,10 @@ struct EnumeratorVtbl {
     get_default_audio_endpoint:
         unsafe extern "system" fn(*mut c_void, i32, i32, *mut *mut c_void) -> HRESULT,
     get_device: usize,
-    register_callback: usize,
-    unregister_callback: usize,
+    register_endpoint_notification:
+        unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    unregister_endpoint_notification:
+        unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
 }
 
 #[repr(C)]
@@ -153,8 +164,8 @@ struct EndpointVolumeVtbl {
     ) -> HRESULT,
     add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
     release: unsafe extern "system" fn(*mut c_void) -> u32,
-    register_notify: usize,
-    unregister_notify: usize,
+    register_notify: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    unregister_notify: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
     get_channel_count: usize,
     set_master_level: usize,
     set_master_scalar:
@@ -269,6 +280,10 @@ struct PolicyConfigVtbl {
 /// COM pointer that Releases on drop, so early `?` returns can't leak.
 struct ComPtr(*mut c_void);
 
+// MTA COM interface pointers are safe to use from any MTA thread, and every
+// thread that touches these calls `com_init()` (MTA) first.
+unsafe impl Send for ComPtr {}
+
 impl ComPtr {
     fn vtbl<T>(&self) -> *const T {
         unsafe { *(self.0 as *mut *const T) }
@@ -292,6 +307,280 @@ fn com_init() {
         // May report "already initialized" on a pooled Tauri thread; fine.
         let _ = CoInitializeEx(null_mut(), COINIT_MULTITHREADED as u32);
     }
+}
+
+/// Push channel: every Core Audio callback below funnels here. The frontend
+/// re-reads (`audio_master` / `audio_sessions` / `audio_devices`) on receipt,
+/// so no polling is needed anywhere.
+fn emit_audio_changed() {
+    let app = WATCH
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|st| st.app.clone()));
+    if let Some(app) = app {
+        let _ = app.emit("audio-changed", ());
+    }
+}
+
+// --- event callbacks -------------------------------------------------------
+// Process-lifetime COM callback singletons. Each is a bare vtable pointer
+// (AddRef/Release are no-ops against a static) whose handlers just emit
+// `audio-changed` — the frontend re-reads, so handlers never touch audio
+// state and can't deadlock against `WATCH`.
+
+fn callback_qi(
+    this: *mut c_void,
+    iid: *const GUID,
+    out: *mut *mut c_void,
+    supported: &GUID,
+) -> HRESULT {
+    use windows_sys::core::GUID as G;
+    // IID_IUnknown = {00000000-0000-0000-C000-000000000046}.
+    const UNKNOWN: G = G::from_u128(0x00000000_0000_0000_c000_000000000046);
+    unsafe {
+        if guid_eq(&*iid, &UNKNOWN) || guid_eq(&*iid, supported) {
+            *out = this;
+            return 0; // S_OK (static object: no refcount)
+        }
+        *out = null_mut();
+        0x80004002u32 as i32 // E_NOINTERFACE
+    }
+}
+
+fn guid_eq(a: &GUID, b: &GUID) -> bool {
+    a.data1 == b.data1
+        && a.data2 == b.data2
+        && a.data3 == b.data3
+        && a.data4 == b.data4
+}
+
+#[repr(C)]
+struct VolumeCallback {
+    vtbl: *const VolumeCallbackVtbl,
+}
+// Read-only vtable pointer, never mutated — safe to share.
+unsafe impl Sync for VolumeCallback {}
+#[repr(C)]
+struct VolumeCallbackVtbl {
+    query_interface: unsafe extern "system" fn(
+        *mut c_void,
+        *const GUID,
+        *mut *mut c_void,
+    ) -> HRESULT,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+    on_notify: unsafe extern "system" fn(*mut c_void, *const c_void) -> HRESULT,
+}
+
+unsafe extern "system" fn volume_qi(
+    this: *mut c_void,
+    iid: *const GUID,
+    out: *mut *mut c_void,
+) -> HRESULT {
+    callback_qi(this, iid, out, &IID_IAUDIO_ENDPOINT_VOLUME_CALLBACK)
+}
+unsafe extern "system" fn static_add_ref(_this: *mut c_void) -> u32 {
+    1
+}
+unsafe extern "system" fn static_release(_this: *mut c_void) -> u32 {
+    1
+}
+/// Fires on master volume/mute changes (sliders, volume keys, other mixers).
+unsafe extern "system" fn volume_on_notify(
+    _this: *mut c_void,
+    _data: *const c_void,
+) -> HRESULT {
+    emit_audio_changed();
+    0
+}
+
+static VOLUME_VTBL: VolumeCallbackVtbl = VolumeCallbackVtbl {
+    query_interface: volume_qi,
+    add_ref: static_add_ref,
+    release: static_release,
+    on_notify: volume_on_notify,
+};
+static VOLUME_CALLBACK: VolumeCallback = VolumeCallback {
+    vtbl: &VOLUME_VTBL,
+};
+
+#[repr(C)]
+struct DeviceCallback {
+    vtbl: *const DeviceCallbackVtbl,
+}
+// Read-only vtable pointer, never mutated — safe to share.
+unsafe impl Sync for DeviceCallback {}
+#[repr(C)]
+struct DeviceCallbackVtbl {
+    query_interface: unsafe extern "system" fn(
+        *mut c_void,
+        *const GUID,
+        *mut *mut c_void,
+    ) -> HRESULT,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+    on_state_changed:
+        unsafe extern "system" fn(*mut c_void, *const u16, u32) -> HRESULT,
+    on_added: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
+    on_removed: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
+    on_default_changed:
+        unsafe extern "system" fn(*mut c_void, i32, i32, *const u16) -> HRESULT,
+    on_property_changed:
+        unsafe extern "system" fn(*mut c_void, *const u16, *const PropertyKey) -> HRESULT,
+}
+
+unsafe extern "system" fn device_qi(
+    this: *mut c_void,
+    iid: *const GUID,
+    out: *mut *mut c_void,
+) -> HRESULT {
+    callback_qi(this, iid, out, &IID_IMM_NOTIFICATION_CLIENT)
+}
+/// Device added/removed/enabled/disabled — the picker list may have changed.
+unsafe extern "system" fn device_topology_changed(
+    _this: *mut c_void,
+    _id: *const u16,
+    _extra: u32,
+) -> HRESULT {
+    emit_audio_changed();
+    0
+}
+unsafe extern "system" fn device_added_or_removed(
+    _this: *mut c_void,
+    _id: *const u16,
+) -> HRESULT {
+    emit_audio_changed();
+    0
+}
+/// Default switched elsewhere — emit; the next command's `ensure_watch`
+/// re-registers the volume/session callbacks on the new default.
+unsafe extern "system" fn device_default_changed(
+    _this: *mut c_void,
+    _flow: i32,
+    _role: i32,
+    _id: *const u16,
+) -> HRESULT {
+    eprintln!("[audio] event: default device changed");
+    emit_audio_changed();
+    0
+}
+unsafe extern "system" fn device_property_changed(
+    _this: *mut c_void,
+    _id: *const u16,
+    _key: *const PropertyKey,
+) -> HRESULT {
+    0
+}
+
+static DEVICE_VTBL: DeviceCallbackVtbl = DeviceCallbackVtbl {
+    query_interface: device_qi,
+    add_ref: static_add_ref,
+    release: static_release,
+    on_state_changed: device_topology_changed,
+    on_added: device_added_or_removed,
+    on_removed: device_added_or_removed,
+    on_default_changed: device_default_changed,
+    on_property_changed: device_property_changed,
+};
+static DEVICE_CALLBACK: DeviceCallback = DeviceCallback {
+    vtbl: &DEVICE_VTBL,
+};
+
+/// Live notification registrations. `default_id` tracks which device the
+/// volume callback is bound to; a mismatch in `ensure_watch` tears
+/// everything down and re-registers on the new default.
+struct WatchState {
+    app: AppHandle,
+    enumerator: ComPtr,
+    endpoint: ComPtr,
+    default_id: String,
+}
+
+// Never torn down once built (except default-device switches, which happen
+// on a command thread holding the lock); all use sites are MTA.
+unsafe impl Send for WatchState {}
+
+static WATCH: Mutex<Option<WatchState>> = Mutex::new(None);
+
+fn unregister_all(st: &WatchState) {
+    unsafe {
+        ((*st.endpoint.vtbl::<EndpointVolumeVtbl>()).unregister_notify)(
+            st.endpoint.0,
+            &VOLUME_CALLBACK as *const _ as *mut c_void,
+        );
+        ((*st.enumerator.vtbl::<EnumeratorVtbl>()).unregister_endpoint_notification)(
+            st.enumerator.0,
+            &DEVICE_CALLBACK as *const _ as *mut c_void,
+        );
+    }
+}
+
+/// Register push notifications (idempotent; re-registers on default-device
+/// switches). Called at the top of the read commands so the first chip read
+/// arms everything and later reads heal a stale registration.
+pub fn ensure_watch(app: AppHandle) {
+    com_init();
+    let current = create_enumerator()
+        .and_then(|en| default_device(&en))
+        .and_then(|d| device_id(&d))
+        .unwrap_or_default();
+    if current.is_empty() {
+        return; // no render device — retry on the next command
+    }
+    let mut guard = match WATCH.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if let Some(st) = guard.as_ref() {
+        if st.default_id == current {
+            return; // already watching this device
+        }
+        eprintln!("[audio] default switched, re-registering");
+        unregister_all(st);
+        *guard = None;
+    }
+    match register_all(&app, &current) {
+        Ok(st) => {
+            eprintln!("[audio] watching default device");
+            *guard = Some(st);
+        }
+        Err(e) => {
+            eprintln!("[audio] audio watch failed: {e}");
+        }
+    }
+}
+
+fn register_all(app: &AppHandle, default_id: &str) -> Result<WatchState, String> {
+    let en = create_enumerator()?;
+    let dev = default_device(&en)?;
+    // Master-volume changes on this endpoint.
+    let endpoint = activate_endpoint_volume(&dev)?;
+    let hr = unsafe {
+        ((*endpoint.vtbl::<EndpointVolumeVtbl>()).register_notify)(
+            endpoint.0,
+            &VOLUME_CALLBACK as *const _ as *mut c_void,
+        )
+    };
+    if hr < 0 {
+        return Err(format!("could not watch master volume (0x{hr:08X})"));
+    }
+    // Device plug/unplug + default switches (device-agnostic).
+    // Device plug/unplug + default switches (device-agnostic).
+    let hr = unsafe {
+        ((*en.vtbl::<EnumeratorVtbl>()).register_endpoint_notification)(
+            en.0,
+            &DEVICE_CALLBACK as *const _ as *mut c_void,
+        )
+    };
+    if hr < 0 {
+        return Err(format!("could not watch audio devices (0x{hr:08X})"));
+    }
+    Ok(WatchState {
+        app: app.clone(),
+        enumerator: en,
+        endpoint,
+        default_id: default_id.to_string(),
+    })
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
@@ -392,11 +681,9 @@ fn device_friendly_name(dev: &ComPtr) -> String {
     }
 }
 
-/// `IAudioEndpointVolume` for the default render endpoint (the main mixer).
-fn default_endpoint_volume() -> Result<ComPtr, String> {
+/// `IAudioEndpointVolume` for one render device (the main mixer).
+fn activate_endpoint_volume(dev: &ComPtr) -> Result<ComPtr, String> {
     use windows_sys::Win32::System::Com::CLSCTX_ALL;
-    let en = create_enumerator()?;
-    let dev = default_device(&en)?;
     let mut out: *mut c_void = null_mut();
     let hr = unsafe {
         ((*dev.vtbl::<DeviceVtbl>()).activate)(
@@ -413,11 +700,16 @@ fn default_endpoint_volume() -> Result<ComPtr, String> {
     Ok(ComPtr(out))
 }
 
-/// `IAudioSessionManager2` for the default render endpoint (the apps mixer).
-fn default_session_manager() -> Result<ComPtr, String> {
-    use windows_sys::Win32::System::Com::CLSCTX_ALL;
+/// `IAudioEndpointVolume` for the default render endpoint (the main mixer).
+fn default_endpoint_volume() -> Result<ComPtr, String> {
     let en = create_enumerator()?;
     let dev = default_device(&en)?;
+    activate_endpoint_volume(&dev)
+}
+
+/// `IAudioSessionManager2` for one render device (the apps mixer).
+fn activate_session_manager(dev: &ComPtr) -> Result<ComPtr, String> {
+    use windows_sys::Win32::System::Com::CLSCTX_ALL;
     let mut out: *mut c_void = null_mut();
     let hr = unsafe {
         ((*dev.vtbl::<DeviceVtbl>()).activate)(
@@ -432,6 +724,13 @@ fn default_session_manager() -> Result<ComPtr, String> {
         return Err(format!("could not open session manager (0x{hr:08X})"));
     }
     Ok(ComPtr(out))
+}
+
+/// `IAudioSessionManager2` for the default render endpoint (the apps mixer).
+fn default_session_manager() -> Result<ComPtr, String> {
+    let en = create_enumerator()?;
+    let dev = default_device(&en)?;
+    activate_session_manager(&dev)
 }
 
 /// `ISimpleAudioVolume` for one session control object.
