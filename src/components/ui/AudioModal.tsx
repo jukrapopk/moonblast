@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
@@ -63,7 +63,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
     localChangeAt.current = Date.now();
   }
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const [d, m, ss] = await Promise.all([
@@ -83,7 +83,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -113,8 +113,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       cancelled = true;
       unlisten?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open ]);
+  }, [open, refresh]);
 
   async function handleSelectDevice(id: string) {
     setSwitching(id);
