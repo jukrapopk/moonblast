@@ -1839,8 +1839,16 @@ fn wifi_current() -> Option<wifi::WifiConnection> {
 /// Triggers a fresh scan (~1s) then returns the resulting list. Cost is
 /// paid only on demand, not on every chip poll.
 #[tauri::command]
-fn wifi_scan() -> Vec<wifi::WifiNetwork> {
-    wifi::scan_and_list().unwrap_or_default()
+async fn wifi_scan() -> Vec<wifi::WifiNetwork> {
+    // The scan does a synchronous WlanScan + a 2.5s sleep to let the
+    // driver populate the visible-network cache, then a netsh read.
+    // Running it on a blocking task means other Tauri commands (like
+    // the chip's wifi_current poll) don't queue up behind it.
+    tauri::async_runtime::spawn_blocking(wifi::scan_and_list)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
 }
 
 /// Connect to a WiFi network by SSID. Returns `Ok(())` on success, or an
