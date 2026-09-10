@@ -1356,6 +1356,37 @@ fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
     v
 }
 
+/// True if `pid` owns any visible top-level window. The Moonlight process can
+/// outlive its UI in two ways: a few moments after the user closes the
+/// window (process is finishing cleanup but `try_wait` still says alive), or
+/// longer if the connection was lost and the client hangs in a non-UI state.
+/// Either way, "no visible window" is a stronger signal that the stream is
+/// gone than `try_wait` alone, and lets us re-spawn a fresh stream instead of
+/// refusing the user.
+fn pid_has_visible_window(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{BOOL, HWND};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible};
+    let found = false;
+    unsafe extern "system" fn cb(hwnd: HWND, lparam: isize) -> BOOL {
+        let blob = &mut *(lparam as *mut (u32, bool));
+        if IsWindowVisible(hwnd) == 0 {
+            return 1;
+        }
+        let mut owner_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut owner_pid);
+        if owner_pid == blob.0 {
+            blob.1 = true;
+            return 0; // abort the enum — we have our answer
+        }
+        1
+    }
+    let mut blob = (pid, found);
+    unsafe {
+        EnumWindows(Some(cb), (&mut blob as *mut (u32, bool)) as isize);
+    }
+    blob.1
+}
+
 /// Launch a stream for a host + app via `moonlight stream <host> <app>`.
 /// Returns `true` if a new stream was launched, or `false` if one for this
 /// host+app is already running (no duplicate window).
@@ -1370,14 +1401,21 @@ fn moonlight_stream(
     let prefs = state.0.lock().unwrap().moonlight.clone();
     let key = format!("{host}\u{1f}{app}");
     let mut map = streams.0.lock().unwrap();
-    // Reap any process that has already exited, and detect a still-running one.
+    // Three states for an existing entry:
+    //   - process exited cleanly → reap and respawn
+    //   - process alive AND owns a visible top-level window → truly streaming,
+    //     refuse the duplicate
+    //   - process alive but no visible window (connection lost, window closed,
+    //     stuck cleanup thread) → user-visible stream is gone, allow respawn.
+    // The third case used to false-positive: `try_wait` said alive, we
+    // blocked the user from starting a fresh stream.
     let already_running = match map.get_mut(&key) {
         Some(child) => match child.try_wait() {
-            Ok(None) => true, // still streaming
+            Ok(None) => pid_has_visible_window(child.id()),
             Ok(Some(_)) => {
                 map.remove(&key);
                 false
-            } // finished — spawn a fresh one next
+            }
             Err(_) => false,
         },
         None => false,
