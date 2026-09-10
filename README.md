@@ -23,12 +23,16 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - **Copy From Clipboard** action: pull an image from the clipboard (raw image, `data:` URI, https URL, or raw base64), encode to PNG, cache into `.icons`. Action is grayed out when the clipboard has nothing usable.
   - rename apps to a custom display name; reusable search / source-filter / A↔Z / Z↔A sort list.
 - **Right-click context menus** everywhere (replacing the native WebView2 menu): per-app, per-host, title bar, text inputs (Undo/Cut/Copy/Paste/Select-All), and a generic page-level Back/Refresh fallback.
+- **Battery status** — TopBar chip with current %, plug state, and time-remaining / time-to-full in the tooltip; click opens a modal with the full percent bar, time-remaining, and power source. Updates every 5s (10s in the modal) without Rust push events.
 - **Moonlight tab** — machines + streaming:
+  - **Unified host list** — mDNS discovery, the paired registry, and the user's `settings.machines` are merged into one `HostEntry[]` keyed by case-insensitive name (not address), so the same host at a LAN IP and a Tailscale IP shows as **one card**, not two.
+  - **Saved address override** — the address in `settings.machines` always wins as the active address used for probe + stream. This is the fix for "LAN IP changed, paired record is stale, Tailscale override saved": add the remote address, and the saved one is used from then on. A `Saved` badge on the card signals when the active address isn't the paired record's.
   - mDNS **discovery** of Sunshine/GameStream hosts (paired/unpaired) — `discover_hosts` browses `_nvstream._tcp.local.` then probes each host.
   - **Paired hosts** read directly from Moonlight QT's QSettings store (registry for normal installs, `Moonlight.conf` for portable installs).
-  - **Saved machines** — user-added hosts; probed per-scan (TCP 47984/47989 + `moonlight list`) and shown as Online / Offline. Tailscale `*.ts.net` hostnames work.
-  - **Pair / Desktop / Apps** actions per host; **Resume / Disconnect** during a stream. Duplicate stream spawns for the same host+app are blocked.
-  - Drives the **Moonlight QT client** via its CLI (`list`, `pair`, `stream`, `quit`).
+  - **Saved machines** — user-added hosts (typically Tailscale `*.ts.net` hostnames or remote IPs); probed per-scan (TCP 47984/47989 + `moonlight list`) and shown as Online / Offline.
+  - **Per-host actions**: Pair / Stream Desktop / Apps gated on `paired AND reachable`. Right-click menu separates **Forget pairing** (drops the cert) from **Remove saved address** (drops the override).
+  - **Resume / Disconnect** during a stream. Duplicate stream spawns for the same host+app are blocked.
+  - Drives the **Moonlight QT client** via its CLI (`list`, `pair`, `stream`); disconnects use `GET /cancel?uniqueid=…` directly, matching Moonlight Qt's `NvHTTP::quitApp`.
 - **Gamepad support** — controller buttons/sticks are bridged to keyboard events in `useGamepad`, so the existing keyboard handlers drive everything: A = Enter, B = Esc, LB/RB = Tab/Shift+Tab (view switching), D-pad / left stick = arrows.
 - **Persistent settings** — all settings survive restarts.
 - **Integrations** — auto-detect Tailscale (CLI, polled while Settings is mounted), select + validate Moonlight install folder, SteamGridDB API key.
@@ -40,7 +44,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - system power: `system_power(sleep|reboot|shutdown)`, `enter_immersive`, `exit_immersive`
   - startup: `set_start_with_windows` (HKCU Run key), `set_replace_desktop` (per-user `Winlogon\Shell` takeover), `booted_as_shell`
   - Tailscale: `tailscale_status`, `tailscale_set`
-  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps` (10s subprocess timeout), `moonlight_pair` (async + 10-min deadline, emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`; kills prior orphan + drains on `close_app`/`Destroyed`), `moonlight_quit` (host + app: graceful host quit, then kills the local client window)
+  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps` (10s subprocess timeout), `moonlight_pair` (async + 10-min deadline, emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`; kills prior orphan + drains on `close_app`/`Destroyed`), `moonlight_quit` (host + app: `GET /cancel?uniqueid=…&uuid=…` over HTTPS to stop the host's app immediately + bounded reap of the local moonlight.exe; matches Moonlight Qt's `quitApp`)
   - host discovery / pairing: `discover_hosts` (mDNS + per-host `list` probe), `moonlight_paired_hosts` (reads QSettings), `moonlight_probe` (TCP + list check, used for online/offline)
   - apps: `discover_apps` (Start Menu + Store + Steam), `launch_app`
   - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`
@@ -57,7 +61,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
 ```
 src/                          # React frontend
   components/
-    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList, Button, Card, Prompt, WifiModal, AudioModal, Slider, StatusPill, IconTile)
+    ui/                       # shared primitives (Toggle, Row, Section, Select, Segmented, Modal, Toast, Input, ContextMenu, FilterList, Button, Card, Prompt, WifiModal, AudioModal, BatteryModal, Slider, StatusPill, IconTile)
     TopBar.tsx                # icon nav + power button
     TitleBar.tsx              # custom window title bar
     PageShell.tsx             # shared page layout
@@ -67,7 +71,13 @@ src/                          # React frontend
     SettingsView.tsx          # app-level settings (general, integrations, about)
     PowerMenu.tsx             # power menu modal
   settings/SettingsContext.tsx  # persistent settings provider
-  hooks/useGamepad.ts         # gamepad → keyboard bridge
+  hooks/
+    useGamepad.ts             # gamepad → keyboard bridge
+    usePowerMenuTrigger.ts    # Rust → JS trigger pubsub (Alt+F4 in Immersive)
+    useWifi.ts                # event-driven WiFi chip + scan state
+    useAudio.ts               # event-driven audio master + sessions
+    useBattery.ts             # 5s poll + focus/visibility battery chip
+    useTime.ts                # clock + date formatter
   styles.css                  # design tokens (@theme)
 src-tauri/                    # Rust backend
   src/lib.rs                  # Tauri commands
@@ -81,11 +91,11 @@ src-tauri/                    # Rust backend
 |---|---|---|
 | Fullscreen | F11 | — |
 | Immersive Mode | Power menu | — |
-| Exit Immersive | Esc | B |
+| Exit Immersive | Power menu | — |
 | Next / prev view | Tab / Shift+Tab | RB / LB |
 | Move | Arrows | D-pad / left stick |
 | Activate | Enter / Space | A |
-| Back / cancel | Escape | B |
+| Close a modal | Escape | B |
 
 ## Building for ARM64
 
