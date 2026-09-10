@@ -202,6 +202,9 @@ function AddAppModal({
 
   return (
     <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one." width="max-w-lg">
+      <div className="mb-3 rounded-xl border border-(--color-border) bg-(--color-surface-2)/40 px-3 py-2 text-xs text-(--color-muted)">
+        Some Microsoft Store and UWP apps (Calculator, Settings, Store Notepad's modern edition, etc.) rely on Windows desktop components that Moonblast's fullscreen mode doesn't keep alive. They may launch without showing a window, freeze, or behave oddly — use at your own risk. Plain Win32 apps (Steam, Firefox, file dialog apps, classic Notepad) work normally.
+      </div>
       <div className="mb-3">
         <Segmented
           variant="tabs"
