@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
+import { Toggle } from "./Toggle";
 import {
   WifiHigh,
   WifiLow,
@@ -9,10 +10,8 @@ import {
   WifiNone,
   WifiSlash,
   Lock,
-  Check,
   ArrowsClockwise,
   ArrowsOutSimple,
-  Power,
 } from "@phosphor-icons/react";
 import {
   fetchWifiCurrent,
@@ -68,53 +67,76 @@ function NetworkRow({
   net,
   currentSsid,
   onConnect,
+  onDisconnect,
   busy,
 }: {
   net: WifiNetwork;
   currentSsid: string | null;
   onConnect: (ssid: string) => void;
+  onDisconnect: () => void;
   busy: boolean;
 }) {
   const isCurrent = currentSsid === net.ssid && net.connected;
-  const needsPassword = net.secured && !net.known && !isCurrent;
-  return (
-    <div
-      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
-        isCurrent ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface)"
-      }`}
-    >
+  const needsSignIn = net.secured && !net.known;
+
+  const rowBody = (
+    <>
       <span className={`${signalTone(net.signal)} flex w-5 shrink-0 items-center justify-center`}>
         {signalIcon(net.signal)}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-(--color-text)">{net.ssid}</span>
-          {net.secured && <Lock size={12} weight="bold" className="shrink-0 text-(--color-muted)" />}
         </div>
-        <div className="mt-0.5 text-xs text-(--color-muted)">
-          {isCurrent ? "Connected" : needsPassword ? "Tap to sign in" : net.known ? "Saved" : `${net.signal}%`}
-        </div>
+        {(isCurrent || net.known) && (
+          <div className="mt-0.5 text-xs text-(--color-muted)">
+            {isCurrent ? "Connected" : "Saved"}
+          </div>
+        )}
       </div>
-      {isCurrent ? (
-        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-(--color-accent)">
-          <Check size={14} weight="bold" />
-        </span>
-      ) : (
-        <button
-          onClick={() => onConnect(net.ssid)}
-          disabled={busy}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text) disabled:opacity-40"
-          aria-label={`Connect to ${net.ssid}`}
-          title={needsPassword ? "Sign in (opens Wi-Fi settings)" : "Connect"}
-        >
-          {needsPassword ? (
-            <Lock size={13} weight="bold" />
-          ) : (
-            <ArrowsOutSimple size={13} weight="bold" className="rotate-[-90deg]" />
-          )}
-        </button>
+      {/* Decorative icon — shows the user what kind of network this row
+          is (saved vs. needs sign-in). The whole row is the click target. */}
+      {!isCurrent && needsSignIn && (
+        <Lock size={13} weight="bold" className="shrink-0 text-(--color-muted)" />
       )}
-    </div>
+      {!isCurrent && !needsSignIn && net.known && (
+        <ArrowsOutSimple size={13} weight="bold" className="rotate-[-90deg] shrink-0 text-(--color-muted)" />
+      )}
+      {isCurrent && (
+        <Button
+          variant="outline"
+          size="md"
+          onClick={onDisconnect}
+          disabled={busy}
+          className="px-3 py-1 text-xs"
+        >
+          Disconnect
+        </Button>
+      )}
+    </>
+  );
+
+  // For the connected row, keep the existing click-to-disconnect only on
+  // the Disconnect button (not the whole row). For all other rows, the
+  // whole row is the action — click anywhere to connect / sign in.
+  if (isCurrent) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5">
+        {rowBody}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onConnect(net.ssid)}
+      disabled={busy}
+      aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
+      title={needsSignIn ? "Sign in (opens Wi-Fi settings)" : "Connect"}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none disabled:opacity-40"
+    >
+      {rowBody}
+    </button>
   );
 }
 
@@ -188,8 +210,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     }
   }
 
-  async function handleRadioToggle() {
-    const next = !(radioOn ?? true);
+  async function handleRadioToggle(next: boolean) {
     setBusy("radio");
     setError(null);
     try {
@@ -203,40 +224,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="WiFi" subtitle={liveSsid ?? "Not connected"} width="max-w-sm">
-      {liveSsid && (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Check size={14} weight="bold" className="shrink-0 text-(--color-accent)" />
-              <span className="truncate text-sm font-medium text-(--color-text)">{liveSsid}</span>
-            </div>
-            <div className="mt-0.5 ml-6 text-xs text-(--color-muted)">Connected</div>
-          </div>
-          <Button
-            variant="outline"
-            size="md"
-            onClick={handleDisconnect}
-            disabled={busy !== null}
-            className="px-3 py-1 text-xs"
-          >
-            Disconnect
-          </Button>
-        </div>
-      )}
-
-      <div className="mb-3 flex justify-end">
-        <Button
-          variant="ghost"
-          size="md"
-          onClick={scan}
-          disabled={loading || busy !== null}
-          icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
-        >
-          Rescan
-        </Button>
-      </div>
-
+    <Modal open={open} onClose={onClose} title="WiFi" width="max-w-sm">
       {error && (
         <p className="mb-3 rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
           {error}
@@ -257,27 +245,28 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
               net={net}
               currentSsid={liveSsid}
               onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
               busy={busy === "connect"}
             />
           ))
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-(--color-border) pt-3">
-        <span className="text-xs text-(--color-muted)">Wi-Fi radio</span>
-        <button
-          onClick={handleRadioToggle}
-          disabled={busy !== null}
-          className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${
-            (radioOn ?? true)
-              ? "bg-(--color-accent) text-white"
-              : "bg-(--color-surface-2) text-(--color-muted)"
-          } disabled:opacity-40`}
-          aria-label={(radioOn ?? true) ? "Turn Wi-Fi off" : "Turn Wi-Fi on"}
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-(--color-border) pt-3">
+        <Button
+          variant="ghost"
+          size="md"
+          onClick={scan}
+          disabled={loading || busy !== null}
+          icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
         >
-          <Power size={12} weight="bold" />
-          {(radioOn ?? true) ? "On" : "Off"}
-        </button>
+          Rescan
+        </Button>
+        <Toggle
+          checked={radioOn ?? true}
+          onChange={handleRadioToggle}
+          disabled={busy !== null}
+        />
       </div>
     </Modal>
   );
