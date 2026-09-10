@@ -2,8 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface WifiConnection {
-  /** Connected SSID. Empty when the radio is on but no network is
-   *  associated — the chip still shows in that case. */
+  /** Connected SSID. Empty when not connected. */
   ssid: string;
   /** 0–100. 0 when not connected. */
   signal: number;
@@ -11,6 +10,10 @@ export interface WifiConnection {
   secured: boolean;
   /** True if a network is currently associated. */
   connected: boolean;
+  /** False when the adapter exists but the radio is off — the chip
+   *  shows a WifiX icon. Absent (`null` fetch result) means no
+   *  adapter, and the chip stays hidden. */
+  radioOn: boolean;
 }
 
 export interface WifiNetwork {
@@ -29,15 +32,14 @@ export interface WifiNetwork {
 }
 
 /**
- * Event-driven WiFi state for the TopBar chip. Replaces the old
- * 30s-tick poll: the wlan service doesn't change state on its own,
- * so we just read on:
+ * Event-driven WiFi state for the TopBar chip: the wlan service doesn't
+ * change state on its own, so we just read on:
  *   - mount (app start)
  *   - window `focus`
  *   - `visibilitychange` to "visible" (user alt-tabs back)
  *   - explicit `refresh()` call (the modal calls this after a
- *     connect/disconnect/radio toggle so the chip reflects the new
- *     state immediately, not on the next user focus).
+ *     connect/disconnect so the chip reflects the new state
+ *     immediately, not on the next user focus).
  *
  * The wlan service's netsh read takes ~200ms; calling it on focus
  * is cheap.
@@ -103,9 +105,9 @@ export function useWifi(): {
 }
 
 /**
- * One-shot fetch of the current connection. The polling hook above is for
- * continuous monitoring; the modal uses this to refresh its header after
- * connect/disconnect so the UI doesn't wait for the next 30s tick.
+ * One-shot fetch of the current connection. The event-driven hook above
+ * is for continuous monitoring; the modal uses this to refresh its
+ * header after connect/disconnect.
  */
 export async function fetchWifiCurrent(): Promise<WifiConnection | null> {
   try {
@@ -124,6 +126,7 @@ export function useWifiScan(): {
   networks: WifiNetwork[];
   loading: boolean;
   scan: () => void;
+  clear: () => void;
 } {
   const [networks, setNetworks] = useState<WifiNetwork[]>([]);
   const [loading, setLoading] = useState(false);
@@ -138,7 +141,10 @@ export function useWifiScan(): {
       setLoading(false);
     }
   }
-  return { networks, loading, scan };
+  function clear() {
+    setNetworks([]);
+  }
+  return { networks, loading, scan, clear };
 }
 
 /**

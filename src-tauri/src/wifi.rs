@@ -40,16 +40,19 @@ const WLAN_CLIENT_VERSION_2: u32 = 2;
 #[serde(rename_all = "camelCase")]
 pub struct WifiConnection {
     /// UTF-8 SSID (already validated as UTF-8 when stored).
-    /// Empty when the radio is on but no network is connected.
+    /// Empty when not connected.
     pub ssid: String,
     /// 0–100. 0 when not connected.
     pub signal: u32,
     /// True if the AP requires a password.
     pub secured: bool,
-    /// True if a network is currently associated. When false, the
-    /// radio is on but the adapter is idle (e.g. just disconnected,
-    /// or the saved network isn't reachable).
+    /// True if a network is currently associated.
     pub connected: bool,
+    /// True if the radio is on. When false, the adapter exists but is
+    /// off — the UI shows a WifiX chip (still clickable, so the user
+    /// can open the picker / OS settings). `None` (no `WifiConnection`
+    /// at all) means no adapter — the chip stays hidden.
+    pub radio_on: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -372,15 +375,15 @@ fn netsh_known_ssids() -> std::collections::HashSet<String> {
     out
 }
 
-/// Cheap, allocation-light call for the chip's polling. `None` means "no
+/// Cheap call for the chip's event-driven reads. `None` means "no
 /// WiFi adapter at all" — the UI should hide the chip in that case.
 ///
 /// The wlanapi path is supposed to be the primary route, but in long-lived
 /// Tauri processes the wlan service returns `ERROR_NOT_FOUND` (1168) for
 /// `WlanGetAvailableNetworkList` even when `netsh` reports an active
 /// connection. As a stopgap, we shell out to `netsh wlan show interfaces`
-/// which always works. Cost is ~200ms per call; the chip polls every 30s
-/// so the overhead is negligible.
+/// which always works. Cost is ~200ms per call; reads happen on window
+/// focus / modal open, so the overhead is negligible.
 pub fn current() -> Option<WifiConnection> {
     netsh_current_connection()
 }
@@ -399,9 +402,38 @@ fn netsh_current_connection() -> Option<WifiConnection> {
     let mut ssid: Option<String> = None;
     let mut signal: Option<u32> = None;
     let mut auth: Option<String> = None;
-    let mut radio_on: Option<bool> = None;
-    for line in text.lines() {
-        let line = line.trim();
+    // `Radio status` spans two lines when HW/SW differ:
+    //   Radio status           : Hardware On
+    //                            Software Off
+    // The radio is on only when BOTH are on — any `Off` means off.
+    // Collect the first line's value plus any continuation lines
+    // (indented, no colon) that follow it.
+    let mut radio_values: Vec<String> = Vec::new();
+    let mut in_radio = false;
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if let Some(rest) = line.strip_prefix("Radio status") {
+            in_radio = true;
+            if let Some(v) = rest.split(':').nth(1) {
+                radio_values.push(v.trim().to_string());
+            }
+            continue;
+        }
+        if in_radio {
+            if line.is_empty() {
+                in_radio = false;
+                continue;
+            }
+            if line.contains(':') {
+                // Next key — end of the radio block; fall through
+                // to normal parsing below.
+                in_radio = false;
+            } else {
+                // Continuation line, e.g. "Software Off".
+                radio_values.push(line.to_string());
+                continue;
+            }
+        }
         if let Some(rest) = line.strip_prefix("State") {
             state = rest.split(':').nth(1).map(|s| s.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("SSID") {
@@ -413,20 +445,24 @@ fn netsh_current_connection() -> Option<WifiConnection> {
                 .and_then(|s| s.trim().trim_end_matches('%').parse().ok());
         } else if let Some(rest) = line.strip_prefix("Authentication") {
             auth = rest.split(':').nth(1).map(|s| s.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("Radio status") {
-            let v = rest.split(':').nth(1).map(|s| s.trim().to_string());
-            // "Hardware On" / "Software On" → on, "Off" → off. Any
-            // other value (or absent) leaves it None so we don't guess.
-            radio_on = v.map(|s| s.contains("On") && !s.contains("Off"));
         }
     }
-    // Only show "not connected" as a connected state if the radio is
-    // explicitly on. If `radio_on` is None (couldn't parse) we err on
-    // the side of treating the adapter as idle and hide the chip.
+    let radio_on = if radio_values.iter().any(|v| v.contains("Off")) {
+        Some(false)
+    } else if radio_values.iter().any(|v| v.contains("On")) {
+        Some(true)
+    } else {
+        None
+    };
+    // Connected implies the radio is on even if the `Radio status`
+    // line was missing. Radio explicitly off → still return `Some`
+    // so the UI can show a WifiX chip. `None` only when we can't
+    // tell an adapter exists at all (chip stays hidden).
     let connected = state.as_deref() == Some("connected");
-    if !connected && radio_on != Some(true) {
-        return None;
-    }
+    let radio_on_bool = if connected { true } else { match radio_on {
+        Some(v) => v,
+        None => return None,
+    } };
     let (ssid, signal) = if connected {
         (
             ssid.unwrap_or_default(),
@@ -444,6 +480,7 @@ fn netsh_current_connection() -> Option<WifiConnection> {
         signal,
         secured,
         connected,
+        radio_on: radio_on_bool,
     })
 }
 

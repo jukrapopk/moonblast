@@ -48,6 +48,16 @@ interface WifiModalProps {
   onClose: () => void;
   /** SSID of the currently connected network, or null if disconnected. */
   currentSsid: string | null;
+  /**
+   * Radio state from the parent's shared `useWifi` subscription.
+   * `false` = adapter exists but radio off (skip scans, show the
+   * off-hint, disable Rescan); `true`/`null` = on or unknown.
+   * `null` covers loading and no-adapter — both fall back to the
+   * old behavior (scan optimistically). The parent refreshes this
+   * on window focus, so toggling WiFi in OS Settings with the
+   * modal open updates the modal on return — no modal-local poll.
+   */
+  radioOn: boolean | null;
 }
 
 function signalIcon(signal: number) {
@@ -267,16 +277,21 @@ function NetworkRow({
   );
 }
 
-export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
-  const { networks, loading, scan } = useWifiScan();
+export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProps) {
+  const { networks, loading, scan, clear } = useWifiScan();
   // Per-row in-flight state (the row that the user is currently acting
   // on). `null` when nothing is happening.
   const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Derived from the parent's subscription — no local fetch, no poll.
+  // When off, scans are pointless (`netsh show networks` can only
+  // return the empty cache), so the list stays empty with an off-hint
+  // and Rescan is disabled until the radio comes back on.
+  const radioOff = radioOn === false;
   // Local copy of the current SSID so connect/disconnect reflect
-  // immediately, without waiting for the parent chip's 30s poll.
-  // Seeded from the prop on open; re-fetched from the OS after every
-  // connect/disconnect so the modal reflects the real state.
+  // immediately. Seeded from the prop on open; re-fetched from the
+  // OS after every connect/disconnect, and synced from the parent
+  // subscription (which refreshes on window focus) while open.
   const [liveSsid, setLiveSsid] = useState<string | null>(currentSsid);
   useEffect(() => {
     if (open) setLiveSsid(currentSsid);
@@ -294,9 +309,21 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     if (!open) setBusy(null);
   }, [open]);
 
+  // Scan on open and on off→on transitions (parent refreshes `radioOn`
+  // on window focus, so returning from OS Settings auto-populates).
+  // On→off clears the now-stale list so the off-hint shows.
   useEffect(() => {
     if (!open) return;
+    if (radioOff) {
+      clear();
+      return;
+    }
     scan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, radioOff]);
+
+  useEffect(() => {
+    if (!open) return;
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -386,7 +413,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
               <p className="py-6 text-center text-sm text-(--color-muted)">Scanning…</p>
             ) : networks.length === 0 ? (
               <p className="py-6 text-center text-sm text-(--color-muted)">
-                No networks found
+                {radioOff ? "Wi-Fi is off — turn it on in WiFi Settings." : "No networks found"}
               </p>
             ) : (
               networks.map((net) => {
@@ -415,7 +442,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
               variant="ghost"
               size="md"
               onClick={scan}
-              disabled={loading || busy !== null}
+              disabled={loading || busy !== null || radioOff}
               icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
             >
               Rescan

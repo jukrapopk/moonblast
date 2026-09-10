@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { useTime, formatClock } from "../hooks/useTime";
@@ -63,8 +63,10 @@ function batteryIcon(percent: number, charging: boolean) {
 const chipBase =
   "flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-(--color-muted) tabular-nums";
 
-function wifiChipIcon(signal: number) {
+function wifiChipIcon(wifi: WifiConnection) {
   const weight = "bold" as const;
+  if (!wifi.radioOn) return <WifiX size={24} weight={weight} />;
+  const signal = wifi.signal;
   if (signal >= 75) return <WifiHigh size={24} weight={weight} />;
   if (signal >= 50) return <WifiMedium size={24} weight={weight} />;
   if (signal >= 25) return <WifiLow size={24} weight={weight} />;
@@ -97,8 +99,8 @@ function Status({
       )}
       {wifi && (
         <TopBarButton
-          label="WiFi"
-          icon={wifiChipIcon(wifi.signal)}
+          label={wifi.radioOn ? "WiFi" : "WiFi off"}
+          icon={wifiChipIcon(wifi)}
           onClick={onWifiClick}
         />
       )}
@@ -190,7 +192,7 @@ export function TopBar({
           immersive={immersive}
           onToggleImmersive={onToggleImmersive}
         />
-        <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} />
+        <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} radioOn={wifi?.radioOn ?? null} />
       </div>
     </header>
   );
