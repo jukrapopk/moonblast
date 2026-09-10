@@ -15,6 +15,7 @@ import {
   Power,
 } from "@phosphor-icons/react";
 import {
+  fetchWifiCurrent,
   useWifiScan,
   wifiConnect,
   wifiDisconnect,
@@ -22,6 +23,24 @@ import {
   wifiRadioSet,
   type WifiNetwork,
 } from "../../hooks/useWifi";
+
+/**
+ * Poll the OS up to `timeoutMs` waiting for the connection state to
+ * settle to the expected value. The wlan service can take a few
+ * seconds to actually apply connect/disconnect, and reading it
+ * before that gives a stale view.
+ */
+async function waitForState(
+  expected: string | null,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const c = await fetchWifiCurrent();
+    if (expected === null ? c === null : c?.ssid === expected) return;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
 
 interface WifiModalProps {
   open: boolean;
@@ -104,6 +123,14 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   const [busy, setBusy] = useState<null | "connect" | "disconnect" | "radio">(null);
   const [error, setError] = useState<string | null>(null);
   const [radioOn, setRadioOn] = useState<boolean | null>(null);
+  // Local copy of the current SSID so connect/disconnect reflect
+  // immediately, without waiting for the parent chip's 30s poll.
+  // Seeded from the prop on open; re-fetched from the OS after every
+  // connect/disconnect so the modal reflects the real state.
+  const [liveSsid, setLiveSsid] = useState<string | null>(currentSsid);
+  useEffect(() => {
+    if (open) setLiveSsid(currentSsid);
+  }, [open, currentSsid]);
 
   useEffect(() => {
     if (!open) return;
@@ -121,8 +148,14 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     setError(null);
     try {
       await wifiConnect(ssid);
+      // The connect command may take a few seconds to actually take
+      // effect; poll the OS a few times to wait for the state to land
+      // before refreshing the modal.
+      await waitForState(ssid);
       // Refresh the scan to update the `connected` flag.
-      setTimeout(() => scan(), 800);
+      await scan();
+      const c = await fetchWifiCurrent();
+      setLiveSsid(c?.ssid ?? null);
     } catch (e) {
       const msg = String(e);
       setError(msg);
@@ -142,7 +175,12 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     setError(null);
     try {
       await wifiDisconnect();
-      setTimeout(() => scan(), 500);
+      // The disconnect command may also be async on the wlan service;
+      // poll briefly so the modal reflects the real state.
+      await waitForState(null);
+      await scan();
+      const c = await fetchWifiCurrent();
+      setLiveSsid(c?.ssid ?? null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -165,13 +203,13 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="WiFi" subtitle={currentSsid ?? "Not connected"} width="max-w-sm">
-      {currentSsid && (
+    <Modal open={open} onClose={onClose} title="WiFi" subtitle={liveSsid ?? "Not connected"} width="max-w-sm">
+      {liveSsid && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Check size={14} weight="bold" className="shrink-0 text-(--color-accent)" />
-              <span className="truncate text-sm font-medium text-(--color-text)">{currentSsid}</span>
+              <span className="truncate text-sm font-medium text-(--color-text)">{liveSsid}</span>
             </div>
             <div className="mt-0.5 ml-6 text-xs text-(--color-muted)">Connected</div>
           </div>
@@ -217,7 +255,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
             <NetworkRow
               key={net.ssid}
               net={net}
-              currentSsid={currentSsid}
+              currentSsid={liveSsid}
               onConnect={handleConnect}
               busy={busy === "connect"}
             />

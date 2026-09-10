@@ -47,6 +47,19 @@ export function useWifi(intervalMs = 30_000): WifiConnection | null | undefined 
 }
 
 /**
+ * One-shot fetch of the current connection. The polling hook above is for
+ * continuous monitoring; the modal uses this to refresh its header after
+ * connect/disconnect so the UI doesn't wait for the next 30s tick.
+ */
+export async function fetchWifiCurrent(): Promise<WifiConnection | null> {
+  try {
+    return await invoke<WifiConnection | null>("wifi_current");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * On-demand scan for the picker modal. Returns an empty array while loading,
  * an empty array if the scan failed (no WiFi / no permission), or the
  * deduped + sorted list of visible networks.
