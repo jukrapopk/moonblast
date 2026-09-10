@@ -137,6 +137,15 @@ async fn tailscale_set(up: bool) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Absolute path to the installed Tailscale GUI, or `None` if Tailscale
+/// isn't installed (the standard installer writes
+/// `HKLM\SOFTWARE\Tailscale\InstallPath`). Used by the Settings UI to decide
+/// whether the "Auto Tailscale Start" toggle should be enabled.
+#[tauri::command]
+fn tailscale_install_path() -> Option<String> {
+    shell::tailscale_install_path().map(|p| p.to_string_lossy().into_owned())
+}
+
 #[derive(serde::Serialize)]
 struct TailscaleInfo {
     status: String,
@@ -2146,6 +2155,7 @@ pub fn run() {
             audio_reset_sessions,
             tailscale_status,
             tailscale_set,
+            tailscale_install_path,
             validate_moonlight_dir,
             moonlight_list_apps,
             moonlight_pair,

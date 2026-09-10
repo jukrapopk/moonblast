@@ -16,8 +16,11 @@
 //! user with a working desktop.
 
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
 use std::process::Command;
-use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE};
+
+use crate::settings;
 use winreg::RegKey;
 
 const WINLOGON: &str = r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon";
@@ -151,6 +154,63 @@ pub fn ensure_desktop() {
     }
 }
 
+/// Where Tailscale's installer registers itself. Resolving this is the standard
+/// way to find the GUI client (`tailscaled` is a separate Windows service whose
+/// own path we don't need).
+const TAILSCALE_REG_KEY: &str = r"SOFTWARE\Tailscale";
+
+/// Resolve the installed Tailscale GUI executable, if present.
+///
+/// Reads `HKLM\SOFTWARE\Tailscale\InstallPath` (set by the standard installer),
+/// then looks for `Tailscale.exe` inside it. Returns `None` for uninstalled /
+/// non-standard installs — the stub then silently skips the launch, and the
+/// user can address that by reinstalling Tailscale normally. `pub` so the UI
+/// can use the same definition of "installed" the stub uses.
+pub fn tailscale_install_path() -> Option<PathBuf> {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let key = hklm.open_subkey(TAILSCALE_REG_KEY).ok()?;
+    let path: String = key.get_value("InstallPath").ok()?;
+    let dir = PathBuf::from(path);
+    let exe = dir.join("Tailscale.exe");
+    exe.is_file().then_some(exe)
+}
+
+/// Launch the Tailscale GUI at sign-in. Best-effort: missing install or a
+/// non-zero exit are both ignored — we just want Tailscale coming up next to
+/// Moonblast, the same way Explorer's Run key would have done. Skipped when
+/// the user hasn't opted into Auto Tailscale Start in Settings.
+fn launch_tailscale() {
+    if !auto_tailscale_start_enabled() {
+        return;
+    }
+    let Some(exe) = tailscale_install_path() else {
+        return;
+    };
+    let _ = Command::new(exe)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+}
+
+/// Read the user's `auto_tailscale_start` preference from `settings.json`.
+/// Returns `false` if the file is missing or unparseable — a fresh install or
+/// a corrupt file should never spawn Tailscale, only an explicit opt-in.
+fn auto_tailscale_start_enabled() -> bool {
+    let Some(path) = settings::config_file_path() else {
+        return false;
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    // Just fish the one bool out of the file with a minimal hand-written
+    // search — pulling in the whole Settings serde here would be overkill and
+    // would force us to keep the stub's serde version in lockstep.
+    text.lines()
+        .find(|l| l.trim_start().starts_with("\"auto_tailscale_start\""))
+        .and_then(|line| line.split(':').nth(1))
+        .map(|v| v.trim().trim_end_matches(',').eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 /// Stay alive as the session's shell process, restarting Explorer if it goes away.
 ///
 /// Winlogon launches exactly one shell process per session; keeping this (tiny)
@@ -176,6 +236,11 @@ pub fn run_shell_stub() -> ! {
     // Counted as a failure up front; the launcher clears it once it has survived
     // `CRASH_RESET_SECS`, so only a fast crash loop ever trips the limit.
     bump_crash_count();
+    // Bring Tailscale up alongside Moonblast. Winlogon replaced the shell, so
+    // Explorer's Run keys never fire — including the one Tailscale's installer
+    // adds. Spawning it ourselves restores that behavior for this one app.
+    // No-op if Tailscale isn't installed.
+    launch_tailscale();
     if let Ok(exe) = std::env::current_exe() {
         let _ = Command::new(exe)
             .arg(AUTOSTART_FLAG)
