@@ -5,7 +5,7 @@ import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
-import { useTime, formatClock } from "../hooks/useTime";
+import { useTime, formatClock, formatDate } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
 import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
 
@@ -141,6 +141,7 @@ export function TopBar({
   showMoonlight,
   showApps,
   showTime,
+  showDate,
   showWifi,
   showBattery,
   showAudio,
@@ -154,6 +155,7 @@ export function TopBar({
   showMoonlight: boolean;
   showApps: boolean;
   showTime: boolean;
+  showDate: boolean;
   showWifi: boolean;
   showBattery: boolean;
   showAudio: boolean;
@@ -200,16 +202,27 @@ export function TopBar({
 
       <div className="ml-auto" />
 
-      {showTime && (
-        <div className="absolute left-1/2 -translate-x-1/2">
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center">
+        {showTime && (
           <span
             className="flex h-9 items-center rounded-full px-2 text-lg font-medium text-(--color-muted) tabular-nums"
             title={time.toLocaleString()}
           >
             {formatClock(time)}
           </span>
-        </div>
-      )}
+        )}
+        {showTime && showDate && (
+          <span aria-hidden className="text-(--color-muted)">·</span>
+        )}
+        {showDate && (
+          <span
+            className="flex h-9 items-center rounded-full px-2 text-lg font-medium text-(--color-muted) tabular-nums"
+            title={time.toLocaleString()}
+          >
+            {formatDate(time)}
+          </span>
+        )}
+      </div>
 
       <div className="relative flex items-center gap-1">
         <Status

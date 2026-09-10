@@ -124,6 +124,9 @@ export default function App() {
   function setShowTime(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_time: v } }));
   }
+  function setShowDate(v: boolean) {
+    update((s) => ({ ...s, customization: { ...s.customization, show_date: v } }));
+  }
   function setShowWifi(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_wifi: v } }));
   }
@@ -219,6 +222,7 @@ export default function App() {
         showMoonlight={moonlightEnabled && moonlightDir !== null}
         showApps={appsEnabled}
         showTime={settings.customization.show_time}
+        showDate={settings.customization.show_date}
         showWifi={settings.customization.show_wifi}
         showBattery={settings.customization.show_battery}
         showAudio={settings.customization.show_audio}
@@ -252,6 +256,8 @@ export default function App() {
                 onToggleAutoImmersive={setAutoImmersive}
                 showTime={settings.customization.show_time}
                 onToggleShowTime={setShowTime}
+                showDate={settings.customization.show_date}
+                onToggleShowDate={setShowDate}
                 showWifi={settings.customization.show_wifi}
                 onToggleShowWifi={setShowWifi}
                 showBattery={settings.customization.show_battery}

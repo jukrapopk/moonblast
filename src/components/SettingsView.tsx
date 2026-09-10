@@ -157,6 +157,8 @@ export function SettingsView({
   onToggleAutoImmersive,
   showTime,
   onToggleShowTime,
+  showDate,
+  onToggleShowDate,
   showWifi,
   onToggleShowWifi,
   showBattery,
@@ -178,6 +180,8 @@ export function SettingsView({
   onToggleAutoImmersive: (v: boolean) => void;
   showTime: boolean;
   onToggleShowTime: (v: boolean) => void;
+  showDate: boolean;
+  onToggleShowDate: (v: boolean) => void;
   showWifi: boolean;
   onToggleShowWifi: (v: boolean) => void;
   showBattery: boolean;
@@ -249,6 +253,9 @@ export function SettingsView({
       <Section title="Customization">
         <Row label="Show Time" description="Show the clock in the TopBar.">
           <Toggle checked={showTime} onChange={onToggleShowTime} />
+        </Row>
+        <Row label="Show Date" description="Show the date beside the clock in the TopBar.">
+          <Toggle checked={showDate} onChange={onToggleShowDate} />
         </Row>
         <Row
           label="Show Battery"
