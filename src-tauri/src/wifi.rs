@@ -27,8 +27,8 @@ use std::ptr;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WiFi::{
-    WlanCloseHandle, WlanEnumInterfaces, WlanOpenHandle, WlanQueryInterface, WlanSetInterface,
-    WLAN_INTERFACE_INFO_LIST,
+    WlanCloseHandle, WlanEnumInterfaces, WlanOpenHandle, WlanQueryInterface, WlanScan,
+    WlanSetInterface, WLAN_INTERFACE_INFO_LIST,
 };
 // `WLAN_INTF_OPCODE` is `type WLAN_INTF_OPCODE = i32` in windows-sys 0.59, and
 // the constants are also `i32` — just pass the integer directly.
@@ -157,18 +157,38 @@ fn first_interface(client: &WlanClient) -> Option<windows_sys::core::GUID> {
 ///
 /// We keep the strongest BSSID per SSID. Saved profiles and the currently
 /// connected network are flagged from the interfaces output (run
+/// Ask the wlan driver to refresh its visible-network cache. Fire-and-forget:
+/// `WlanScan` returns immediately and the scan runs asynchronously; the cache
+/// is updated within ~1-2s. Errors are ignored — if the scan can't be
+/// triggered, the next netsh read will just return the cached list.
+fn trigger_scan() {
+    let Some(client) = shared_client() else { return };
+    let Some(guid) = first_interface(client) else { return };
+    unsafe {
+        let _ = WlanScan(
+            client.handle(),
+            &guid,
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+        );
+    }
+}
+
 /// alongside the scan so the chip and the modal agree on connection state).
 pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
-    // First call populates the wlan service's scan cache (returns only
-    // the currently-connected network, since the rest hasn't been
-    // discovered yet). The second call, ~3s later, returns the full
-    // visible-network list. We kick off the first one (which queues a
-    // scan), sleep, then re-read.
-    let _ = std::process::Command::new("netsh")
-        .args(["wlan", "show", "networks", "mode=bssid"])
-        .creation_flags(0x0800_0000)
-        .output();
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    // `netsh wlan show networks` only returns whatever the wlan service
+    // already has in its cache — it doesn't trigger a scan itself. The
+    // wlan service, in turn, only refreshes the cache opportunistically
+    // (e.g. on connect/disconnect). Without an explicit scan, the list
+    // stays at just the currently-connected network.
+    //
+    // We use `WlanScan` to ask the driver for a fresh scan. The driver
+    // updates the visible-network cache within ~1-2s; we then read it
+    // via `netsh` (which always works in this process, unlike the
+    // read-side wlanapi opcodes).
+    trigger_scan();
+    std::thread::sleep(std::time::Duration::from_millis(2500));
     let output = std::process::Command::new("netsh")
         .args(["wlan", "show", "networks", "mode=bssid"])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
