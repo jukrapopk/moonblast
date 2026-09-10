@@ -1,16 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Live wall-clock time, refreshed every 30s. Returns a `Date` so callers can
  * format however they like. 30s is enough to never show a stale minute while
  * keeping the wakeup rate negligible.
+ *
+ * `now` is held in a ref so callers that pass an inline arrow don't churn
+ * the interval on every render — the interval runs forever; it reads the
+ * latest `now()` at each tick.
  */
 export function useTime(now: () => Date = () => new Date()): Date {
   const [t, setT] = useState<Date>(now);
+  const nowRef = useRef(now);
+  nowRef.current = now;
   useEffect(() => {
-    const id = setInterval(() => setT(now()), 30_000);
+    const id = setInterval(() => setT(nowRef.current()), 30_000);
     return () => clearInterval(id);
-  }, [now]);
+  }, []);
   return t;
 }
 
