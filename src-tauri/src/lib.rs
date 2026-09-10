@@ -1400,17 +1400,37 @@ fn moonlight_stream(
     Ok(true)
 }
 
-/// Ask the running stream on a host to quit.
+/// Disconnect the streaming session for `(host, app)`. Tells the host to quit
+/// the running app via `moonlight quit <host>` (graceful — the host's running
+/// process gets a clean shutdown), then kills the local Moonlight client
+/// window Moonblast itself launched, so the user doesn't have to close it
+/// by hand. Without the second step the local window often lingers — the CLI
+/// `quit` runs in a *separate* Moonlight process and only signals the host,
+/// not the existing client.
 #[tauri::command]
 fn moonlight_quit(
     host: String,
+    app: String,
     state: State<'_, settings::SettingsState>,
+    streams: State<'_, StreamState>,
 ) -> Result<(), String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    Command::new(&exe)
+    // 1) Tell the host to terminate the running app. Spawned fire-and-forget;
+    //    failures here don't block the local kill below — the local window
+    //    should close either way.
+    let _ = Command::new(&exe)
         .args(["quit", &host])
-        .spawn()
-        .map_err(|e| e.to_string())?;
+        .spawn();
+    // 2) Kill the local streaming window Moonblast launched for this
+    //    host+app. `Child::kill` is a no-op if the process already exited
+    //    (e.g. the host terminated the stream so quickly the window closed
+    //    on its own), so this is safe even when the two race.
+    let key = format!("{host}\u{1f}{app}");
+    let mut map = streams.0.lock().unwrap();
+    if let Some(mut child) = map.remove(&key) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     Ok(())
 }
 

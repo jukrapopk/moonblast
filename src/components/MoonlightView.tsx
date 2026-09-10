@@ -580,10 +580,14 @@ export function MoonlightView() {
   async function disconnectSession() {
     if (!session) return;
     setSessionBusy(true);
-    const host = session.host;
     try {
-      await invoke("moonlight_quit", { host: host.address });
-      showToast(`Disconnected from ${host.name}`);
+      await invoke("moonlight_quit", {
+        host: session.host.address,
+        app: session.app,
+      });
+      // Silent on success — the user clicked the button, the streaming
+      // window is closing, the toast would just be confirming what they
+      // already did. Errors still surface (e.g. Moonlight exe missing).
     } catch (err) {
       showToast(String(err));
     } finally {

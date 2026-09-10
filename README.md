@@ -40,7 +40,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - system power: `system_power(sleep|reboot|shutdown)`, `enter_immersive`, `exit_immersive`
   - startup: `set_start_with_windows` (HKCU Run key), `set_replace_desktop` (per-user `Winlogon\Shell` takeover), `booted_as_shell`
   - Tailscale: `tailscale_status`, `tailscale_set`
-  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps`, `moonlight_pair` (emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`), `moonlight_quit`
+  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps`, `moonlight_pair` (emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`), `moonlight_quit` (host + app: graceful host quit, then kills the local client window)
   - host discovery / pairing: `discover_hosts` (mDNS + per-host `list` probe), `moonlight_paired_hosts` (reads QSettings), `moonlight_probe` (TCP + list check, used for online/offline)
   - apps: `discover_apps` (Start Menu + Store + Steam), `launch_app`
   - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`

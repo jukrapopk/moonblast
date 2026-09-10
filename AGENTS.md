@@ -48,7 +48,7 @@ Streaming/pairing is done by **driving the Moonlight QT client via its CLI**, NO
   - `moonlight_list_apps(host)` → `moonlight list <host>` (action is `list`, not `listapps`).
   - `moonlight_pair(host)` → `moonlight pair <host>` (shows Moonlight QT's own pairing UI).
   - `moonlight_stream(host, app)` → `moonlight stream <host> <app>`. "Desktop" streams the host's Desktop app. The launcher tracks running stream child processes in a `StreamState` keyed by `host\u{1f}app` so a second click doesn't spawn a duplicate window for the same host+app.
-  - `moonlight_quit(host)` → `moonlight quit <host>`.
+  - `moonlight_quit(host, app)` → `moonlight quit <host>` to terminate the running app on the host (graceful), then `Child::kill` on the local streaming window Moonblast launched for `(host, app)` so it doesn't linger.
 - **Host discovery:** `discover_hosts()` (Rust) browses `_nvstream._tcp.local.` via `mdns-sd` for ~3s, then probes each host with `moonlight list <host>` to classify paired/unpaired. The whole scan runs on `spawn_blocking` so it never freezes the UI.
 - **Paired hosts:** `moonlight_paired_hosts()` reads Moonlight QT's own QSettings store (Windows registry `HKCU\Software\Moonlight Game Streaming Project\Moonlight\hosts\*` for normal installs, or `Moonlight.conf` next to `moonlight.exe` for portable installs) — a host is paired if it holds a pinned `srvcert`. No CLI exists for this; Rust reads the store directly.
 - **Saved-machine reachability:** `moonlight_probe(host)` does a 1.5s TCP probe to ports 47984 / 47989 (so Tailscale `*.ts.net` hosts work too) and a `moonlight list` check for pairing — used to show saved machines as **Online / Offline** without depending on mDNS.
