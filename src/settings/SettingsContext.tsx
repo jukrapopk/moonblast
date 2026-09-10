@@ -18,8 +18,6 @@ export interface Settings {
     moonlight_enabled: boolean;
     apps_enabled: boolean;
     steamgrid_key: string | null;
-    /** Auto Immersive also launches the Tailscale GUI at sign-in. */
-    auto_tailscale_start: boolean;
   };
   moonlight: {
     resolution: string;
@@ -66,7 +64,6 @@ export const DEFAULT_SETTINGS: Settings = {
     moonlight_enabled: false,
     apps_enabled: true,
     steamgrid_key: null,
-    auto_tailscale_start: false,
   },
   moonlight: {
     resolution: "auto",

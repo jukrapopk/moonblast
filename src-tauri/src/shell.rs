@@ -16,11 +16,8 @@
 //! user with a working desktop.
 
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
 use std::process::Command;
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
-
-use crate::settings;
 use winreg::RegKey;
 
 const WINLOGON: &str = r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon";
@@ -154,105 +151,6 @@ pub fn ensure_desktop() {
     }
 }
 
-/// Resolve the installed Tailscale GUI executable, if present.
-///
-/// Asks `where.exe` where `tailscale` lives and uses the first hit. Matches
-/// the detection the rest of the Tailscale integration uses, so the stub and
-/// the UI agree on what "installed" means regardless of how Tailscale got
-/// onto the system (installer, scoop, manual copy to Program Files, etc.).
-pub fn tailscale_install_path() -> Option<PathBuf> {
-    let output = Command::new("where.exe")
-        .arg("tailscale")
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    // `where.exe` may list multiple matches (e.g. `tailscale.exe` and
-    // `Tailscale.exe`); pick the first non-empty line.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let first = stdout
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())?
-        .to_string();
-    let path = PathBuf::from(first);
-    // Prefer the GUI binary if both happen to be on PATH.
-    let gui = path.with_file_name("Tailscale.exe");
-    if gui.is_file() {
-        return Some(gui);
-    }
-    path.is_file().then_some(path)
-}
-
-/// Launch the Tailscale GUI at sign-in. Best-effort: missing install or a
-/// non-zero exit are both ignored — we just want Tailscale coming up next to
-/// Moonblast, the same way Explorer's Run key would have done. Skipped when
-/// the user hasn't opted into Auto Tailscale Start in Settings.
-///
-/// Order matters: this is called *after* `ensure_desktop()` has brought
-/// Explorer up. Tailscale's GUI registers its tray icon via Explorer's
-/// notification area; firing it before Explorer exists leaves the IPC
-/// handshake with `tailscaled` half-done and `tailscale status` reports
-/// "Starting" indefinitely until the user manually opens Tailscale. With
-/// Explorer alive, the tray registers cleanly and the daemon's user-state
-/// handshake completes within a second or two.
-///
-/// `CREATE_NO_WINDOW` is intentionally *not* set: it's a no-op for GUI apps
-/// in most Windows versions but has been observed to interfere with how
-/// Tailscale.exe picks up its inherited WindowStation/Desktop on some
-/// builds. Leaving the flag off is the safer default for a GUI binary.
-fn launch_tailscale() {
-    if !auto_tailscale_start_enabled() {
-        return;
-    }
-    let Some(exe) = tailscale_install_path() else {
-        return;
-    };
-    let _ = Command::new(exe).spawn();
-}
-
-/// Block until Explorer's top-level window is alive (~1500ms budget). Used
-/// before firing Tailscale's GUI, which depends on Explorer's notification
-/// area existing. Returns true if Explorer showed up in time.
-fn wait_for_explorer() -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetShellWindow;
-    let start = std::time::Instant::now();
-    let budget = std::time::Duration::from_millis(1500);
-    while start.elapsed() < budget {
-        if unsafe { !GetShellWindow().is_null() } {
-            // Small extra wait so the notification area (Shell_TrayWnd) has
-            // time to come up — Explorer's top-level window arrives before
-            // the tray, and Tailscale's tray-registration needs both.
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(75));
-    }
-    false
-}
-
-/// Read the user's `auto_tailscale_start` preference from `settings.json`.
-/// Returns `false` if the file is missing or unparseable — a fresh install or
-/// a corrupt file should never spawn Tailscale, only an explicit opt-in.
-fn auto_tailscale_start_enabled() -> bool {
-    let Some(path) = settings::config_file_path() else {
-        return false;
-    };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return false;
-    };
-    // Just fish the one bool out of the file with a minimal hand-written
-    // search — pulling in the whole Settings serde here would be overkill and
-    // would force us to keep the stub's serde version in lockstep.
-    text.lines()
-        .find(|l| l.trim_start().starts_with("\"auto_tailscale_start\""))
-        .and_then(|line| line.split(':').nth(1))
-        .map(|v| v.trim().trim_end_matches(',').eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
 /// Stay alive as the session's shell process, restarting Explorer if it goes away.
 ///
 /// Winlogon launches exactly one shell process per session; keeping this (tiny)
@@ -275,21 +173,9 @@ pub fn run_shell_stub() -> ! {
         ensure_desktop();
         park();
     }
-    // Bring Explorer up first — Winlogon replaced the shell, so Explorer's
-    // normally started by the shell-launch machinery never runs. Doing this
-    // up front lets Tailscale's GUI register its tray against an existing
-    // notification area (see `launch_tailscale`).
-    ensure_desktop();
-    let explorer_ready = wait_for_explorer();
     // Counted as a failure up front; the launcher clears it once it has survived
     // `CRASH_RESET_SECS`, so only a fast crash loop ever trips the limit.
     bump_crash_count();
-    // Bring Tailscale up alongside Moonblast, but only after Explorer is
-    // ready — otherwise `tailscale status` stays stuck on "Starting" until
-    // the user manually opens the GUI.
-    if explorer_ready {
-        launch_tailscale();
-    }
     if let Ok(exe) = std::env::current_exe() {
         let _ = Command::new(exe)
             .arg(AUTOSTART_FLAG)

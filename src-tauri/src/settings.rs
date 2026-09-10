@@ -97,12 +97,6 @@ pub struct Integrations {
     pub moonlight_enabled: bool,
     pub apps_enabled: bool,
     pub steamgrid_key: Option<String>,
-    /// When Auto Immersive is armed, also launch the installed Tailscale GUI
-    /// at sign-in. Winlogon's shell replacement means Explorer never runs, so
-    /// the Run key Tailscale's installer adds is never processed — this is how
-    /// the user opts into us doing that work ourselves.
-    #[serde(default)]
-    pub auto_tailscale_start: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,7 +199,6 @@ impl Default for Settings {
                 moonlight_enabled: false,
                 apps_enabled: true,
                 steamgrid_key: None,
-                auto_tailscale_start: false,
             },
             moonlight: MoonlightStreaming::default(),
             fullscreen: Fullscreen {
@@ -235,17 +228,12 @@ impl SettingsState {
     // `%LOCALAPPDATA%\<identifier>` via `app_data_dir`). `settings.json` sits at
     // the root; the `.icons` icon cache is a sibling folder under the same root
     // (see lib.rs icon_cache_dir).
-    fn config_file(_app: &AppHandle) -> PathBuf {
-        config_file_path().unwrap_or_else(|| PathBuf::from("moonblast-local").join("settings.json"))
+    fn config_file(app: &AppHandle) -> PathBuf {
+        app.path()
+            .app_data_dir()
+            .unwrap_or_else(|_| PathBuf::from("moonblast-local"))
+            .join("settings.json")
     }
-}
-
-/// Absolute path to `settings.json`, derived from `%LOCALAPPDATA%`. Free
-/// function so the Winlogon stub can read the user's preferences *before* Tauri
-/// is initialized (the AppHandle doesn't exist yet at that point).
-pub fn config_file_path() -> Option<PathBuf> {
-    let local = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(local).join("com.moonblast.app").join("settings.json"))
 }
 
 /// Copy `settings.json` from the legacy Roaming (`app_config_dir`) location into

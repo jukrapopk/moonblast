@@ -91,9 +91,6 @@ export default function App() {
   function setSteamgridKey(k: string) {
     update((s) => ({ ...s, integrations: { ...s.integrations, steamgrid_key: k || null } }));
   }
-  function setAutoTailscaleStart(v: boolean) {
-    update((s) => ({ ...s, integrations: { ...s.integrations, auto_tailscale_start: v } }));
-  }
 
   function setMoonlightEnabled(v: boolean) {
     update((s) => ({
@@ -253,8 +250,6 @@ export default function App() {
                 onToggleApps={setAppsEnabled}
                 steamgridKey={settings.integrations.steamgrid_key}
                 onSetSteamgridKey={setSteamgridKey}
-                autoTailscaleStart={settings.integrations.auto_tailscale_start}
-                onToggleAutoTailscaleStart={setAutoTailscaleStart}
                 startWithWindows={settings.general.start_with_windows}
                 onToggleStartWithWindows={setStartWithWindows}
                 autoImmersive={settings.fullscreen.auto_immersive}

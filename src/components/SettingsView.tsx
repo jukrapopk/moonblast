@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -9,37 +9,21 @@ import { Section } from "./ui/Section";
 import { Toggle } from "./ui/Toggle";
 
 type TailscaleStatus =
-  | "not-installed"
   | "not-found"
   | "not-running"
   | "starting"
   | "logged-out"
   | "connected"
-  | "disconnected"; function TailscaleRow({
-    autoImmersive,
-    autoTailscaleStart,
-    onToggleAutoTailscaleStart,
-  }: {
-    autoImmersive: boolean;
-    autoTailscaleStart: boolean;
-    onToggleAutoTailscaleStart: (v: boolean) => void;
-  }) {
+  | "disconnected"; function TailscaleRow() {
     const [status, setStatus] = useState<TailscaleStatus | null>(null);
     const [busy, setBusy] = useState(false);
-    /** Whether the standard Tailscale installer is present on this system. */
-    const [installed, setInstalled] = useState<boolean | null>(null);
 
     async function refresh() {
       try {
-        const info = await invoke<{ status: TailscaleStatus; installed: boolean }>("tailscale_status");
+        const info = await invoke<{ status: TailscaleStatus }>("tailscale_status");
         setStatus(info.status);
-        // `installed` is reported by the same command that reports `status`,
-        // so the top row and the sub-row can never disagree about whether
-        // Tailscale is actually on this machine.
-        setInstalled(info.installed);
       } catch {
-        setStatus("not-installed");
-        setInstalled(false);
+        setStatus("not-found");
       }
     }
 
@@ -63,78 +47,52 @@ type TailscaleStatus =
       setBusy(false);
     }
 
-    let main: ReactNode;
     if (status === null) {
-      main = (
+      return (
         <Row label="Tailscale">
           <span className="text-sm text-(--color-muted)">Checking…</span>
         </Row>
       );
-    } else if (status === "not-installed" || status === "not-found") {
-      main = (
+    }
+
+    if (status === "not-found") {
+      return (
         <Row label="Tailscale">
           <span className="text-sm text-(--color-muted)/60">Tailscale not found.</span>
         </Row>
       );
-    } else if (status === "not-running") {
-      main = (
+    }
+
+    if (status === "not-running") {
+      return (
         <Row label="Tailscale" description="Tailscale isn't running">
           <span className="text-sm text-(--color-muted)/60">Start the Tailscale app to use it.</span>
         </Row>
       );
-    } else if (status === "starting") {
-      main = (
+    }
+
+    if (status === "starting") {
+      return (
         <Row label="Tailscale" description="Tailscale is starting…">
           <span className="text-sm text-(--color-muted)/60">Please wait.</span>
         </Row>
       );
-    } else if (status === "logged-out") {
-      main = (
+    }
+
+    if (status === "logged-out") {
+      return (
         <Row label="Tailscale" description="Logged out">
           <span className="text-sm text-(--color-muted)/60">Sign in to Tailscale to connect.</span>
         </Row>
       );
-    } else {
-      const up = status === "connected";
-      main = (
-        <Row label="Tailscale" description={up ? "Connected" : "Disconnected"}>
-          <Toggle checked={up} onChange={toggle} disabled={busy} />
-        </Row>
-      );
     }
 
-    // The top row is only interactive in the `connected` / `disconnected`
-    // branch above; the other branches render static text. The sub-row mirrors
-    // that — it's hidden otherwise so the section doesn't read like
-    // "everything's broken, but here's a setting you can't use." `installed`
-    // is implied by `status` reaching this branch (the Rust command hardcodes
-    // `status = "not-installed"` when `installed === false`), but we check
-    // both for defense in depth: if the correlation ever breaks, both rows
-    // still hide consistently.
-    const subVisible =
-      installed === true && (status === "connected" || status === "disconnected");
-    const subDisabled = !autoImmersive || installed !== true;
-    const subDescription = !autoImmersive
-      ? "Turn on Auto Immersive Mode first."
-      : installed === false
-        ? "Install Tailscale to use this."
-        : "Launch Tailscale at sign-in alongside Moonblast.";
+    const up = status === "connected";
 
     return (
-      <>
-        {main}
-        {subVisible && (
-          <div className="pl-6">
-            <Row label="Auto-start with Auto Immersive" description={subDescription}>
-              <Toggle
-                checked={autoTailscaleStart}
-                onChange={onToggleAutoTailscaleStart}
-                disabled={subDisabled}
-              />
-            </Row>
-          </div>
-        )}
-      </>
+      <Row label="Tailscale" description={up ? "Connected" : "Disconnected"}>
+        <Toggle checked={up} onChange={toggle} disabled={busy} />
+      </Row>
     );
   }
 
@@ -193,8 +151,6 @@ export function SettingsView({
   onToggleApps,
   steamgridKey,
   onSetSteamgridKey,
-  autoTailscaleStart,
-  onToggleAutoTailscaleStart,
   startWithWindows,
   onToggleStartWithWindows,
   autoImmersive,
@@ -218,9 +174,6 @@ export function SettingsView({
   onToggleApps: (v: boolean) => void;
   steamgridKey: string | null;
   onSetSteamgridKey: (k: string) => void;
-  /** Tailscale: also launch at sign-in when Auto Immersive is armed. */
-  autoTailscaleStart: boolean;
-  onToggleAutoTailscaleStart: (v: boolean) => void;
   startWithWindows: boolean;
   onToggleStartWithWindows: (v: boolean) => void;
   autoImmersive: boolean;
@@ -323,11 +276,7 @@ export function SettingsView({
       </Section>
 
       <Section title="Integrations">
-        <TailscaleRow
-          autoImmersive={autoImmersive}
-          autoTailscaleStart={autoTailscaleStart}
-          onToggleAutoTailscaleStart={onToggleAutoTailscaleStart}
-        />
+        <TailscaleRow />
         <Row label="Apps" description="Discover and launch installed Windows apps.">
           <Toggle checked={appsEnabled} onChange={onToggleApps} />
         </Row>
