@@ -154,15 +154,15 @@ export default function App() {
     }
   }
 
-  // F11 toggles windowed / fullscreen (disabled while immersed).
+  // F11 toggles windowed / fullscreen (disabled while immersed). Immersive
+  // Mode is exited only through the Power menu — there's no keyboard
+  // shortcut for it, by design (immersive is meant to feel inescapable
+  // while the user is gaming).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "F11") {
         e.preventDefault();
         if (!immersive) toggleFullscreen();
-      } else if (e.key === "Escape" && immersive) {
-        e.preventDefault();
-        exitImmersive();
       }
     }
     window.addEventListener("keydown", onKey);
