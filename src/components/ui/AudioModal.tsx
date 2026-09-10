@@ -95,13 +95,24 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
     // Skips the self-echo window after local changes so refreshes don't
     // fight an in-progress slider drag with stale backend reads.
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void listen("audio-changed", () => {
       if (Date.now() - localChangeAt.current < 500) return;
       void refresh();
     }).then((f) => {
+      // If the modal closed between listen() returning and this .then()
+      // resolving, unlisten immediately so we don't leak a subscription
+      // that would fire refresh() on an unmounted component forever.
+      if (cancelled) {
+        f();
+        return;
+      }
       unlisten = f;
     });
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open ]);
 
