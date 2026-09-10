@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface WifiConnection {
@@ -43,13 +43,34 @@ export function useWifi(): {
   refresh: () => void;
 } {
   const [current, setCurrent] = useState<WifiConnection | null | undefined>(undefined);
+  // In-flight read — multiple concurrent calls (e.g. focus + visibility
+  // firing on the same refocus) share a single in-flight Promise
+  // instead of issuing multiple Rust invocations. Resolves to void; the
+  // value is the same `current` state set inside the single read.
+  const inFlight = useRef<Promise<void> | null>(null);
+  // Last successful read timestamp (ms). Back-to-back events within 2s
+  // collapse to one read — the wlan service doesn't change state that
+  // fast, and the previous read's `current` is still fresh.
+  const lastReadAt = useRef(0);
 
   const read = useCallback(async () => {
+    if (inFlight.current) return inFlight.current;
+    const now = Date.now();
+    if (now - lastReadAt.current < 2000) return;
+    lastReadAt.current = now;
+    const p = (async () => {
+      try {
+        const c = await invoke<WifiConnection | null>("wifi_current");
+        setCurrent(c);
+      } catch {
+        setCurrent(null);
+      }
+    })();
+    inFlight.current = p;
     try {
-      const c = await invoke<WifiConnection | null>("wifi_current");
-      setCurrent(c);
-    } catch {
-      setCurrent(null);
+      await p;
+    } finally {
+      inFlight.current = null;
     }
   }, []);
 
