@@ -13,6 +13,46 @@ use std::sync::Mutex;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+/// Run a `Command` to completion with a hard deadline. Returns the captured
+/// stdout on success. On timeout the child is killed and reaped; stdout is
+/// lost. This is the cross-platform equivalent of `Command::output()` with
+/// a timeout — `output()` itself doesn't take one, and a wedged child on a
+/// blocking-pool task would otherwise sit forever, starving the pool.
+///
+/// Takes a closure that builds the Command so callers don't have to break
+/// the `creation_flags(...).args(...)` chain. The closure must return the
+/// Command by value (some builder methods return `&mut Command`).
+fn run_with_timeout<F>(
+    build: F,
+    deadline: std::time::Duration,
+) -> std::io::Result<std::process::Output>
+where
+    F: FnOnce() -> Command,
+{
+    let mut cmd = build();
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::null());
+    let mut child = cmd.spawn()?;
+    let until = std::time::Instant::now() + deadline;
+    loop {
+        match child.try_wait()? {
+            Some(_) => return child.wait_with_output(),
+            None => {
+                if std::time::Instant::now() >= until {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "subprocess timed out",
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
 /// window for the same host+app while one is already running. `ActiveStream`
 /// also carries the host's UUID + cert so we can send the host an explicit
@@ -90,8 +130,17 @@ fn is_maximized(window: tauri::Window) -> Result<bool, String> {
 #[tauri::command]
 async fn tailscale_status() -> TailscaleInfo {
     // Offload the subprocess wait off the main thread so the UI never freezes.
+    // Bound the wait so a wedged tailscaled can't hold a blocking-pool slot
+    // forever (Settings polls this every 3s).
     tauri::async_runtime::spawn_blocking(|| {
-        let status = match Command::new("tailscale").arg("status").creation_flags(0x0800_0000).output() {
+        let status = match run_with_timeout(
+            || {
+                let mut c = Command::new("tailscale");
+                c.arg("status").creation_flags(0x0800_0000);
+                c
+            },
+            std::time::Duration::from_secs(5),
+        ) {
             Err(_) => "not-found".to_string(),
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -133,7 +182,15 @@ async fn tailscale_status() -> TailscaleInfo {
 async fn tailscale_set(up: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let arg = if up { "up" } else { "down" };
-        let out = Command::new("tailscale").arg(arg).creation_flags(0x0800_0000).output().map_err(|e| e.to_string())?;
+        let out = run_with_timeout(
+            || {
+                let mut c = Command::new("tailscale");
+                c.arg(arg).creation_flags(0x0800_0000);
+                c
+            },
+            std::time::Duration::from_secs(15),
+        )
+        .map_err(|e| e.to_string())?;
         if !out.status.success() {
             let msg = format!(
                 "{}{}",
@@ -184,10 +241,15 @@ async fn moonlight_list_apps(
 ) -> Result<Vec<String>, String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let out = Command::new(&exe)
-            .args(["list", &host])
-            .output()
-            .map_err(|e| e.to_string())?;
+        let out = run_with_timeout(
+            || {
+                let mut c = Command::new(&exe);
+                c.args(["list", &host]);
+                c
+            },
+            std::time::Duration::from_secs(10),
+        )
+        .map_err(|e| e.to_string())?;
         if !out.status.success() {
             let msg = String::from_utf8_lossy(&out.stderr).into_owned();
             return Err(msg.trim().to_string());
@@ -426,10 +488,15 @@ fn parse_vdf_pairs(content: &str) -> Vec<(String, String)> {
 /// (desktop items have plain paths/empty AppIDs).
 fn discover_store_apps() -> Vec<AppEntry> {
     let mut out = Vec::new();
-    let Ok(ps) = Command::new("powershell.exe")
-        .args(["-NoProfile", "-Command", "Get-StartApps | ConvertTo-Json -Compress"])
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW — don't flash a console
-        .output()
+    let Ok(ps) = run_with_timeout(
+        || {
+            let mut c = Command::new("powershell.exe");
+            c.args(["-NoProfile", "-Command", "Get-StartApps | ConvertTo-Json -Compress"])
+                .creation_flags(0x0800_0000); // CREATE_NO_WINDOW — don't flash a console
+            c
+        },
+        std::time::Duration::from_secs(15),
+    )
     else {
         return out;
     };
