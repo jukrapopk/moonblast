@@ -122,7 +122,7 @@ function Status({
       )}
       {showAudio && (
         <TopBarButton
-          label={audio ? (audio.muted ? "Muted" : `Volume · ${audio.volume}%`) : "Audio"}
+          label={audio ? (audio.muted || audio.volume === 0 ? "Muted" : `Volume · ${audio.volume}%`) : "Audio"}
           icon={audio ? audioChipIcon(audio) : audioChipFallback()}
           onClick={onAudioClick}
         />

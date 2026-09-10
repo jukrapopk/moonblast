@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Slider } from "./Slider";
 import {
-  ArrowCounterClockwise,
   ArrowsClockwise,
   Check,
 } from "@phosphor-icons/react";
@@ -48,18 +47,28 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
   /** Device id currently being switched to (row spinner). */
   const [switching, setSwitching] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Last non-zero levels. 0 and mute are a single state in the UI, so
+   * unmuting from 0 restores these instead of staying silent at 0.
+   */
+  const lastMaster = useRef(50);
+  const lastSession = useRef<Record<string, number>>({});
 
   async function refresh() {
     setLoading(true);
     try {
-      const [d, m, s] = await Promise.all([
+      const [d, m, ss] = await Promise.all([
         fetchAudioDevices(),
         fetchAudioMaster(),
         fetchAudioSessions(),
       ]);
       setDevices(d.devices);
       setMaster(m);
-      setSessions(s);
+      setSessions(ss);
+      if (m.volume > 0) lastMaster.current = m.volume;
+      for (const s of ss) {
+        if (s.volume > 0) lastSession.current[s.id] = s.volume;
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -97,62 +106,92 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
   }
 
   function handleMasterVolume(v: number) {
-    setMaster((m) => ({ ...m, volume: v }));
+    const wasMuted = master.muted;
+    if (v > 0) lastMaster.current = v;
+    // 0 and mute are one state: dragging the slider always leaves mute behind.
+    setMaster({ volume: v, muted: false });
     // Fire-and-forget: COM set is sub-millisecond; awaiting every tick
     // would queue invokes behind the drag.
     void setMasterVolume(v)
       .then(() => onChanged())
       .catch((e) => setError(String(e)));
+    if (wasMuted) void setMasterMute(false).catch((e) => setError(String(e)));
   }
 
   async function handleMasterMute() {
-    const next = !master.muted;
-    setMaster((m) => ({ ...m, muted: next }));
-    try {
-      await setMasterMute(next);
-      onChanged();
-    } catch (e) {
-      setError(String(e));
-      setMaster((m) => ({ ...m, muted: !next }));
+    const prev = master;
+    if (prev.muted || prev.volume === 0) {
+      const restore = prev.volume > 0 ? prev.volume : lastMaster.current;
+      setMaster({ volume: restore, muted: false });
+      try {
+        if (prev.muted) await setMasterMute(false);
+        if (prev.volume === 0) await setMasterVolume(restore);
+        onChanged();
+      } catch (e) {
+        setError(String(e));
+        setMaster(prev);
+      }
+    } else {
+      setMaster({ ...prev, muted: true });
+      try {
+        await setMasterMute(true);
+        onChanged();
+      } catch (e) {
+        setError(String(e));
+        setMaster(prev);
+      }
     }
   }
 
   function handleSessionVolume(id: string, v: number) {
-    setSessions((ss) => ss.map((s) => (s.id === id ? { ...s, volume: v } : s)));
+    const wasMuted = sessions.find((s) => s.id === id)?.muted ?? false;
+    if (v > 0) lastSession.current[id] = v;
+    setSessions((ss) =>
+      ss.map((s) => (s.id === id ? { ...s, volume: v, muted: false } : s)),
+    );
     void setSessionVolume(id, v).catch((e) => setError(String(e)));
+    if (wasMuted) void setSessionMute(id, false).catch((e) => setError(String(e)));
   }
 
   async function handleSessionMute(id: string) {
     const cur = sessions.find((s) => s.id === id);
     if (!cur) return;
-    setSessions((ss) =>
-      ss.map((s) => (s.id === id ? { ...s, muted: !s.muted } : s)),
-    );
-    try {
-      await setSessionMute(id, !cur.muted);
-    } catch (e) {
-      setError(String(e));
+    if (cur.muted || cur.volume === 0) {
+      const restore = cur.volume > 0 ? cur.volume : (lastSession.current[id] ?? 50);
       setSessions((ss) =>
-        ss.map((s) => (s.id === id ? { ...s, muted: cur.muted } : s)),
+        ss.map((s) => (s.id === id ? { ...s, volume: restore, muted: false } : s)),
       );
-    }
-  }
-
-  async function handleSessionReset(id: string) {
-    setSessions((ss) =>
-      ss.map((s) => (s.id === id ? { ...s, volume: 100, muted: false } : s)),
-    );
-    try {
-      await Promise.all([setSessionVolume(id, 100), setSessionMute(id, false)]);
-    } catch (e) {
-      setError(String(e));
-      void refreshSessions();
+      try {
+        if (cur.muted) await setSessionMute(id, false);
+        if (cur.volume === 0) await setSessionVolume(id, restore);
+      } catch (e) {
+        setError(String(e));
+        setSessions((ss) =>
+          ss.map((s) => (s.id === id ? { ...s, volume: cur.volume, muted: cur.muted } : s)),
+        );
+      }
+    } else {
+      setSessions((ss) =>
+        ss.map((s) => (s.id === id ? { ...s, muted: true } : s)),
+      );
+      try {
+        await setSessionMute(id, true);
+      } catch (e) {
+        setError(String(e));
+        setSessions((ss) =>
+          ss.map((s) => (s.id === id ? { ...s, muted: cur.muted } : s)),
+        );
+      }
     }
   }
 
   async function refreshSessions() {
     try {
-      setSessions(await fetchAudioSessions());
+      const ss = await fetchAudioSessions();
+      setSessions(ss);
+      for (const s of ss) {
+        if (s.volume > 0) lastSession.current[s.id] = s.volume;
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -220,21 +259,21 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       <div className="mb-4 flex items-center gap-3 rounded-xl px-1 py-1">
         <button
           onClick={() => void handleMasterMute()}
-          title={master.muted ? "Unmute" : "Mute"}
-          aria-label={master.muted ? "Unmute" : "Mute"}
+          title={master.muted || master.volume === 0 ? "Unmute" : "Mute"}
+          aria-label={master.muted || master.volume === 0 ? "Unmute" : "Mute"}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
         >
           <SpeakerIcon volume={master.volume} muted={master.muted} size={20} />
         </button>
         <div className="min-w-0 flex-1">
           <Slider
-            value={master.muted ? 0 : master.volume}
+            value={master.muted || master.volume === 0 ? 0 : master.volume}
             onChange={handleMasterVolume}
             label="Main volume"
           />
         </div>
         <span className="w-10 shrink-0 text-right text-sm text-(--color-muted) tabular-nums">
-          {master.muted ? "Muted" : `${master.volume}%`}
+          {master.muted || master.volume === 0 ? "Muted" : `${master.volume}%`}
         </span>
       </div>
 
@@ -259,30 +298,22 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
               </div>
               <button
                 onClick={() => void handleSessionMute(s.id)}
-                title={s.muted ? `Unmute ${s.name}` : `Mute ${s.name}`}
-                aria-label={s.muted ? `Unmute ${s.name}` : `Mute ${s.name}`}
+                title={s.muted || s.volume === 0 ? `Unmute ${s.name}` : `Mute ${s.name}`}
+                aria-label={s.muted || s.volume === 0 ? `Unmute ${s.name}` : `Mute ${s.name}`}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
               >
                 <SpeakerIcon volume={s.volume} muted={s.muted} size={16} />
               </button>
               <div className="min-w-0 flex-1">
                 <Slider
-                  value={s.muted ? 0 : s.volume}
+                  value={s.muted || s.volume === 0 ? 0 : s.volume}
                   onChange={(v) => handleSessionVolume(s.id, v)}
                   label={`${s.name} volume`}
                 />
               </div>
               <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
-                {s.muted ? "Muted" : `${s.volume}%`}
+                {s.muted || s.volume === 0 ? "Muted" : `${s.volume}%`}
               </span>
-              <button
-                onClick={() => void handleSessionReset(s.id)}
-                title={`Reset ${s.name} to max`}
-                aria-label={`Reset ${s.name} to max`}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
-              >
-                <ArrowCounterClockwise size={14} weight="bold" />
-              </button>
             </div>
           ))
         )}
