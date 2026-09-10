@@ -1998,18 +1998,46 @@ async fn moonlight_probe(
 }
 
 fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
-    let exe = exe.to_path_buf();
-    let host = host.to_string();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let ok = Command::new(&exe)
-            .args(["list", &host])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let _ = tx.send(ok);
-    });
-    rx.recv_timeout(std::time::Duration::from_secs(8)).unwrap_or(false)
+    // Spawn the Moonlight child ourselves (instead of going through a
+    // detached thread + Command::output) so we can time-box the wait and
+    // explicitly kill the child + reap it if it hangs past the deadline.
+    // The previous implementation used `Command::output()` inside a
+    // `std::thread::spawn`, then `recv_timeout` on the main thread. If
+    // moonlight.exe hung, `output()` never returned, the inner thread
+    // leaked, and the child process kept running until the OS reaped it.
+    let mut child = match Command::new(exe)
+        .args(["list", host])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x0800_0000)
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // `Child::wait_timeout` is Unix-only; on Windows we poll `try_wait`
+    // until either the child exits or our deadline passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    // Hang: kill and reap so we don't leave a zombie.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
