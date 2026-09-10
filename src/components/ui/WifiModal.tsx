@@ -10,7 +10,7 @@ import {
   WifiSlash,
   Lock,
   ArrowsClockwise,
-  ArrowsOutSimple,
+  CaretRight,
   ArrowLeft,
   Eye,
   EyeSlash,
@@ -160,7 +160,11 @@ function NetworkRow({
   onConnect,
   onNeedsPassword,
   onDisconnect,
+  /** `connect` or `disconnect` while this row is the one being acted on. */
   busy,
+  /** True if any row is currently busy — used to disable clicks on
+   *  every other row while one is in flight. */
+  anyBusy,
 }: {
   net: WifiNetwork;
   currentSsid: string | null;
@@ -169,10 +173,23 @@ function NetworkRow({
    *  in-app password prompt instead of opening Windows settings. */
   onNeedsPassword: (net: WifiNetwork) => void;
   onDisconnect: () => void;
-  busy: boolean;
+  busy: { kind: "connect" | "disconnect" } | null;
+  anyBusy: boolean;
 }) {
   const isCurrent = currentSsid === net.ssid && net.connected;
   const needsSignIn = net.secured && !net.known;
+
+  // Subtitle text: shows the in-flight state for the row that's busy,
+  // otherwise the standard "Connected" / "Saved" status.
+  const subtitle = busy
+    ? busy.kind === "connect"
+      ? "Connecting…"
+      : "Disconnecting…"
+    : isCurrent
+      ? "Connected"
+      : net.known
+        ? "Saved"
+        : null;
 
   const rowBody = (
     <>
@@ -183,26 +200,30 @@ function NetworkRow({
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-(--color-text)">{net.ssid}</span>
         </div>
-        {(isCurrent || net.known) && (
-          <div className="mt-0.5 text-xs text-(--color-muted)">
-            {isCurrent ? "Connected" : "Saved"}
+        {subtitle && (
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-(--color-muted)">
+            {busy && (
+              <ArrowsClockwise size={11} weight="bold" className="animate-spin" />
+            )}
+            <span>{subtitle}</span>
           </div>
         )}
       </div>
       {/* Decorative icon — shows the user what kind of network this row
-          is (saved vs. needs sign-in). The whole row is the click target. */}
-      {!isCurrent && needsSignIn && (
+          is (saved vs. needs sign-in). Hidden while busy: the spinner
+          takes the right-side slot. The whole row is the click target. */}
+      {!busy && !isCurrent && needsSignIn && (
         <Lock size={13} weight="bold" className="shrink-0 text-(--color-muted)" />
       )}
-      {!isCurrent && !needsSignIn && net.known && (
-        <ArrowsOutSimple size={13} weight="bold" className="rotate-[-90deg] shrink-0 text-(--color-muted)" />
+      {!busy && !isCurrent && !needsSignIn && net.known && (
+        <CaretRight size={13} weight="bold" className="shrink-0 text-(--color-muted)" />
       )}
-      {isCurrent && (
+      {isCurrent && busy?.kind !== "disconnect" && (
         <Button
-          variant="outline"
+          variant="ghost"
           size="md"
           onClick={onDisconnect}
-          disabled={busy}
+          disabled={anyBusy}
           className="px-3 py-1 text-xs"
         >
           Disconnect
@@ -216,7 +237,11 @@ function NetworkRow({
   // whole row is the action — click anywhere to connect / sign in.
   if (isCurrent) {
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5">
+      <div
+        className={`flex items-center gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5 ${
+          busy?.kind === "disconnect" ? "opacity-40" : ""
+        }`}
+      >
         {rowBody}
       </div>
     );
@@ -228,7 +253,7 @@ function NetworkRow({
         if (needsSignIn) onNeedsPassword(net);
         else onConnect(net.ssid);
       }}
-      disabled={busy}
+      disabled={anyBusy}
       aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
       title={needsSignIn ? "Sign in" : "Connect"}
       className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none disabled:opacity-40"
@@ -240,7 +265,11 @@ function NetworkRow({
 
 export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   const { networks, loading, scan } = useWifiScan();
-  const [busy, setBusy] = useState<null | "connect" | "disconnect" | "radio">(null);
+  // Per-row in-flight state (the row that the user is currently acting
+  // on). `null` when nothing is happening. The radio toggle has its own
+  // `radioBusy` flag since it doesn't correspond to a row.
+  const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" } | null>(null);
+  const [radioBusy, setRadioBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [radioOn, setRadioOn] = useState<boolean | null>(null);
   // Local copy of the current SSID so connect/disconnect reflect
@@ -270,7 +299,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   }, [open]);
 
   async function handleConnect(ssid: string) {
-    setBusy("connect");
+    setBusy({ ssid, kind: "connect" });
     setError(null);
     try {
       await wifiConnect(ssid);
@@ -290,7 +319,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   }
 
   async function handleDisconnect() {
-    setBusy("disconnect");
+    setBusy(liveSsid ? { ssid: liveSsid, kind: "disconnect" } : null);
     setError(null);
     try {
       await wifiDisconnect();
@@ -311,7 +340,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     net: WifiNetwork,
     password: string,
   ) {
-    setBusy("connect");
+    setBusy({ ssid: net.ssid, kind: "connect" });
     setError(null);
     try {
       await wifiConnectWithPassword(net.ssid, password, net.auth ?? "");
@@ -329,7 +358,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
   }
 
   async function handleRadioToggle(next: boolean) {
-    setBusy("radio");
+    setRadioBusy(true);
     setError(null);
     try {
       const result = await wifiRadioSet(next);
@@ -337,7 +366,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(null);
+      setRadioBusy(false);
     }
   }
 
@@ -346,7 +375,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
       {passwordTarget ? (
         <PasswordForm
           network={passwordTarget}
-          busy={busy === "connect"}
+          busy={busy !== null && busy.ssid === passwordTarget.ssid && busy.kind === "connect"}
           error={error}
           onSubmit={handleConnectWithPassword}
           onBack={() => {
@@ -370,17 +399,24 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
                 No networks found. {radioOn === false ? "Wi-Fi is off — turn it on to scan." : "Make sure WiFi is on and try again."}
               </p>
             ) : (
-              networks.map((net) => (
-                <NetworkRow
-                  key={net.ssid}
-                  net={net}
-                  currentSsid={liveSsid}
-                  onConnect={handleConnect}
-                  onNeedsPassword={setPasswordTarget}
-                  onDisconnect={handleDisconnect}
-                  busy={busy === "connect"}
-                />
-              ))
+              networks.map((net) => {
+                // Per-row busy state: this row shows the spinner only
+                // when it's the one being acted on.
+                const rowBusy: { kind: "connect" | "disconnect" } | null =
+                  busy && busy.ssid === net.ssid ? { kind: busy.kind } : null;
+                return (
+                  <NetworkRow
+                    key={net.ssid}
+                    net={net}
+                    currentSsid={liveSsid}
+                    onConnect={handleConnect}
+                    onNeedsPassword={setPasswordTarget}
+                    onDisconnect={handleDisconnect}
+                    busy={rowBusy}
+                    anyBusy={busy !== null}
+                  />
+                );
+              })
             )}
           </div>
 
@@ -397,7 +433,7 @@ export function WifiModal({ open, onClose, currentSsid }: WifiModalProps) {
             <Toggle
               checked={radioOn ?? true}
               onChange={handleRadioToggle}
-              disabled={busy !== null}
+              disabled={radioBusy}
             />
           </div>
         </>
