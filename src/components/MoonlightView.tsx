@@ -130,24 +130,30 @@ function HostCard({
     entry.saved &&
     !!entry.pairedInfo &&
     entry.savedInfo?.address !== entry.pairedInfo.address;
-  // Online/offline pill: only meaningful when we have a probe. Unpaired
-  // discovery entries don't get probed (mDNS visibility IS the reachability
-  // signal — render an "Online" pill so the user knows it's reachable even
-  // though we never ran an explicit /serverinfo).
+  // Online/offline pill: prefer the explicit probe (works for saved +
+  // paired entries); fall back to mDNS visibility for unpaired discovery
+  // entries that never get probed.
   const status: "streaming" | "online" | "offline" | null = streaming
     ? "streaming"
     : entry.probe
       ? entry.probe.reachable
         ? "online"
         : "offline"
-      : entry.discovery && !entry.paired && !entry.probe
+      : entry.discovery && !entry.paired
         ? "online"
         : null;
-  // Actionable surface. We branch on (paired && reachable) / (reachable && !paired) /
-  // (!reachable) rather than collapsing them into one expression so the JSX
-  // tree stays readable.
-  const showStream = !streaming && (entry.paired ? entry.probe?.reachable !== false : true);
-  const showPair = !streaming && !entry.paired && entry.probe?.reachable !== false;
+  // Reachability (with a small unpaired-discovery fallback). Used to gate
+  // both Stream and Pair buttons — Pair can't fetch a cert from an
+  // unreachable host, and Stream needs a paired host to talk to GameStream.
+  const reachable =
+    entry.probe?.reachable === true ||
+    (entry.probe === undefined && entry.discovery && !entry.paired);
+  // Stream actions (Desktop / Apps) need a paired host. Pair is the only
+  // useful action for a reachable-but-unpaired host; for unreachable hosts
+  // we render neither — the Offline pill already explains the situation
+  // and right-click is the escape hatch.
+  const showStream = !streaming && entry.paired && reachable;
+  const showPair = !streaming && !entry.paired && reachable;
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -723,27 +729,24 @@ export function MoonlightView() {
   /** Render a HostEntry as the new HostCard with the right-click menu. */
   const renderHost = (entry: HostEntry) => {
     const host = { name: entry.name, address: entry.address };
-    const probe = entry.probe;
-    const menuItems = [
-      // Stream Desktop / Apps — paired+reachable OR (saved with unknown
-      // pair state but reachable). The right-click mirrors what the
-      // buttons show in the card.
-      ...(entry.paired
-        ? probe?.reachable !== false
-          ? [
-              { label: "Stream Desktop", onClick: () => streamDesktop(host) },
-              { label: "Apps", onClick: () => setAppsHost(host) },
-            ]
-          : []
-        : probe?.reachable !== false
-          ? [
-              { label: "Stream Desktop", onClick: () => streamDesktop(host) },
-              { label: "Apps", onClick: () => setAppsHost(host) },
-              { label: "Pair", onClick: () => pair(entry) },
-            ]
-          : [{ label: "Pair", onClick: () => pair(entry) }]),
-      // Forget pairing — only meaningful for paired hosts. Doesn't
-      // remove the saved address.
+    // Mirror the HostCard's gating logic so the right-click doesn't offer
+    // actions the buttons don't show. Pair is offered only when the host
+    // is reachable (we can't pair an unreachable host).
+    const reachable =
+      entry.probe?.reachable === true ||
+      (entry.probe === undefined && entry.discovery && !entry.paired);
+    const menuItems: { label: string; onClick: () => void; danger?: boolean }[] = [
+      ...(entry.paired && reachable
+        ? [
+            { label: "Stream Desktop", onClick: () => streamDesktop(host) },
+            { label: "Apps", onClick: () => setAppsHost(host) },
+          ]
+        : []),
+      ...(!entry.paired && reachable
+        ? [{ label: "Pair", onClick: () => pair(entry) }]
+        : []),
+      // Forget pairing — only meaningful for paired hosts. Doesn't remove
+      // the saved address.
       ...(entry.paired
         ? [
             {
