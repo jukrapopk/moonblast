@@ -103,30 +103,37 @@ type TailscaleStatus =
       );
     }
 
-    // Sub-row: only meaningful when Auto Immersive is armed *and* Tailscale is
-    // installed. Gated visually (disabled, not hidden) so the user can see
-    // what would happen and why it's off.
+    // The top row is only interactive in the `connected` / `disconnected`
+    // branch above; the other branches render static text. The sub-row mirrors
+    // that — it's hidden otherwise so the section doesn't read like
+    // "everything's broken, but here's a setting you can't use." `installed`
+    // is implied by `status` reaching this branch (the Rust command hardcodes
+    // `status = "not-installed"` when `installed === false`), but we check
+    // both for defense in depth: if the correlation ever breaks, both rows
+    // still hide consistently.
+    const subVisible =
+      installed === true && (status === "connected" || status === "disconnected");
     const subDisabled = !autoImmersive || installed !== true;
     const subDescription = !autoImmersive
       ? "Turn on Auto Immersive Mode first."
       : installed === false
         ? "Install Tailscale to use this."
-        : installed === null
-          ? "Checking…"
-          : "Launch Tailscale at sign-in alongside Moonblast.";
+        : "Launch Tailscale at sign-in alongside Moonblast.";
 
     return (
       <>
         {main}
-        <div className="pl-6">
-          <Row label="Auto-start with Auto Immersive" description={subDescription}>
-            <Toggle
-              checked={autoTailscaleStart}
-              onChange={onToggleAutoTailscaleStart}
-              disabled={subDisabled}
-            />
-          </Row>
-        </div>
+        {subVisible && (
+          <div className="pl-6">
+            <Row label="Auto-start with Auto Immersive" description={subDescription}>
+              <Toggle
+                checked={autoTailscaleStart}
+                onChange={onToggleAutoTailscaleStart}
+                disabled={subDisabled}
+              />
+            </Row>
+          </div>
+        )}
       </>
     );
   }
