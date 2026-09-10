@@ -22,6 +22,10 @@ export interface WifiNetwork {
   connected: boolean;
   /** True if Windows already has a saved profile for this network. */
   known: boolean;
+  /** Best WiFi generation advertised by the network (4/5/6/7).
+   * `null` when unknown or legacy. Drives the small "6" / "5" badge
+   * in the modal row. */
+  gen: number | null;
 }
 
 /**

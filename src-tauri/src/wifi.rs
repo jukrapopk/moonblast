@@ -66,6 +66,11 @@ pub struct WifiNetwork {
     pub connected: bool,
     /// True if Windows already has a saved profile for it (auto-join on sight).
     pub known: bool,
+    /// WiFi generation number (4/5/6/7) of the best BSSID — the
+    /// generation number the network is *capable* of. Drives the small
+    /// "6" / "5" badge in the modal row. `None` when unknown
+    /// (e.g. legacy or unparseable "Radio type" line).
+    pub gen: Option<u8>,
 }
 
 /// RAII wrapper for the WLAN client handle; closes on drop.
@@ -221,6 +226,9 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
     // netsh output lists each BSSID separately under one SSID block, so
     // we keep the best of them.
     let mut current_signal: u32 = 0;
+    // Best WiFi generation seen across this SSID's BSSIDs (drives the
+    // "4" / "5" / "6" / "7" badge in the modal row).
+    let mut current_gen: Option<u8> = None;
     // The first `SSID N :` line introduces a new network. Sub-indented
     // fields (4 leading spaces) belong to that network until the next SSID.
     for line in text.lines() {
@@ -245,6 +253,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
                         auth: current_auth.clone(),
                         connected,
                         known,
+                        gen: current_gen,
                     });
                 }
             }
@@ -254,6 +263,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
                 .map(|(_, v)| v.trim().to_string());
             current_auth = None;
             current_signal = 0;
+            current_gen = None;
         } else if let Some(rest) = trimmed.strip_prefix("Authentication") {
             if let Some(v) = rest.split_once(':').map(|(_, v)| v.trim().to_string()) {
                 // "Open" means no auth required → secured = false.
@@ -270,6 +280,25 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
             {
                 if s > current_signal {
                     current_signal = s;
+                }
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("Radio type") {
+            // Map "802.11n" / "802.11ac" / "802.11ax" / "802.11be" to a
+            // generation number. "802.11a/b/g" (legacy) maps to 3.
+            // Take the max across BSSIDs so the row shows what the
+            // network is *capable* of, not what the user is currently
+            // associated with.
+            if let Some((_, v)) = rest.split_once(':') {
+                let g: u8 = match v.trim() {
+                    "802.11b" | "802.11g" | "802.11a" => 3,
+                    "802.11n" => 4,
+                    "802.11ac" => 5,
+                    "802.11ax" => 6,
+                    "802.11be" => 7,
+                    _ => 0,
+                };
+                if g > 0 && current_gen.map_or(true, |cur| g > cur) {
+                    current_gen = Some(g);
                 }
             }
         }
@@ -293,6 +322,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
                 auth: current_auth.clone(),
                 connected,
                 known,
+                gen: current_gen,
             });
         }
     }

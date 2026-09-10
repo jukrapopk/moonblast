@@ -53,11 +53,11 @@ interface WifiModalProps {
 
 function signalIcon(signal: number) {
   const weight = "bold" as const;
-  if (signal >= 75) return <WifiHigh size={16} weight={weight} />;
-  if (signal >= 50) return <WifiMedium size={16} weight={weight} />;
-  if (signal >= 25) return <WifiLow size={16} weight={weight} />;
-  if (signal > 0) return <WifiNone size={16} weight={weight} />;
-  return <WifiSlash size={16} weight={weight} />;
+  if (signal >= 75) return <WifiHigh size={20} weight={weight} />;
+  if (signal >= 50) return <WifiMedium size={20} weight={weight} />;
+  if (signal >= 25) return <WifiLow size={20} weight={weight} />;
+  if (signal > 0) return <WifiNone size={20} weight={weight} />;
+  return <WifiSlash size={20} weight={weight} />;
 }
 
 function signalTone(signal: number) {
@@ -193,9 +193,14 @@ function NetworkRow({
 
   const rowBody = (
     <>
-      <span className={`${signalTone(net.signal)} flex w-5 shrink-0 items-center justify-center`}>
-        {signalIcon(net.signal)}
-      </span>
+      <div className="relative flex w-7 shrink-0 items-center justify-center">
+        <span className={signalTone(net.signal)}>{signalIcon(net.signal)}</span>
+        {net.gen && (
+          <span className="absolute -bottom-0.5 right-0.5 text-[10px] font-bold leading-none text-(--color-muted)">
+            {net.gen}
+          </span>
+        )}
+      </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-(--color-text)">{net.ssid}</span>
