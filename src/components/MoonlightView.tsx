@@ -65,6 +65,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 function MachineCard({
   host,
   onApps,
+  onDesktop,
   onPair,
   onRemove,
   busy,
@@ -78,6 +79,7 @@ function MachineCard({
 }: {
   host: Host;
   onApps: () => void;
+  onDesktop: () => void;
   onPair: () => void;
   onRemove: () => void;
   busy: boolean;
@@ -124,8 +126,21 @@ function MachineCard({
               onDisconnect={onDisconnect}
             />
           ) : probe?.reachable === false ? (
-            // Saved but offline — can't list apps, no host to talk to. Pair
-            // and Remove remain so the user can either re-pair or drop it.
+            // Saved but offline — can't reach the host, so Pair can't fetch
+            // a new cert and Apps can't talk to GameStream. Only Remove is
+            // actionable; the Online/Offline pill already explains the rest.
+            <button
+              onClick={onRemove}
+              title="Remove"
+              aria-label="Remove"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
+            >
+              <Trash size={16} weight="bold" />
+            </button>
+          ) : probe?.paired === false ? (
+            // Saved, reachable, but the Moonlight store has no `srvcert` for
+            // this host — `moonlight_list_apps` would fail with "not paired".
+            // Pair is the only useful action besides Remove.
             <>
               <Button
                 variant="outline-accent"
@@ -146,21 +161,24 @@ function MachineCard({
               </button>
             </>
           ) : (
+            // Saved + reachable + paired — same surface as DiscoveredCard.
             <>
               <Button
-                variant="outline-accent"
                 size="md"
-                onClick={onPair}
+                onClick={onDesktop}
                 disabled={busy}
-                icon={<LockKey size={14} weight="bold" />}
+                icon={<Play size={15} weight="fill" />}
+                className="px-4 py-2 font-semibold"
               >
-                Pair
+                Desktop
               </Button>
               <Button
+                variant="outline"
                 size="md"
                 onClick={onApps}
                 disabled={busy}
                 icon={<GameController size={14} weight="bold" />}
+                className="py-2"
               >
                 Apps
               </Button>
@@ -496,23 +514,53 @@ export function MoonlightView() {
 
   // "Paired" = persisted moonlight-qt pairings, merged with paired hosts found
   // by discovery (deduped by address).
+  //
+  // Hosts the user explicitly added to `settings.machines` are excluded here
+  // — they're rendered as `MachineCard` instead, which carries the Remove
+  // action. Showing the same machine as both a DiscoveredCard (no Remove)
+  // and a MachineCard (with Remove) was confusing. Same treatment for the
+  // discovery group: a saved machine is never listed as "Discovery" even
+  // if it's broadcasting but currently unpaired, because the saved card is
+  // the source of truth.
+  const machineAddresses = useMemo(
+    () => new Set(machines.map((m) => m.address.toLowerCase())),
+    [machines],
+  );
   const pairedGroup = useMemo(() => {
     const byAddr = new Map<string, DiscoveredHost>();
+    // A discovery entry with `paired: false` is authoritative — Moonlight's
+    // CLI was just asked and said "not paired". A stale registry entry that
+    // disagrees (e.g. left over from an old pairing whose cert no longer
+    // matches) loses. This keeps the host under "Discovery" where the user
+    // can pair again, instead of pretending it's still paired.
+    const probeSaysUnpaired = new Set(
+      discovered
+        .filter((d) => !d.paired)
+        .map((d) => d.address.toLowerCase()),
+    );
     for (const p of pairedHosts) {
+      if (machineAddresses.has(p.address.toLowerCase())) continue;
+      if (probeSaysUnpaired.has(p.address.toLowerCase())) continue;
       byAddr.set(p.address, { hostname: p.name, name: p.name, address: p.address, paired: true });
     }
     for (const d of discovered) {
-      if (d.paired) byAddr.set(d.address, d);
+      if (!d.paired) continue;
+      if (machineAddresses.has(d.address.toLowerCase())) continue;
+      byAddr.set(d.address, d);
     }
     return [...byAddr.values()].sort(sortStreamingFirst);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairedHosts, discovered, streamingAddress]);
+  }, [pairedHosts, discovered, streamingAddress, machineAddresses]);
 
-  // "Discovery" = found on the network but not yet paired.
+  // "Discovery" = found on the network but not yet paired and not in the
+  // user's saved list.
   const discoveryGroup = useMemo(
-    () => discovered.filter((d) => !d.paired).sort(sortStreamingFirst),
+    () =>
+      discovered
+        .filter((d) => !d.paired && !machineAddresses.has(d.address.toLowerCase()))
+        .sort(sortStreamingFirst),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [discovered, streamingAddress],
+    [discovered, streamingAddress, machineAddresses],
   );
 
   const sortedMachines = [...machines].sort(sortStreamingFirst);
@@ -629,6 +677,35 @@ export function MoonlightView() {
     update((s) => ({ ...s, machines: s.machines.filter((m) => m.address !== address) }));
   }
 
+  /// Forget a Moonlight pairing — deletes the host's `srvcert` from
+  /// Moonlight's own QSettings store so it stops appearing in the paired
+  /// list. Used by the right-click "Forget pairing" entry on discovered
+  /// hosts. Refreshes pairedHosts so the UI updates without a full scan.
+  async function forgetPairing(address: string) {
+    setBusyAddress(address);
+    try {
+      await invoke("moonlight_forget", { host: address });
+      // Refresh paired hosts from the store we just mutated. Clear any
+      // cached online state for this address — it'll be re-probed on the
+      // next scan, and that probe (now authoritative) decides whether the
+      // host lands under Paired or Discovery.
+      const paired = await invoke<PairedHost[]>("moonlight_paired_hosts").catch(
+        () => [] as PairedHost[],
+      );
+      setPairedHosts(paired);
+      setPairedOnline((prev) => {
+        if (!(address in prev)) return prev;
+        const next = { ...prev };
+        delete next[address];
+        return next;
+      });
+    } catch (e) {
+      showToast(`Forget failed: ${e}`);
+    } finally {
+      setBusyAddress((cur) => (cur === address ? null : cur));
+    }
+  }
+
   async function pair(host: Host) {
     pairingRef.current = host.address;
     setBusyAddress(host.address);
@@ -716,7 +793,18 @@ export function MoonlightView() {
                   { label: "Apps", onClick: () => setAppsHost(host) },
                 ]
               : [{ label: "Pair", onClick: () => pair(host) }]),
-            { label: "Remove", danger: true, onClick: () => removeHost(d.address) },
+            // Forget pairing for paired hosts — drops the cert from
+            // Moonlight's store so it stops showing up. Unpaired
+            // discoveries have nothing to forget, so the entry is hidden.
+            ...(d.paired
+              ? [
+                  {
+                    label: "Forget pairing",
+                    danger: true,
+                    onClick: () => forgetPairing(d.address),
+                  },
+                ]
+              : []),
           ])
         }
       />
@@ -808,20 +896,26 @@ export function MoonlightView() {
                             onResume={resumeSession}
                             onDisconnect={disconnectSession}
                             onApps={() => setAppsHost(m)}
+                            onDesktop={() => streamDesktop(m)}
                             onPair={() => pair(m)}
                             onRemove={() => removeHost(m.address)}
                             onContextMenu={(e) =>
                               ctx.open(e, [
-                                // "Stream Desktop" / "Apps" only make sense when
-                                // the host actually answers — otherwise the
-                                // call is a guaranteed no-op.
-                                ...(machineProbe[m.address]?.reachable !== false
+                                // "Stream Desktop" / "Apps" need a paired,
+                                // reachable host. Offline OR unpaired entries
+                                // skip both — the buttons are noise there.
+                                // Pair is only useful when the host is
+                                // reachable but not yet paired (already
+                                // paired + reachable makes it a no-op).
+                                ...(machineProbe[m.address]?.reachable !== false &&
+                                machineProbe[m.address]?.paired !== false
                                   ? [
                                       { label: "Stream Desktop", onClick: () => streamDesktop(m) },
                                       { label: "Apps", onClick: () => setAppsHost(m) },
                                     ]
+                                  : machineProbe[m.address]?.reachable !== false
+                                  ? [{ label: "Pair", onClick: () => pair(m) }]
                                   : []),
-                                { label: "Pair", onClick: () => pair(m) },
                                 { label: "Remove", danger: true, onClick: () => removeHost(m.address) },
                               ])
                             }

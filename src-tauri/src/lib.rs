@@ -1593,6 +1593,155 @@ async fn moonlight_paired_hosts(
     .map_err(|e| e.to_string())?)
 }
 
+/// Forget a Moonlight pairing by removing its entry from Moonlight's own
+/// QSettings store. Looks up the entry by address (either the registry
+/// `HKCU\Software\Moonlight Game Streaming Project\Moonlight\hosts\<id>`
+/// subkey on a normal install, or the matching `[hosts\<uuid>]` section in
+/// `Moonlight.conf` on a portable install) and deletes it. After this the
+/// host's `srvcert` is gone, so the next `moonlight list <host>` will
+/// report it as unpaired and the UI's `pairedGroup` re-evaluates.
+///
+/// No-op when no matching entry exists — forgetting something not in the
+/// store is fine, the caller's intent is already satisfied.
+///
+/// We don't use `moonlight`'s CLI for this: there is no `unpair` /
+/// `forget` subcommand. Direct registry/INI mutation is the only path,
+/// and it matches what Moonlight's own GUI does via Qt's QSettings.
+#[tauri::command]
+async fn moonlight_forget(
+    host: String,
+    state: State<'_, settings::SettingsState>,
+) -> Result<(), String> {
+    let exe = moonlight_exe(&state);
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        if let Some(p) = exe.as_deref() {
+            if let Some(dir) = p.parent() {
+                if dir.join("portable.dat").exists() {
+                    forget_ini_host(dir, &host);
+                    return;
+                }
+            }
+        }
+        forget_registry_host(&host);
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
+/// Find the `[hosts\<uuid>]` section whose `localaddress`/`manualaddress`
+/// matches `host` and remove every line from that section header through
+/// the next section header (or end of file). Preserves the rest of the
+/// INI verbatim — we only delete our own matched section.
+fn forget_ini_host(dir: &std::path::Path, host: &str) {
+    let path = dir.join("Moonlight.conf");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let host_lower = host.to_lowercase();
+    let lines: Vec<&str> = text.lines().collect();
+    // Walk sections once, finding a host section whose address matches.
+    let mut drop_start: Option<usize> = None;
+    let mut drop_end: Option<usize> = None;
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section = &trimmed[1..trimmed.len() - 1];
+            if section.starts_with(r"hosts\") && !section.starts_with(r"hostsbackup\") {
+                // Find the section's end.
+                let mut j = i + 1;
+                while j < lines.len() {
+                    let t = lines[j].trim();
+                    if t.starts_with('[') && t.ends_with(']') {
+                        break;
+                    }
+                    j += 1;
+                }
+                if section_matches_address_host(&lines[i + 1..j], &host_lower) {
+                    drop_start = Some(i);
+                    drop_end = Some(j);
+                    break;
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    let (Some(start), Some(end)) = (drop_start, drop_end) else {
+        return;
+    };
+    // Stitch: everything before `start` + everything from `end` onward.
+    let mut out = String::with_capacity(text.len());
+    for line in &lines[..start] {
+        out.push_str(line);
+        out.push('\n');
+    }
+    for line in &lines[end..] {
+        out.push_str(line);
+        out.push('\n');
+    }
+    let _ = std::fs::write(&path, out);
+}
+
+/// True if any line in this section is `localaddress=<host>` or
+/// `manualaddress=<host>` (case-insensitive).
+fn section_matches_address_host(section_lines: &[&str], host_lower: &str) -> bool {
+    for line in section_lines {
+        if let Some((k, v)) = line.split_once('=') {
+            let key = k.trim();
+            if key == "localaddress" || key == "manualaddress" {
+                if v.trim().to_lowercase() == host_lower {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Walk `HKCU\Software\Moonlight Game Streaming Project\Moonlight\hosts`
+/// and delete any numeric subkey whose `localaddress`/`manualaddress`
+/// matches `host`. Idempotent: a missing subkey is not an error.
+fn forget_registry_host(host: &str) {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::RegKey;
+    let host_lower = host.to_lowercase();
+    let root = match RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+        r"Software\Moonlight Game Streaming Project\Moonlight\hosts",
+        KEY_READ | KEY_WRITE,
+    ) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    // Collect names first — we can't delete while iterating.
+    let names: Vec<String> = root
+        .enum_keys()
+        .flatten()
+        .filter(|n| n.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+    for name in names {
+        let addr = match root.open_subkey(&name) {
+            Ok(e) => match reg_host_get(&e, "localaddress")
+                .or_else(|| reg_host_get(&e, "manualaddress"))
+            {
+                Some(a) => a,
+                None => continue,
+            },
+            Err(_) => continue,
+        };
+        if addr.to_lowercase() == host_lower {
+            // Re-open with write access for the delete.
+            if let Ok(parent) = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+                r"Software\Moonlight Game Streaming Project\Moonlight\hosts",
+                KEY_READ | KEY_WRITE,
+            ) {
+                let _ = parent.delete_subkey_all(&name);
+            }
+        }
+    }
+}
+
 fn reg_host_get(h: &winreg::RegKey, key: &str) -> Option<String> {
     h.get_value::<String, _>(key).ok().filter(|s| !s.is_empty())
 }
@@ -2446,6 +2595,7 @@ pub fn run() {
             moonlight_quit,
             discover_hosts,
             moonlight_paired_hosts,
+            moonlight_forget,
             moonlight_probe,
             moonlight_probe_paired,
             client_display,
