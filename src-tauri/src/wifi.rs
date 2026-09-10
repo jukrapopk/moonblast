@@ -171,6 +171,15 @@ fn first_interface(client: &WlanClient) -> Option<windows_sys::core::GUID> {
 ///          ...
 /// ```
 ///
+/// `netsh` writes its output in whatever encoding the host's console
+/// code page is set to. Most modern Windows installs land on UTF-8 but
+/// some ARM64 / locale-specific installs end up at UTF-16LE, in which
+/// case `String::from_utf8_lossy` would see `S\0S\0I\0D\0` and our
+/// `strip_prefix("SSID")` would either miss (nulls in the middle) or
+/// pick up `ssid` values laced with `\0` bytes. The symptom is the
+/// chip showing "no connection" while the user is clearly connected.
+/// `decode_netsh` sniffs for UTF-16LE first and falls back to UTF-8.
+///
 /// Ask the wlan driver to refresh its visible-network cache. Fire-and-forget:
 /// `WlanScan` returns immediately and the scan runs asynchronously; the cache
 /// is updated within ~1-2s. Errors are ignored — if the scan can't be
@@ -212,7 +221,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
     if !output.status.success() {
         return None;
     }
-    let text = String::from_utf8_lossy(&output.stdout);
+    let text = decode_netsh(&output.stdout);
     let mut networks: Vec<WifiNetwork> = Vec::new();
     let mut current_ssid: Option<String> = None;
     if let Some(c) = netsh_current_connection() {
@@ -358,7 +367,7 @@ fn netsh_known_ssids() -> std::collections::HashSet<String> {
     if !output.status.success() {
         return out;
     }
-    let text = String::from_utf8_lossy(&output.stdout);
+    let text = decode_netsh(&output.stdout);
     for line in text.lines() {
         let trimmed = line.trim();
         // "All User Profile     : Foo Bar" or "Profiles on interface Wi-Fi:"
@@ -388,6 +397,42 @@ pub fn current() -> Option<WifiConnection> {
     netsh_current_connection()
 }
 
+/// Decode the raw bytes from `netsh` into a UTF-8 String. Detects UTF-16LE
+/// (some Windows / ARM64 installs emit this when the console code page
+/// is set to UTF-16) and falls back to UTF-8 lossy otherwise.
+///
+/// Heuristic: if the bytes start with the UTF-16LE BOM (`FF FE`), or
+/// they look like "ASCII chars with a null between each" (every odd
+/// byte is 0 in the first ~256 bytes), decode as UTF-16LE. Otherwise
+/// treat as UTF-8. The ASCII-with-nulls test catches the case where
+/// `netsh` doesn't emit a BOM but is still UTF-16LE (which it does on
+/// some Windows builds).
+fn decode_netsh(bytes: &[u8]) -> String {
+    let utf16le = bytes.starts_with(&[0xFF, 0xFE])
+        || (bytes.len() >= 16 && {
+            // Count "ASCII + null" pairs in the first 64 bytes (32 chars).
+            // If the majority are paired, it's UTF-16LE with no BOM.
+            let window = &bytes[..bytes.len().min(64)];
+            let pairs = window
+                .chunks_exact(2)
+                .filter(|c| c[1] == 0 && (0x20..=0x7E).contains(&c[0]) || c[0] == 0x0D || c[0] == 0x0A)
+                .count();
+            // At least 60% of pairs are "ASCII char + NUL" or line ending.
+            pairs * 2 >= (window.len() * 60) / 100
+        });
+    if utf16le {
+        // Strip BOM if present, then decode.
+        let stripped = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes);
+        let wide: Vec<u16> = stripped
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16_lossy(&wide)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
 fn netsh_current_connection() -> Option<WifiConnection> {
     let output = std::process::Command::new("netsh")
         .args(["wlan", "show", "interfaces"])
@@ -397,7 +442,7 @@ fn netsh_current_connection() -> Option<WifiConnection> {
     if !output.status.success() {
         return None;
     }
-    let text = String::from_utf8_lossy(&output.stdout);
+    let text = decode_netsh(&output.stdout);
     let mut state: Option<String> = None;
     let mut ssid: Option<String> = None;
     let mut signal: Option<u32> = None;
