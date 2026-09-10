@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { PowerMenu } from "./PowerMenu";
@@ -8,25 +8,11 @@ import { useWifi } from "../hooks/useWifi";
 
 export type View = "apps" | "moonlight" | "settings";
 
-const items: { id: View; label: string; nav: "left" | "right"; icon: View }[] = [
-  { id: "apps", label: "Apps", nav: "left", icon: "apps" },
-  { id: "moonlight", label: "Moonlight", nav: "left", icon: "moonlight" },
-  { id: "settings", label: "Settings", nav: "right", icon: "settings" },
+const items: { id: View; label: string; nav: "left" | "right"; icon: ReactNode }[] = [
+  { id: "apps", label: "Apps", nav: "left", icon: <SquaresFour size={24} weight="bold" /> },
+  { id: "moonlight", label: "Moonlight", nav: "left", icon: <Monitor size={24} weight="bold" /> },
+  { id: "settings", label: "Settings", nav: "right", icon: <Gear size={24} weight="bold" /> },
 ];
-
-function Icon({ name }: { name: View }) {
-  const props = { size: 24, weight: "bold" as const };
-  switch (name) {
-    case "apps":
-      return <SquaresFour {...props} />;
-    case "moonlight":
-      return <Monitor {...props} />;
-    case "settings":
-      return <Gear {...props} />;
-    default:
-      return null;
-  }
-}
 
 interface BatteryStatus {
   /** 0–100, or -1 when the OS reports "unknown". */
@@ -79,15 +65,15 @@ const chipBase =
 
 function wifiChipIcon(signal: number) {
   const weight = "bold" as const;
-  if (signal >= 75) return <WifiHigh size={16} weight={weight} />;
-  if (signal >= 50) return <WifiMedium size={16} weight={weight} />;
-  if (signal >= 25) return <WifiLow size={16} weight={weight} />;
-  if (signal > 0) return <WifiNone size={16} weight={weight} />;
-  return <WifiSlash size={16} weight={weight} />;
+  if (signal >= 75) return <WifiHigh size={18} weight={weight} />;
+  if (signal >= 50) return <WifiMedium size={18} weight={weight} />;
+  if (signal >= 25) return <WifiLow size={18} weight={weight} />;
+  if (signal > 0) return <WifiNone size={18} weight={weight} />;
+  return <WifiSlash size={18} weight={weight} />;
 }
 
-/** Clock + battery + WiFi chips shown in the TopBar's right cluster. */
-function Status({ onWifiClick, ssid }: { onWifiClick: () => void; ssid: string | null }) {
+/** Clock chip + battery / WiFi icon buttons shown in the TopBar's right cluster. */
+function Status({ onWifiClick }: { onWifiClick: () => void }) {
   const time = useTime();
   const battery = useBattery();
   const wifi = useWifi();
@@ -97,25 +83,19 @@ function Status({ onWifiClick, ssid }: { onWifiClick: () => void; ssid: string |
         {formatClock(time)}
       </span>
       {battery && (
-        <span
-          className={`${chipBase} ${
-            !battery.charging && battery.percent <= 10 ? "text-(--color-danger)" : ""
-          }`}
-          title={battery.charging ? `Charging · ${battery.percent}%` : `On battery · ${battery.percent}%`}
-        >
-          {batteryIcon(battery.percent, battery.charging)}
-          {battery.percent >= 0 ? `${battery.percent}%` : ""}
-        </span>
+        <TopBarButton
+          label={battery.charging ? `Charging · ${battery.percent}%` : `On battery · ${battery.percent}%`}
+          icon={batteryIcon(battery.percent, battery.charging)}
+          onClick={() => {/* TODO: open battery details */}}
+          danger={!battery.charging && battery.percent >= 0 && battery.percent <= 10}
+        />
       )}
       {wifi && (
-        <button
+        <TopBarButton
+          label="WiFi"
+          icon={wifiChipIcon(wifi.signal)}
           onClick={onWifiClick}
-          className={`${chipBase} hover:text-(--color-text) cursor-pointer`}
-          title={ssid ? `${ssid} · ${wifi.signal}%` : "WiFi · click to scan"}
-        >
-          {wifiChipIcon(wifi.signal)}
-          {ssid && <span className="max-w-32 truncate">{ssid}</span>}
-        </button>
+        />
       )}
     </div>
   );
@@ -157,16 +137,28 @@ export function TopBar({
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       <nav className="flex items-center gap-1">
         {visibleLeft.map((item) => (
-          <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
+          <TopBarButton
+            key={item.id}
+            label={item.label}
+            icon={item.icon}
+            active={view === item.id}
+            onClick={() => onNavigate(item.id)}
+          />
         ))}
       </nav>
 
       <div className="ml-auto" />
 
       <div className="relative flex items-center gap-1">
-        <Status onWifiClick={() => setWifiOpen(true)} ssid={wifi?.ssid ?? null} />
+        <Status onWifiClick={() => setWifiOpen(true)} />
         {rightItems.map((item) => (
-          <TopBarButton key={item.id} item={item} view={view} onNavigate={onNavigate} />
+          <TopBarButton
+            key={item.id}
+            label={item.label}
+            icon={item.icon}
+            active={view === item.id}
+            onClick={() => onNavigate(item.id)}
+          />
         ))}
         <button
           onClick={() => setPowerOpen((o) => !o)}
@@ -195,28 +187,42 @@ export function TopBar({
   );
 }
 
+/**
+ * Shared circular icon button used for every TopBar control — nav items
+ * (Apps / Moonlight / Settings), system status (battery, WiFi), and the
+ * power button. Two visual states:
+ *   - `active` (default false): the current nav view — soft accent
+ *     background + accent icon.
+ *   - `danger` (default false): a status condition that needs attention
+ *     (e.g. low battery) — red icon, no background.
+ */
 function TopBarButton({
-  item,
-  view,
-  onNavigate,
+  label,
+  icon,
+  onClick,
+  active = false,
+  danger = false,
 }: {
-  item: { id: View; label: string; icon: View };
-  view: View;
-  onNavigate: (v: View) => void;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  active?: boolean;
+  danger?: boolean;
 }) {
-  const active = view === item.id;
   return (
     <button
-      onClick={() => onNavigate(item.id)}
-      title={item.label}
-      aria-label={item.label}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
       className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
         active
           ? "bg-(--color-accent-soft) text-(--color-accent)"
-          : "text-(--color-muted) hover:text-(--color-text)"
+          : danger
+            ? "text-(--color-danger)"
+            : "text-(--color-muted) hover:text-(--color-text)"
       }`}
     >
-      <Icon name={item.icon} />
+      {icon}
     </button>
   );
 }
