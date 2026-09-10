@@ -4,7 +4,7 @@ import { BatteryChargingVertical, BatteryEmpty, BatteryFull, BatteryLow, Battery
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { useTime, formatClock } from "../hooks/useTime";
-import { useWifi } from "../hooks/useWifi";
+import { useWifi, type WifiConnection } from "../hooks/useWifi";
 
 export type View = "apps" | "moonlight" | "settings";
 
@@ -73,10 +73,15 @@ function wifiChipIcon(signal: number) {
 }
 
 /** Clock chip + battery / WiFi icon buttons shown in the TopBar's right cluster. */
-function Status({ onWifiClick }: { onWifiClick: () => void }) {
+function Status({
+  onWifiClick,
+  wifi,
+}: {
+  onWifiClick: () => void;
+  wifi: WifiConnection | null | undefined;
+}) {
   const time = useTime();
   const battery = useBattery();
-  const wifi = useWifi();
   return (
     <div className="flex items-center">
       <span className={chipBase} title={time.toLocaleString()}>
@@ -129,9 +134,13 @@ export function TopBar({
   const rightItems = items.filter((i) => i.nav === "right");
   const [powerOpen, setPowerOpen] = useState(false);
   const [wifiOpen, setWifiOpen] = useState(false);
-  // Subscribed separately so the chip and the modal can both render the
-  // current SSID without coordinating state.
-  const wifi = useWifi();
+  // One subscription shared by the chip (Status) and the modal prop.
+  // `refreshWifi` is also called on modal open/close so the chip picks
+  // up any state change the user made in the modal right away.
+  const { current: wifi, refresh: refreshWifi } = useWifi();
+  useEffect(() => {
+    refreshWifi();
+  }, [wifiOpen, refreshWifi]);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
@@ -150,7 +159,7 @@ export function TopBar({
       <div className="ml-auto" />
 
       <div className="relative flex items-center gap-1">
-        <Status onWifiClick={() => setWifiOpen(true)} />
+        <Status onWifiClick={() => setWifiOpen(true)} wifi={wifi} />
         {rightItems.map((item) => (
           <TopBarButton
             key={item.id}

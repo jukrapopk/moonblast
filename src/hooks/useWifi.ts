@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface WifiConnection {
-  /** Connected SSID. */
+  /** Connected SSID. Empty when the radio is on but no network is
+   *  associated — the chip still shows in that case. */
   ssid: string;
-  /** 0–100. */
+  /** 0–100. 0 when not connected. */
   signal: number;
   /** True if the AP requires credentials. */
   secured: boolean;
+  /** True if a network is currently associated. */
+  connected: boolean;
 }
 
 export interface WifiNetwork {
@@ -22,30 +25,56 @@ export interface WifiNetwork {
 }
 
 /**
- * Cheap, periodic poll of the current WiFi connection for the TopBar chip.
- * `null` means "no WiFi adapter" (the chip hides), `undefined` means
- * "loading" (the chip doesn't render yet).
+ * Event-driven WiFi state for the TopBar chip. Replaces the old
+ * 30s-tick poll: the wlan service doesn't change state on its own,
+ * so we just read on:
+ *   - mount (app start)
+ *   - window `focus`
+ *   - `visibilitychange` to "visible" (user alt-tabs back)
+ *   - explicit `refresh()` call (the modal calls this after a
+ *     connect/disconnect/radio toggle so the chip reflects the new
+ *     state immediately, not on the next user focus).
+ *
+ * The wlan service's netsh read takes ~200ms; calling it on focus
+ * is cheap.
  */
-export function useWifi(intervalMs = 30_000): WifiConnection | null | undefined {
+export function useWifi(): {
+  current: WifiConnection | null | undefined;
+  refresh: () => void;
+} {
   const [current, setCurrent] = useState<WifiConnection | null | undefined>(undefined);
+
+  const read = useCallback(async () => {
+    try {
+      const c = await invoke<WifiConnection | null>("wifi_current");
+      setCurrent(c);
+    } catch {
+      setCurrent(null);
+    }
+  }, []);
+
   useEffect(() => {
     let alive = true;
-    async function read() {
-      try {
-        const c = await invoke<WifiConnection | null>("wifi_current");
-        if (alive) setCurrent(c);
-      } catch {
-        if (alive) setCurrent(null);
-      }
+    const safeRead = () => {
+      if (alive) void read();
+    };
+    safeRead();
+    function onFocus() {
+      safeRead();
     }
-    void read();
-    const id = setInterval(read, intervalMs);
+    function onVisibility() {
+      if (document.visibilityState === "visible") safeRead();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
-      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [intervalMs]);
-  return current;
+  }, [read]);
+
+  return { current, refresh: read };
 }
 
 /**

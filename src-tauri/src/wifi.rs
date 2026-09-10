@@ -40,11 +40,16 @@ const WLAN_CLIENT_VERSION_2: u32 = 2;
 #[serde(rename_all = "camelCase")]
 pub struct WifiConnection {
     /// UTF-8 SSID (already validated as UTF-8 when stored).
+    /// Empty when the radio is on but no network is connected.
     pub ssid: String,
-    /// 0–100.
+    /// 0–100. 0 when not connected.
     pub signal: u32,
     /// True if the AP requires a password.
     pub secured: bool,
+    /// True if a network is currently associated. When false, the
+    /// radio is on but the adapter is idle (e.g. just disconnected,
+    /// or the saved network isn't reachable).
+    pub connected: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -365,6 +370,7 @@ fn netsh_current_connection() -> Option<WifiConnection> {
     let mut ssid: Option<String> = None;
     let mut signal: Option<u32> = None;
     let mut auth: Option<String> = None;
+    let mut radio_on: Option<bool> = None;
     for line in text.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("State") {
@@ -378,21 +384,38 @@ fn netsh_current_connection() -> Option<WifiConnection> {
                 .and_then(|s| s.trim().trim_end_matches('%').parse().ok());
         } else if let Some(rest) = line.strip_prefix("Authentication") {
             auth = rest.split(':').nth(1).map(|s| s.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("Radio status") {
+            let v = rest.split(':').nth(1).map(|s| s.trim().to_string());
+            // "Hardware On" / "Software On" → on, "Off" → off. Any
+            // other value (or absent) leaves it None so we don't guess.
+            radio_on = v.map(|s| s.contains("On") && !s.contains("Off"));
         }
     }
-    if state.as_deref() != Some("connected") {
+    // Only show "not connected" as a connected state if the radio is
+    // explicitly on. If `radio_on` is None (couldn't parse) we err on
+    // the side of treating the adapter as idle and hide the chip.
+    let connected = state.as_deref() == Some("connected");
+    if !connected && radio_on != Some(true) {
         return None;
     }
-    let ssid = ssid?;
-    if ssid.is_empty() {
-        return None;
-    }
-    let signal = signal.unwrap_or(0).min(100);
+    let (ssid, signal) = if connected {
+        (
+            ssid.unwrap_or_default(),
+            signal.unwrap_or(0).min(100),
+        )
+    } else {
+        (String::new(), 0)
+    };
     let secured = auth
         .as_deref()
         .map(|a| a.to_ascii_lowercase().contains("wpa") || a.contains("802.1X") || a == "WEP")
         .unwrap_or(false);
-    Some(WifiConnection { ssid, signal, secured })
+    Some(WifiConnection {
+        ssid,
+        signal,
+        secured,
+        connected,
+    })
 }
 
 /// Connect to a WiFi network by SSID. Works for:
