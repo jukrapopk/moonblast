@@ -543,6 +543,33 @@ pub fn disconnect() -> Result<(), String> {
     Err(out.trim().to_string())
 }
 
+/// Delete a saved WiFi profile ("forget" the network). No-op when no
+/// profile exists for the SSID — forgetting is idempotent.
+pub fn forget(ssid: &str) -> Result<(), String> {
+    if ssid.is_empty() {
+        return Err("empty SSID".into());
+    }
+    let output = std::process::Command::new("netsh")
+        .args(["wlan", "delete", "profile", &format!("name={ssid}")])
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    // "Profile ... is not found on any interface." — already forgotten.
+    let out = String::from_utf8_lossy(&output.stdout);
+    if out.to_lowercase().contains("not found") {
+        return Ok(());
+    }
+    let msg = out.trim().to_string();
+    Err(if msg.is_empty() {
+        format!("forget failed (exit {:?})", output.status.code())
+    } else {
+        msg
+    })
+}
+
 /// Connect to a secured network that needs a fresh password. We build a
 /// temporary profile XML, register it with `netsh wlan add profile`, then
 /// `netsh wlan connect` to that profile. The profile sticks around after

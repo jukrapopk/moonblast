@@ -1877,6 +1877,13 @@ fn wifi_disconnect() -> Result<(), String> {
     wifi::disconnect()
 }
 
+/// Delete a saved WiFi profile ("forget" the network). No-op when no
+/// profile exists — forgetting is idempotent.
+#[tauri::command]
+fn wifi_forget(ssid: String) -> Result<(), String> {
+    wifi::forget(&ssid)
+}
+
 /// Open the Windows Wi-Fi settings app. The user manages radio on/off
 /// there — radio toggling from Moonblast needs elevation to write
 /// `WlanSetInterface` and most `netsh interface set` calls, so we
@@ -2022,6 +2029,7 @@ pub fn run() {
             wifi_connect,
             wifi_connect_with_password,
             wifi_disconnect,
+            wifi_forget,
             open_wifi_settings,
             tailscale_status,
             tailscale_set,

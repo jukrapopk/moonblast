@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
-import { Gear } from "@phosphor-icons/react";
 import {
   WifiHigh,
   WifiLow,
@@ -22,8 +21,10 @@ import {
   wifiConnect,
   wifiConnectWithPassword,
   wifiDisconnect,
+  wifiForget,
   type WifiNetwork,
 } from "../../hooks/useWifi";
+import { useContextMenu } from "./ContextMenu";
 
 /**
  * Poll the OS up to `timeoutMs` waiting for the connection state to
@@ -169,7 +170,8 @@ function NetworkRow({
   onConnect,
   onNeedsPassword,
   onDisconnect,
-  /** `connect` or `disconnect` while this row is the one being acted on. */
+  onMenu,
+  /** In-flight action on this row (spinner + subtitle) — `null` when idle. */
   busy,
   /** True if any row is currently busy — used to disable clicks on
    *  every other row while one is in flight. */
@@ -182,7 +184,10 @@ function NetworkRow({
    *  in-app password prompt instead of opening Windows settings. */
   onNeedsPassword: (net: WifiNetwork) => void;
   onDisconnect: () => void;
-  busy: { kind: "connect" | "disconnect" } | null;
+  /** Right-click — opens the row's context menu (same actions as click). */
+  onMenu: (e: React.MouseEvent, net: WifiNetwork) => void;
+  /** In-flight action on this row (spinner + subtitle) — `null` when idle. */
+  busy: { kind: "connect" | "disconnect" | "forget" } | null;
   anyBusy: boolean;
 }) {
   const isCurrent = currentSsid === net.ssid && net.connected;
@@ -193,7 +198,9 @@ function NetworkRow({
   const subtitle = busy
     ? busy.kind === "connect"
       ? "Connecting…"
-      : "Disconnecting…"
+      : busy.kind === "forget"
+        ? "Forgetting…"
+        : "Disconnecting…"
     : isCurrent
       ? "Connected"
       : net.known
@@ -252,6 +259,7 @@ function NetworkRow({
   if (isCurrent) {
     return (
       <div
+        onContextMenu={(e) => onMenu(e, net)}
         className={`flex items-center gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5 ${
           busy?.kind === "disconnect" ? "opacity-40" : ""
         }`}
@@ -267,6 +275,7 @@ function NetworkRow({
         if (needsSignIn) onNeedsPassword(net);
         else onConnect(net.ssid);
       }}
+      onContextMenu={(e) => onMenu(e, net)}
       disabled={anyBusy}
       aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
       title={needsSignIn ? "Sign in" : "Connect"}
@@ -281,7 +290,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   const { networks, loading, scan, clear } = useWifiScan();
   // Per-row in-flight state (the row that the user is currently acting
   // on). `null` when nothing is happening.
-  const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" } | null>(null);
+  const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" | "forget" } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Derived from the parent's subscription — no local fetch, no poll.
   // When off, scans are pointless (`netsh show networks` can only
@@ -303,8 +312,8 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     if (!open) setPasswordTarget(null);
   }, [open]);
   // Clear in-flight state when the modal closes so a fresh open doesn't
-  // show stale "Connecting…" / "Disconnecting…" subtitles. The chip
-  // picks up the real state immediately via the parent's refresh effect.
+  // show a stale in-flight subtitle. The chip picks up the real state
+  // immediately via the parent's refresh effect.
   useEffect(() => {
     if (!open) setBusy(null);
   }, [open]);
@@ -366,6 +375,23 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     }
   }
 
+  async function handleForget(ssid: string) {
+    setBusy({ ssid, kind: "forget" });
+    setError(null);
+    try {
+      await wifiForget(ssid);
+      // Profile deletion is synchronous — just re-read the list so
+      // the `known` flag (and connection, if it was current) updates.
+      await scan();
+      const c = await fetchWifiCurrent();
+      setLiveSsid(c?.ssid ?? null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleConnectWithPassword(
     net: WifiNetwork,
     password: string,
@@ -385,6 +411,40 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     } finally {
       setBusy(null);
     }
+  }
+
+  // Right-click menu per row — same actions as left-click, plus
+  // forgetting saved networks. Built in the parent (AppsView pattern)
+  // so failures can surface in the modal's error slot.
+  const ctx = useContextMenu();
+  function openNetMenu(e: React.MouseEvent, net: WifiNetwork) {
+    const isCurrent = net.connected && liveSsid !== null && net.ssid === liveSsid;
+    const needsSignIn = net.secured && !net.known;
+    ctx.open(e, [
+      isCurrent
+        ? {
+            label: "Disconnect",
+            disabled: busy !== null,
+            onClick: () => void handleDisconnect(),
+          }
+        : {
+            label: "Connect",
+            disabled: busy !== null,
+            // Secured with no saved profile → password form first.
+            onClick: () =>
+              needsSignIn ? setPasswordTarget(net) : void handleConnect(net.ssid),
+          },
+      ...(net.known
+        ? [
+            {
+              label: "Forget",
+              danger: true,
+              disabled: busy !== null,
+              onClick: () => void handleForget(net.ssid),
+            },
+          ]
+        : []),
+    ]);
   }
 
   return (
@@ -419,7 +479,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
               networks.map((net) => {
                 // Per-row busy state: this row shows the spinner only
                 // when it's the one being acted on.
-                const rowBusy: { kind: "connect" | "disconnect" } | null =
+                const rowBusy: { kind: "connect" | "disconnect" | "forget" } | null =
                   busy && busy.ssid === net.ssid ? { kind: busy.kind } : null;
                 return (
                   <NetworkRow
@@ -429,6 +489,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
                     onConnect={handleConnect}
                     onNeedsPassword={setPasswordTarget}
                     onDisconnect={handleDisconnect}
+                    onMenu={openNetMenu}
                     busy={rowBusy}
                     anyBusy={busy !== null}
                   />
@@ -451,7 +512,6 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
               variant="ghost"
               size="md"
               onClick={() => void openWifiSettings()}
-              icon={<Gear size={14} weight="bold" />}
             >
               WiFi Settings
             </Button>
