@@ -18,7 +18,7 @@
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE};
+use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
 
 use crate::settings;
 use winreg::RegKey;
@@ -154,25 +154,36 @@ pub fn ensure_desktop() {
     }
 }
 
-/// Where Tailscale's installer registers itself. Resolving this is the standard
-/// way to find the GUI client (`tailscaled` is a separate Windows service whose
-/// own path we don't need).
-const TAILSCALE_REG_KEY: &str = r"SOFTWARE\Tailscale";
-
 /// Resolve the installed Tailscale GUI executable, if present.
 ///
-/// Reads `HKLM\SOFTWARE\Tailscale\InstallPath` (set by the standard installer),
-/// then looks for `Tailscale.exe` inside it. Returns `None` for uninstalled /
-/// non-standard installs — the stub then silently skips the launch, and the
-/// user can address that by reinstalling Tailscale normally. `pub` so the UI
-/// can use the same definition of "installed" the stub uses.
+/// Asks `where.exe` where `tailscale` lives and uses the first hit. Matches
+/// the detection the rest of the Tailscale integration uses, so the stub and
+/// the UI agree on what "installed" means regardless of how Tailscale got
+/// onto the system (installer, scoop, manual copy to Program Files, etc.).
 pub fn tailscale_install_path() -> Option<PathBuf> {
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let key = hklm.open_subkey(TAILSCALE_REG_KEY).ok()?;
-    let path: String = key.get_value("InstallPath").ok()?;
-    let dir = PathBuf::from(path);
-    let exe = dir.join("Tailscale.exe");
-    exe.is_file().then_some(exe)
+    let output = Command::new("where.exe")
+        .arg("tailscale")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // `where.exe` may list multiple matches (e.g. `tailscale.exe` and
+    // `Tailscale.exe`); pick the first non-empty line.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first = stdout
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?
+        .to_string();
+    let path = PathBuf::from(first);
+    // Prefer the GUI binary if both happen to be on PATH.
+    let gui = path.with_file_name("Tailscale.exe");
+    if gui.is_file() {
+        return Some(gui);
+    }
+    path.is_file().then_some(path)
 }
 
 /// Launch the Tailscale GUI at sign-in. Best-effort: missing install or a

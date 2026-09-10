@@ -9,6 +9,7 @@ import { Section } from "./ui/Section";
 import { Toggle } from "./ui/Toggle";
 
 type TailscaleStatus =
+  | "not-installed"
   | "not-found"
   | "not-running"
   | "starting"
@@ -30,10 +31,15 @@ type TailscaleStatus =
 
     async function refresh() {
       try {
-        const info = await invoke<{ status: TailscaleStatus }>("tailscale_status");
+        const info = await invoke<{ status: TailscaleStatus; installed: boolean }>("tailscale_status");
         setStatus(info.status);
+        // `installed` is reported by the same command that reports `status`,
+        // so the top row and the sub-row can never disagree about whether
+        // Tailscale is actually on this machine.
+        setInstalled(info.installed);
       } catch {
-        setStatus("not-found");
+        setStatus("not-installed");
+        setInstalled(false);
       }
     }
 
@@ -44,14 +50,6 @@ type TailscaleStatus =
       // on other pages.
       const id = setInterval(refresh, 3000);
       return () => clearInterval(id);
-    }, []);
-
-    // One-shot check on mount: is Tailscale actually installed? Drives the
-    // disabled state on the Auto Tailscale Start sub-toggle.
-    useEffect(() => {
-      invoke<string | null>("tailscale_install_path")
-        .then((p) => setInstalled(p !== null))
-        .catch(() => setInstalled(false));
     }, []);
 
     async function toggle(up: boolean) {
@@ -72,7 +70,7 @@ type TailscaleStatus =
           <span className="text-sm text-(--color-muted)">Checking…</span>
         </Row>
       );
-    } else if (status === "not-found") {
+    } else if (status === "not-installed" || status === "not-found") {
       main = (
         <Row label="Tailscale">
           <span className="text-sm text-(--color-muted)/60">Tailscale not found.</span>

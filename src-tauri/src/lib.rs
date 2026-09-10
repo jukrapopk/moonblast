@@ -74,47 +74,68 @@ fn is_maximized(window: tauri::Window) -> Result<bool, String> {
     window.is_maximized().map_err(|e| e.to_string())
 }
 
-/// Reports real Tailscale state as one of: not-found, not-running, starting,
-/// logged-out, connected, disconnected.
+/// Reports real Tailscale state as one of: not-installed, not-running, starting,
+/// logged-out, connected, disconnected. `installed` reports whether `tailscale`
+/// was found on PATH at all (Windows-only — see `tailscale_installed`). The UI
+/// uses `installed` to decide whether the "Auto-start with Auto Immersive"
+/// sub-toggle should be enabled; the stub uses the same helper at sign-in.
 #[tauri::command]
 async fn tailscale_status() -> TailscaleInfo {
     // Offload the subprocess wait off the main thread so the UI never freezes.
     tauri::async_runtime::spawn_blocking(|| {
-        let status = match Command::new("tailscale").arg("status").creation_flags(0x0800_0000).output() {
-            Err(_) => "not-found".to_string(),
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-                let lower = format!("{stdout}\n{stderr}").to_lowercase();
+        let installed = tailscale_installed();
+        let status = if !installed {
+            "not-installed".to_string()
+        } else {
+            match Command::new("tailscale").arg("status").creation_flags(0x0800_0000).output() {
+                Err(_) => "not-running".to_string(),
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                    let lower = format!("{stdout}\n{stderr}").to_lowercase();
 
-                // Daemon unreachable.
-                if lower.contains("failed to connect to local tailscale daemon")
-                    || lower.contains("is the tailscale service running")
-                    || lower.contains("tailscaled process")
-                    || lower.contains("connection refused")
-                {
-                    "not-running".to_string()
-                // Connected (peer list / healthy), not logged out.
-                } else if output.status.success()
-                    && !lower.contains("logged out")
-                    && !lower.contains("needs login")
-                {
-                    "connected".to_string()
-                // Reachable but not signed in.
-                } else if lower.contains("logged out") || lower.contains("needs login") {
-                    "logged-out".to_string()
-                // Warming up.
-                } else if lower.contains("starting") || lower.contains("please wait") || lower.contains("health check") {
-                    "starting".to_string()
-                } else {
-                    "disconnected".to_string()
+                    // Daemon unreachable.
+                    if lower.contains("failed to connect to local tailscale daemon")
+                        || lower.contains("is the tailscale service running")
+                        || lower.contains("tailscaled process")
+                        || lower.contains("connection refused")
+                    {
+                        "not-running".to_string()
+                    // Connected (peer list / healthy), not logged out.
+                    } else if output.status.success()
+                        && !lower.contains("logged out")
+                        && !lower.contains("needs login")
+                    {
+                        "connected".to_string()
+                    // Reachable but not signed in.
+                    } else if lower.contains("logged out") || lower.contains("needs login") {
+                        "logged-out".to_string()
+                    // Warming up.
+                    } else if lower.contains("starting") || lower.contains("please wait") || lower.contains("health check") {
+                        "starting".to_string()
+                    } else {
+                        "disconnected".to_string()
+                    }
                 }
             }
         };
-        TailscaleInfo { status }
+        TailscaleInfo { status, installed }
     })
     .await
-    .unwrap_or(TailscaleInfo { status: "not-found".to_string() })
+    .unwrap_or(TailscaleInfo { status: "not-installed".to_string(), installed: false })
+}
+
+/// True if a `tailscale.exe` is reachable on PATH. Uses `where.exe`, which
+/// matches how the rest of `tailscale_*` resolves the binary — so the UI and
+/// the stub agree on what "installed" means (no separate registry lookup that
+/// could disagree with the CLI).
+fn tailscale_installed() -> bool {
+    Command::new("where.exe")
+        .arg("tailscale")
+        .creation_flags(0x0800_0000)
+        .output()
+        .map(|o| o.status.success() && !o.stdout.is_empty())
+        .unwrap_or(false)
 }
 
 /// Bring Tailscale up or down. Only meaningful when the daemon is running.
@@ -137,18 +158,10 @@ async fn tailscale_set(up: bool) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Absolute path to the installed Tailscale GUI, or `None` if Tailscale
-/// isn't installed (the standard installer writes
-/// `HKLM\SOFTWARE\Tailscale\InstallPath`). Used by the Settings UI to decide
-/// whether the "Auto Tailscale Start" toggle should be enabled.
-#[tauri::command]
-fn tailscale_install_path() -> Option<String> {
-    shell::tailscale_install_path().map(|p| p.to_string_lossy().into_owned())
-}
-
 #[derive(serde::Serialize)]
 struct TailscaleInfo {
     status: String,
+    installed: bool,
 }
 
 /// Returns true if the folder looks like a Moonlight install (contains moonlight.exe).
@@ -2155,7 +2168,6 @@ pub fn run() {
             audio_reset_sessions,
             tailscale_status,
             tailscale_set,
-            tailscale_install_path,
             validate_moonlight_dir,
             moonlight_list_apps,
             moonlight_pair,
