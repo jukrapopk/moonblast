@@ -123,6 +123,28 @@ function MachineCard({
               onResume={onResume}
               onDisconnect={onDisconnect}
             />
+          ) : probe?.reachable === false ? (
+            // Saved but offline — can't list apps, no host to talk to. Pair
+            // and Remove remain so the user can either re-pair or drop it.
+            <>
+              <Button
+                variant="outline-accent"
+                size="md"
+                onClick={onPair}
+                disabled={busy}
+                icon={<LockKey size={14} weight="bold" />}
+              >
+                Pair
+              </Button>
+              <button
+                onClick={onRemove}
+                title="Remove"
+                aria-label="Remove"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
+              >
+                <Trash size={16} weight="bold" />
+              </button>
+            </>
           ) : (
             <>
               <Button
@@ -221,7 +243,7 @@ function DiscoveredCard({
               onResume={onResume}
               onDisconnect={onDisconnect}
             />
-          ) : host.paired ? (
+          ) : host.paired && online !== false ? (
             <>
               <Button
                 size="md"
@@ -243,6 +265,11 @@ function DiscoveredCard({
                 Apps
               </Button>
             </>
+          ) : host.paired ? (
+            // Paired but offline — nothing to connect to. The Online/Offline
+            // pill already says it, and right-click's "Stream Desktop" /
+            // "Apps" are filtered out at the call site too.
+            <span className="text-xs text-(--color-muted)">Host unreachable</span>
           ) : (
             <Button
               variant="outline-accent"
@@ -683,7 +710,7 @@ export function MoonlightView() {
         onDesktop={() => streamDesktop(host)}
         onContextMenu={(e) =>
           ctx.open(e, [
-            ...(d.paired
+            ...(d.paired && pairedOnline[d.address] !== false
               ? [
                   { label: "Stream Desktop", onClick: () => streamDesktop(host) },
                   { label: "Apps", onClick: () => setAppsHost(host) },
@@ -785,8 +812,15 @@ export function MoonlightView() {
                             onRemove={() => removeHost(m.address)}
                             onContextMenu={(e) =>
                               ctx.open(e, [
-                                { label: "Stream Desktop", onClick: () => streamDesktop(m) },
-                                { label: "Apps", onClick: () => setAppsHost(m) },
+                                // "Stream Desktop" / "Apps" only make sense when
+                                // the host actually answers — otherwise the
+                                // call is a guaranteed no-op.
+                                ...(machineProbe[m.address]?.reachable !== false
+                                  ? [
+                                      { label: "Stream Desktop", onClick: () => streamDesktop(m) },
+                                      { label: "Apps", onClick: () => setAppsHost(m) },
+                                    ]
+                                  : []),
                                 { label: "Pair", onClick: () => pair(m) },
                                 { label: "Remove", danger: true, onClick: () => removeHost(m.address) },
                               ])
