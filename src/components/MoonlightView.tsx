@@ -32,6 +32,12 @@ interface PairedHost {
   name: string;
   uuid: string;
   address: string;
+  port: number;
+}
+
+interface PairedProbeResult {
+  address: string;
+  online: boolean;
 }
 
 interface MoonlightProbe {
@@ -156,6 +162,7 @@ function MachineCard({
 
 function DiscoveredCard({
   host,
+  online,
   onApps,
   onPair,
   onDesktop,
@@ -168,6 +175,11 @@ function DiscoveredCard({
   onContextMenu,
 }: {
   host: DiscoveredHost;
+  /// True if paired and the GameStream server returned 200 from /serverinfo.
+  /// False = paired but offline. Undefined = not yet probed, or unpaired
+  /// (we don't probe unpaired discovery entries — `Discover` only sees them
+  /// via mDNS, which is itself the "reachable" signal).
+  online?: boolean;
   onApps: () => void;
   onPair: () => void;
   onDesktop: () => void;
@@ -189,7 +201,13 @@ function DiscoveredCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-(--color-text)">{host.name}</span>
-            {streaming ? <StatusPill pulse>Streaming</StatusPill> : null}
+            {streaming ? (
+              <StatusPill pulse>Streaming</StatusPill>
+            ) : online !== undefined ? (
+              <StatusPill tone={online ? "accent" : "muted"}>
+                {online ? "Online" : "Offline"}
+              </StatusPill>
+            ) : null}
           </div>
           <div className="mt-0.5 truncate text-xs text-(--color-muted)">{host.address}</div>
         </div>
@@ -423,6 +441,10 @@ export function MoonlightView() {
   const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
   const [pairedHosts, setPairedHosts] = useState<PairedHost[]>([]);
   const [machineProbe, setMachineProbe] = useState<Record<string, MoonlightProbe>>({});
+  /// Online/offline state for paired hosts, keyed by address. `true` = the
+  /// host's GameStream server returned 200 from /serverinfo, matching how
+  /// Moonlight itself decides online/offline. `undefined` = not yet probed.
+  const [pairedOnline, setPairedOnline] = useState<Record<string, boolean>>({});
   const [scanning, setScanning] = useState(false);
   const pairingRef = useRef<string | null>(null);
   const ctx = useContextMenu();
@@ -468,7 +490,20 @@ export function MoonlightView() {
 
   const sortedMachines = [...machines].sort(sortStreamingFirst);
 
-  const scan = useCallback(async () => {
+  // Tracks when the last scan finished so focus/visibility bursts don't
+  // spam the network (alt-tabbing in and out, multiple focus events in
+  // quick succession all collapse into one scan). User-initiated scans
+  // (manual Refresh button, pair-complete) bypass the debounce.
+  const lastScanAt = useRef(0);
+
+  const scan = useCallback(async (opts: { force?: boolean } = {}) => {
+    if (!opts.force) {
+      const now = Date.now();
+      if (now - lastScanAt.current < 3000) return;
+      lastScanAt.current = now;
+    } else {
+      lastScanAt.current = Date.now();
+    }
     setScanning(true);
     try {
       const list = await invoke<DiscoveredHost[]>("discover_hosts").catch(
@@ -490,6 +525,18 @@ export function MoonlightView() {
       setMachineProbe(Object.fromEntries(probes));
       setDiscovered(list);
       setPairedHosts(paired);
+      // Liveness check for paired hosts — same signal Moonlight uses
+      // (`GET /serverinfo` 200 = online). Run after the paired list is known
+      // so we can probe each one with its stored per-host HTTP port.
+      if (paired.length > 0) {
+        const pairedResults = await invoke<PairedProbeResult[]>(
+          "moonlight_probe_paired",
+          { hosts: paired },
+        ).catch(() => [] as PairedProbeResult[]);
+        setPairedOnline(Object.fromEntries(pairedResults.map((r) => [r.address, r.online])));
+      } else {
+        setPairedOnline({});
+      }
     } catch {
       // ignore discovery errors
     } finally {
@@ -497,8 +544,28 @@ export function MoonlightView() {
     }
   }, [machines]);
 
+  // Run scans only when the window is focused + page is the active view. The
+  // scan hammers the network (mDNS + HTTP probes per host); doing it in the
+  // background while the user isn't looking is just wasted battery.
   useEffect(() => {
-    if (sub === "machines") scan();
+    if (sub !== "machines") return;
+    // Skip the initial scan if the page isn't visible — the focus/visibility
+    // listener below will pick it up when the user actually looks at it.
+    if (document.visibilityState !== "visible") return;
+    scan();
+  }, [sub, scan]);
+
+  useEffect(() => {
+    if (sub !== "machines") return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") scan();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [sub, scan]);
 
   // When a pairing session completes, refresh once instead of polling.
@@ -509,7 +576,9 @@ export function MoonlightView() {
       if (pairingRef.current === host) {
         pairingRef.current = null;
         setBusyAddress(null);
-        scan();
+        // Pairing just succeeded/failed — the paired list changed, refresh
+        // immediately rather than waiting for the debounce window.
+        scan({ force: true });
         showToast(success ? `Paired with ${host}` : `Pairing ${host} failed`);
       }
     }).then((fn) => {
@@ -602,6 +671,7 @@ export function MoonlightView() {
       <DiscoveredCard
         key={d.address + d.name}
         host={d}
+        {...(d.paired ? { online: pairedOnline[d.address] } : {})}
         busy={busyAddress === d.address || sessionBusy}
         streaming={d.address === streamingAddress}
         streamApp={session?.app ?? ""}
@@ -637,7 +707,7 @@ export function MoonlightView() {
               <Button
                 variant="outline"
                 size="md"
-                onClick={scan}
+                onClick={() => scan({ force: true })}
                 disabled={scanning}
                 icon={<ArrowsClockwise size={16} weight="bold" className={scanning ? "animate-spin" : ""} />}
                 className="h-9 bg-(--color-surface) px-4 disabled:opacity-50"

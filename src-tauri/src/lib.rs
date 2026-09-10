@@ -1539,11 +1539,21 @@ struct DiscoveredHost {
     paired: bool,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct PairedHost {
     name: String,
     uuid: String,
     address: String,
+    /// HTTP port the host's GameStream server listens on. Stored per-host in
+    /// Moonlight's QSettings store as `localport` / `manualport` (default
+    /// `47989` if absent — that's what `NvComputer`'s constructor uses for
+    /// missing port values, and the default GameStream/Sunshine port).
+    #[serde(default = "default_paired_port")]
+    port: u16,
+}
+
+fn default_paired_port() -> u16 {
+    47989
 }
 
 /// Read hosts already paired with the Moonlight client.
@@ -1593,10 +1603,22 @@ fn reg_host_from(entry: &winreg::RegKey) -> Option<PairedHost> {
     reg_host_get(entry, "srvcert")?;
     let address = reg_host_get(entry, "localaddress")
         .or_else(|| reg_host_get(entry, "manualaddress"))?;
+    // Port is stored alongside the address (`localport` for mDNS-discovered
+    // hosts, `manualport` for user-entered ones). Moonlight's deserializer
+    // defaults to `DEFAULT_HTTP_PORT` (= 47989) if absent.
+    let local = reg_host_get(entry, "localaddress").is_some();
+    let port_key = if local { "localport" } else { "manualport" };
+    let port = entry
+        .get_value::<u32, _>(port_key)
+        .ok()
+        .filter(|&p| p > 0 && p < u16::MAX as u32)
+        .map(|p| p as u16)
+        .unwrap_or_else(default_paired_port);
     Some(PairedHost {
         name,
         uuid: reg_host_get(entry, "uuid").unwrap_or_default(),
         address,
+        port,
     })
 }
 
@@ -1635,21 +1657,29 @@ fn push_ini_paired(
     cert: &str,
     local: &str,
     manual: &str,
+    local_port: &str,
+    manual_port: &str,
 ) {
     if !in_host || cert.is_empty() || name.is_empty() {
         return;
     }
-    let address = if !local.is_empty() {
-        local.to_string()
+    let (address, port_str) = if !local.is_empty() {
+        (local.to_string(), local_port)
     } else if !manual.is_empty() {
-        manual.to_string()
+        (manual.to_string(), manual_port)
     } else {
         return;
     };
+    let port = port_str
+        .parse::<u16>()
+        .ok()
+        .filter(|p| *p > 0)
+        .unwrap_or_else(default_paired_port);
     out.push(PairedHost {
         name: name.to_string(),
         uuid: uuid.to_string(),
         address,
+        port,
     });
 }
 
@@ -1661,11 +1691,23 @@ fn parse_moonlight_ini_hosts(ini: &str) -> Vec<PairedHost> {
     let mut cert = String::new();
     let mut local = String::new();
     let mut manual = String::new();
+    let mut local_port = String::new();
+    let mut manual_port = String::new();
 
     for line in ini.lines() {
         let line = line.trim();
         if line.starts_with('[') && line.ends_with(']') {
-            push_ini_paired(&mut out, in_host, &name, &uuid, &cert, &local, &manual);
+            push_ini_paired(
+                &mut out,
+                in_host,
+                &name,
+                &uuid,
+                &cert,
+                &local,
+                &manual,
+                &local_port,
+                &manual_port,
+            );
             let section = &line[1..line.len() - 1];
             in_host = section.starts_with(r"hosts\") && !section.starts_with(r"hostsbackup\");
             name.clear();
@@ -1673,6 +1715,8 @@ fn parse_moonlight_ini_hosts(ini: &str) -> Vec<PairedHost> {
             cert.clear();
             local.clear();
             manual.clear();
+            local_port.clear();
+            manual_port.clear();
         } else if in_host {
             if let Some((k, v)) = line.split_once('=') {
                 let v = v.trim().to_string();
@@ -1682,12 +1726,24 @@ fn parse_moonlight_ini_hosts(ini: &str) -> Vec<PairedHost> {
                     "srvcert" => cert = v,
                     "localaddress" => local = v,
                     "manualaddress" => manual = v,
+                    "localport" => local_port = v,
+                    "manualport" => manual_port = v,
                     _ => {}
                 }
             }
         }
     }
-    push_ini_paired(&mut out, in_host, &name, &uuid, &cert, &local, &manual);
+    push_ini_paired(
+        &mut out,
+        in_host,
+        &name,
+        &uuid,
+        &cert,
+        &local,
+        &manual,
+        &local_port,
+        &manual_port,
+    );
     out
 }
 
@@ -1743,6 +1799,109 @@ fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
         let _ = tx.send(ok);
     });
     rx.recv_timeout(std::time::Duration::from_secs(8)).unwrap_or(false)
+}
+
+#[derive(serde::Serialize)]
+struct PairedProbeResult {
+    address: String,
+    online: bool,
+}
+
+/// Probe paired hosts the same way Moonlight does: hit `GET /serverinfo` over
+/// HTTP on each host's per-host port and look for `<root status_code="200">`
+/// in the XML response. This is exactly the check `PcMonitorThread` runs to
+/// decide online vs. offline, so the result matches what the Moonlight client
+/// itself shows. Returns one entry per input host in the same order.
+///
+/// We deliberately use plain HTTP, not HTTPS — Moonlight's `getServerInfo`
+/// also tries HTTPS first only when a cert is pinned, and falls back to HTTP
+/// fast-fail. For a liveness probe we want speed and zero setup; the XML
+/// status code is the same either way.
+#[tauri::command]
+async fn moonlight_probe_paired(
+    hosts: Vec<PairedHost>,
+) -> Result<Vec<PairedProbeResult>, String> {
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        // Each probe has its own ~2 s timeout, so probe in parallel — 5
+        // paired hosts finish in ~2 s instead of ~10 s. `into_par_iter`
+        // would need the `rayon` crate; threads are fine for a one-shot
+        // burst and avoid pulling in a dep.
+        let mut handles = Vec::with_capacity(hosts.len());
+        for h in hosts {
+            let addr = h.address.clone();
+            let port = h.port;
+            handles.push(std::thread::spawn(move || {
+                let online = serverinfo_probe(&addr, port);
+                PairedProbeResult { address: addr, online }
+            }));
+        }
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().ok())
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?)
+}
+
+/// `GET /serverinfo?uniqueid=…&uuid=…` over plain HTTP, ~2 s timeout. Returns
+/// true iff we get an HTTP response with `<root status_code="200">`. Matches
+/// Moonlight's `FAST_FAIL_TIMEOUT_MS` so we agree with what its polling
+/// thread considers "alive".
+fn serverinfo_probe(address: &str, port: u16) -> bool {
+    use std::io::{Read, Write};
+    use std::net::ToSocketAddrs;
+    use std::time::Duration;
+
+    let addr = match (address, port).to_socket_addrs() {
+        Ok(mut it) => match it.next() {
+            Some(a) => a,
+            None => return false,
+        },
+        Err(_) => return false,
+    };
+
+    let mut stream = match std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(1500)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(2000)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
+
+    // The body Moonlight's NvHTTP sends. uniqueid is a placeholder; uuid is a
+    // request id. Neither matters for liveness — the server replies 200 to
+    // any /serverinfo request when it's healthy.
+    let req = format!(
+        "GET /serverinfo?uniqueid=0123456789ABCDEF&uuid=00000000-0000-0000-0000-000000000000 HTTP/1.0\r\nHost: {address}\r\nUser-Agent: Moonblast\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut buf = Vec::with_capacity(2048);
+    let mut tmp = [0u8; 1024];
+    loop {
+        match stream.read(&mut tmp) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.len() > 8192 {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let text = match std::str::from_utf8(&buf) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    // Look for the `status_code="200"` attribute on the <root> element.
+    // We don't need to parse XML — substring match is enough; any 200 reply
+    // means the host is alive. The XML never legitimately contains this
+    // string in any other field.
+    text.contains("status_code=\"200\"")
 }
 
 /// Exit Moonblast entirely.
@@ -2234,6 +2393,7 @@ pub fn run() {
             discover_hosts,
             moonlight_paired_hosts,
             moonlight_probe,
+            moonlight_probe_paired,
             client_display,
             discover_apps,
             launch_app,
