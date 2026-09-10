@@ -50,7 +50,7 @@ function useBattery(): BatteryStatus | null {
 
 /** Pick the right battery glyph for the current level + charging state. */
 function batteryIcon(percent: number, charging: boolean) {
-  const size = 18;
+  const size = 24;
   const weight = "bold" as const;
   if (charging) return <BatteryChargingVertical size={size} weight={weight} />;
   if (percent < 0) return <BatteryWarning size={size} weight={weight} />;
@@ -65,11 +65,11 @@ const chipBase =
 
 function wifiChipIcon(signal: number) {
   const weight = "bold" as const;
-  if (signal >= 75) return <WifiHigh size={18} weight={weight} />;
-  if (signal >= 50) return <WifiMedium size={18} weight={weight} />;
-  if (signal >= 25) return <WifiLow size={18} weight={weight} />;
-  if (signal > 0) return <WifiNone size={18} weight={weight} />;
-  return <WifiSlash size={18} weight={weight} />;
+  if (signal >= 75) return <WifiHigh size={24} weight={weight} />;
+  if (signal >= 50) return <WifiMedium size={24} weight={weight} />;
+  if (signal >= 25) return <WifiLow size={24} weight={weight} />;
+  if (signal > 0) return <WifiNone size={24} weight={weight} />;
+  return <WifiSlash size={24} weight={weight} />;
 }
 
 /** Clock chip + battery / WiFi icon buttons shown in the TopBar's right cluster. */
