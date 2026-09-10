@@ -155,6 +155,12 @@ export function SettingsView({
   onToggleStartWithWindows,
   autoImmersive,
   onToggleAutoImmersive,
+  showTime,
+  onToggleShowTime,
+  showWifi,
+  onToggleShowWifi,
+  showBattery,
+  onToggleShowBattery,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -168,8 +174,30 @@ export function SettingsView({
   onToggleStartWithWindows: (v: boolean) => void;
   autoImmersive: boolean;
   onToggleAutoImmersive: (v: boolean) => void;
+  showTime: boolean;
+  onToggleShowTime: (v: boolean) => void;
+  showWifi: boolean;
+  onToggleShowWifi: (v: boolean) => void;
+  showBattery: boolean;
+  onToggleShowBattery: (v: boolean) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
+  // Battery hardware presence — one-shot read on mount. `undefined`
+  // while checking; the toggle stays disabled until we know.
+  const [hasBattery, setHasBattery] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    invoke<{ percent: number; charging: boolean } | null>("battery")
+      .then((s) => {
+        if (alive) setHasBattery(s !== null);
+      })
+      .catch(() => {
+        if (alive) setHasBattery(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function checkKey() {
     if (!steamgridKey) return;
@@ -212,6 +240,25 @@ export function SettingsView({
             disabled={!startWithWindows}
           />
         </div>
+      </Section>
+
+      <Section title="Customization">
+        <Row label="Show Time" description="Show the clock in the TopBar.">
+          <Toggle checked={showTime} onChange={onToggleShowTime} />
+        </Row>
+        <Row label="Show WiFi" description="Show the WiFi status icon in the TopBar.">
+          <Toggle checked={showWifi} onChange={onToggleShowWifi} />
+        </Row>
+        <Row
+          label="Show Battery"
+          description={
+            hasBattery === false
+              ? "No battery detected on this machine."
+              : "Only shown on battery-powered machines."
+          }
+        >
+          <Toggle checked={showBattery} onChange={onToggleShowBattery} disabled={hasBattery !== true} />
+        </Row>
       </Section>
 
       <Section title="Integrations">
@@ -268,6 +315,15 @@ export function SettingsView({
           onSelect={onSelectMoonlight}
         />
       </Section>
+
+      <Button
+        variant="outline"
+        size="lg"
+        onClick={() => void invoke("open_windows_settings").catch(() => {})}
+        className="w-full min-h-12"
+      >
+        Open Windows Settings
+      </Button>
 
       <Section title="About">
         <div className="py-4 text-base text-(--color-muted)">

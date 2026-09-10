@@ -11,6 +11,8 @@ interface ToggleProps {
 export function Toggle({ defaultOn = false, checked, onChange, disabled }: ToggleProps) {
   const [internal, setInternal] = useState(defaultOn);
   const on = checked ?? internal;
+  // Disabled reads as off — visual only, the stored value is untouched.
+  const visualOn = disabled ? false : on;
 
   function toggle() {
     if (disabled) return;
@@ -25,13 +27,17 @@ export function Toggle({ defaultOn = false, checked, onChange, disabled }: Toggl
       aria-pressed={on}
       disabled={disabled}
       className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-        disabled ? "opacity-40" : on ? "bg-(--color-accent)" : "bg-(--color-border)"
+        disabled
+          ? "cursor-not-allowed bg-(--color-surface-2)"
+          : visualOn
+            ? "bg-(--color-accent)"
+            : "bg-(--color-border)"
       }`}
     >
       <span
-        className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
-          on ? "left-6" : "left-1"
-        }`}
+        className={`absolute top-1 h-5 w-5 rounded-full transition-all ${
+          visualOn ? "left-6" : "left-1"
+        } ${disabled ? "bg-(--color-muted)" : "bg-white"}`}
       />
     </button>
   );

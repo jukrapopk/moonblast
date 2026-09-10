@@ -16,6 +16,33 @@ pub struct Settings {
     pub machines: Vec<MoonlightHost>,
     #[serde(default)]
     pub app_shortcuts: Vec<AppShortcut>,
+    pub customization: Customization,
+}
+
+/// TopBar system-status visibility. All default on; `show_battery` is
+/// additionally gated in the UI on battery hardware being present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Customization {
+    #[serde(default = "default_true")]
+    pub show_time: bool,
+    #[serde(default = "default_true")]
+    pub show_wifi: bool,
+    #[serde(default = "default_true")]
+    pub show_battery: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Customization {
+    fn default() -> Self {
+        Self {
+            show_time: true,
+            show_wifi: true,
+            show_battery: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,6 +202,7 @@ impl Default for Settings {
             },
             machines: Vec::new(),
             app_shortcuts: Vec::new(),
+            customization: Customization::default(),
         }
     }
 }

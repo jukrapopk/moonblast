@@ -60,9 +60,6 @@ function batteryIcon(percent: number, charging: boolean) {
   return <BatteryFull size={size} weight={weight} />;
 }
 
-const chipBase =
-  "flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-(--color-muted) tabular-nums";
-
 function wifiChipIcon(wifi: WifiConnection) {
   const weight = "bold" as const;
   if (!wifi.radioOn) return <WifiX size={24} weight={weight} />;
@@ -74,22 +71,22 @@ function wifiChipIcon(wifi: WifiConnection) {
   return <WifiSlash size={24} weight={weight} />;
 }
 
-/** Clock chip + battery / WiFi icon buttons shown in the TopBar's right cluster. */
+/** Battery / WiFi icon buttons shown in the TopBar's right cluster. */
 function Status({
   onWifiClick,
   wifi,
+  showWifi,
+  showBattery,
 }: {
   onWifiClick: () => void;
   wifi: WifiConnection | null | undefined;
+  showWifi: boolean;
+  showBattery: boolean;
 }) {
-  const time = useTime();
   const battery = useBattery();
   return (
     <div className="flex items-center">
-      <span className={chipBase} title={time.toLocaleString()}>
-        {formatClock(time)}
-      </span>
-      {battery && (
+      {showBattery && battery && (
         <TopBarButton
           label={battery.charging ? `Charging · ${battery.percent}%` : `On battery · ${battery.percent}%`}
           icon={batteryIcon(battery.percent, battery.charging)}
@@ -97,7 +94,7 @@ function Status({
           danger={!battery.charging && battery.percent >= 0 && battery.percent <= 10}
         />
       )}
-      {wifi && (
+      {showWifi && wifi && (
         <TopBarButton
           label={wifi.radioOn ? "WiFi" : "WiFi off"}
           icon={wifiChipIcon(wifi)}
@@ -117,6 +114,9 @@ export function TopBar({
   onToggleImmersive,
   showMoonlight,
   showApps,
+  showTime,
+  showWifi,
+  showBattery,
 }: {
   view: View;
   onNavigate: (v: View) => void;
@@ -126,6 +126,9 @@ export function TopBar({
   onToggleImmersive: () => void;
   showMoonlight: boolean;
   showApps: boolean;
+  showTime: boolean;
+  showWifi: boolean;
+  showBattery: boolean;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
   const visibleLeft = leftItems.filter((i) => {
@@ -143,9 +146,10 @@ export function TopBar({
   useEffect(() => {
     refreshWifi();
   }, [wifiOpen, refreshWifi]);
+  const time = useTime();
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
+    <header className="relative flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       <nav className="flex items-center gap-1">
         {visibleLeft.map((item) => (
           <TopBarButton
@@ -160,8 +164,19 @@ export function TopBar({
 
       <div className="ml-auto" />
 
+      {showTime && (
+        <div className="absolute left-1/2 -translate-x-1/2">
+          <span
+            className="flex h-9 items-center rounded-full px-2 text-lg font-medium text-(--color-muted) tabular-nums"
+            title={time.toLocaleString()}
+          >
+            {formatClock(time)}
+          </span>
+        </div>
+      )}
+
       <div className="relative flex items-center gap-1">
-        <Status onWifiClick={() => setWifiOpen(true)} wifi={wifi} />
+        <Status onWifiClick={() => setWifiOpen(true)} wifi={wifi} showWifi={showWifi} showBattery={showBattery} />
         {rightItems.map((item) => (
           <TopBarButton
             key={item.id}

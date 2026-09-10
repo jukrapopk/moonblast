@@ -51,6 +51,7 @@ export interface Settings {
     capture_system_keys: string;
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean; auto_immersive: boolean };
+  customization: { show_time: boolean; show_wifi: boolean; show_battery: boolean };
   machines: { name: string; address: string }[];
   app_shortcuts: { name: string; path: string; source: string; kind: string; display_name: string | null; custom_icon: string | null; use_desktop_icon: boolean; steamgrid_icon: string | null }[];
 }
@@ -96,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
     capture_system_keys: "never",
   },
   fullscreen: { suppress_explorer: false, auto_fullscreen: false, auto_immersive: false },
+  customization: { show_time: true, show_wifi: true, show_battery: true },
   machines: [],
   app_shortcuts: [],
 };

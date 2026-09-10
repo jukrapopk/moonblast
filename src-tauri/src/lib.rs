@@ -1884,24 +1884,38 @@ fn wifi_forget(ssid: String) -> Result<(), String> {
     wifi::forget(&ssid)
 }
 
-/// Open the Windows Wi-Fi settings app. The user manages radio on/off
-/// there — radio toggling from Moonblast needs elevation to write
-/// `WlanSetInterface` and most `netsh interface set` calls, so we
-/// just hand the user off to the OS.
-#[tauri::command]
-fn open_wifi_settings() -> Result<(), String> {
+/// Open a Windows Settings page via its `ms-settings:` URI.
+fn open_settings_uri(uri: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     let status = Command::new("cmd")
-        .args(["/c", "start", "", "ms-settings:network-wifi"])
+        .args(["/c", "start", "", uri])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .status()
         .map_err(|e| e.to_string())?;
     if status.success() {
         Ok(())
     } else {
-        Err(format!("could not open Wi-Fi settings (exit {:?})", status.code()))
+        Err(format!(
+            "could not open Windows settings (exit {:?})",
+            status.code()
+        ))
     }
+}
+
+/// Open the Windows Wi-Fi settings app. The user manages radio on/off
+/// there — radio toggling from Moonblast needs elevation to write
+/// `WlanSetInterface` and most `netsh interface set` calls, so we
+/// just hand the user off to the OS.
+#[tauri::command]
+fn open_wifi_settings() -> Result<(), String> {
+    open_settings_uri("ms-settings:network-wifi")
+}
+
+/// Open the Windows Settings app (root page).
+#[tauri::command]
+fn open_windows_settings() -> Result<(), String> {
+    open_settings_uri("ms-settings:")
 }
 
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
@@ -2031,6 +2045,7 @@ pub fn run() {
             wifi_disconnect,
             wifi_forget,
             open_wifi_settings,
+            open_windows_settings,
             tailscale_status,
             tailscale_set,
             validate_moonlight_dir,

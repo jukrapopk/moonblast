@@ -121,6 +121,15 @@ export default function App() {
     update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: v } }));
     void invoke("set_replace_desktop", { enabled: v }).catch(() => {});
   }
+  function setShowTime(v: boolean) {
+    update((s) => ({ ...s, customization: { ...s.customization, show_time: v } }));
+  }
+  function setShowWifi(v: boolean) {
+    update((s) => ({ ...s, customization: { ...s.customization, show_wifi: v } }));
+  }
+  function setShowBattery(v: boolean) {
+    update((s) => ({ ...s, customization: { ...s.customization, show_battery: v } }));
+  }
 
   // Sync the initial fullscreen state.
   useEffect(() => {
@@ -206,6 +215,9 @@ export default function App() {
         onToggleImmersive={immersive ? exitImmersive : enterImmersive}
         showMoonlight={moonlightEnabled && moonlightDir !== null}
         showApps={appsEnabled}
+        showTime={settings.customization.show_time}
+        showWifi={settings.customization.show_wifi}
+        showBattery={settings.customization.show_battery}
       />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
@@ -234,6 +246,12 @@ export default function App() {
                 onToggleStartWithWindows={setStartWithWindows}
                 autoImmersive={settings.fullscreen.auto_immersive}
                 onToggleAutoImmersive={setAutoImmersive}
+                showTime={settings.customization.show_time}
+                onToggleShowTime={setShowTime}
+                showWifi={settings.customization.show_wifi}
+                onToggleShowWifi={setShowWifi}
+                showBattery={settings.customization.show_battery}
+                onToggleShowBattery={setShowBattery}
               />
             </motion.div>
           )}
