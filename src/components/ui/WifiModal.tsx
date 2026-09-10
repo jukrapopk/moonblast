@@ -470,9 +470,9 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
 
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {loading && networks.length === 0 ? (
-              <p className="py-6 text-center text-sm text-(--color-muted)">Scanning…</p>
+              <p className="py-4 text-center text-sm text-(--color-muted)">Scanning…</p>
             ) : networks.length === 0 ? (
-              <p className="py-6 text-center text-sm text-(--color-muted)">
+              <p className="py-4 text-center text-sm text-(--color-muted)">
                 {radioOff ? "Wi-Fi is off — turn it on in WiFi Settings." : "No networks found"}
               </p>
             ) : (
@@ -498,7 +498,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-2 border-t border-(--color-border) pt-3">
+          <div className="mt-5 flex items-center justify-between gap-2 border-t border-(--color-border) pt-4">
             <Button
               variant="ghost"
               size="md"

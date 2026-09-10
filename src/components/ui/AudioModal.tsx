@@ -237,7 +237,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       )}
 
       <SectionLabel>Output</SectionLabel>
-      <div className="mb-4 max-h-44 space-y-1 overflow-y-auto">
+      <div className="mb-5 max-h-44 space-y-1 overflow-y-auto">
         {loading && devices.length === 0 ? (
           <p className="py-4 text-center text-sm text-(--color-muted)">Loading…</p>
         ) : devices.length === 0 ? (
@@ -277,7 +277,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       </div>
 
       <SectionLabel>Volume</SectionLabel>
-      <div className="mb-4 flex items-center gap-3 rounded-xl px-1 py-1">
+      <div className="mb-5 flex items-center gap-3 rounded-xl px-1 py-1">
         <button
           onClick={() => void handleMasterMute()}
           title={master.muted || master.volume === 0 ? "Unmute" : "Mute"}
@@ -293,7 +293,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
             label="Main volume"
           />
         </div>
-        <span className="w-10 shrink-0 text-right text-sm text-(--color-muted) tabular-nums">
+        <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
           {master.muted || master.volume === 0 ? "Muted" : `${master.volume}%`}
         </span>
       </div>
@@ -340,7 +340,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-end gap-2 border-t border-(--color-border) pt-3">
+      <div className="mt-5 flex items-center justify-end gap-2 border-t border-(--color-border) pt-4">
         <Button variant="ghost" size="md" onClick={() => void openSoundSettings()}>
           Sound Settings
         </Button>
