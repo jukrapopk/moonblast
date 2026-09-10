@@ -657,19 +657,30 @@ export function AppsView() {
   // One-time migration: localize legacy steamgrid URLs and out-of-cache custom
   // files into the `.icons` cache so they're stable and offline-safe.
   useEffect(() => {
+    // Migrate legacy shortcut icon refs (HTTP SteamGridDB URLs and
+    // out-of-tree custom paths) into the local .icons/ cache. The
+    // `alive` flag prevents in-flight invokes from writing settings
+    // after the view unmounts (which would no-op via React but burn
+    // an IPC round-trip per migration).
+    let alive = true;
     for (const a of shortcuts) {
       if (a.steamgrid_icon && a.steamgrid_icon.startsWith("http")) {
-        void invoke<string | null>("cache_steamgrid_icon", { url: a.steamgrid_icon }).then(
-          (p) => {
-            if (p) setSteamgridIcon(a.path, p);
-          },
-        );
+        const path = a.path;
+        const url = a.steamgrid_icon;
+        void invoke<string | null>("cache_steamgrid_icon", { url }).then((p) => {
+          if (alive && p) setSteamgridIcon(path, p);
+        });
       } else if (a.custom_icon && !/\.icons[\\/]/.test(a.custom_icon)) {
-        void invoke<string | null>("import_app_icon", { src: a.custom_icon }).then((p) => {
-          if (p && p !== a.custom_icon) setCustomIcon(a.path, p);
+        const path = a.path;
+        const src = a.custom_icon;
+        void invoke<string | null>("import_app_icon", { src }).then((p) => {
+          if (alive && p && p !== src) setCustomIcon(path, p);
         });
       }
     }
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shortcuts]);
 
