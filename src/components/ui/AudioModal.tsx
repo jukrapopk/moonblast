@@ -53,6 +53,16 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
    */
   const lastMaster = useRef(50);
   const lastSession = useRef<Record<string, number>>({});
+  /**
+   * Timestamp of the last local change. The `audio-changed` listener skips
+   * refreshes inside this self-echo window: our optimistic state is ahead
+   * of the backend read, so a re-read would snap the dragged slider back
+   * to a stale value and fight the drag.
+   */
+  const localChangeAt = useRef(0);
+  function markLocal() {
+    localChangeAt.current = Date.now();
+  }
 
   async function refresh() {
     setLoading(true);
@@ -83,8 +93,13 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
     void refresh();
     // Push channel — external volume/session/device changes re-read
     // automatically while the modal is open. No polling, no Refresh.
+    // Skips the self-echo window after local changes so refreshes don't
+    // fight an in-progress slider drag with stale backend reads.
     let unlisten: (() => void) | undefined;
-    void listen("audio-changed", () => void refresh()).then((f) => {
+    void listen("audio-changed", () => {
+      if (Date.now() - localChangeAt.current < 500) return;
+      void refresh();
+    }).then((f) => {
       unlisten = f;
     });
     return () => unlisten?.();
@@ -94,6 +109,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
   async function handleSelectDevice(id: string) {
     setSwitching(id);
     setError(null);
+    markLocal();
     try {
       await setDefaultDevice(id);
       await refresh();
@@ -108,6 +124,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
   function handleMasterVolume(v: number) {
     const wasMuted = master.muted;
     if (v > 0) lastMaster.current = v;
+    markLocal();
     // 0 and mute are one state: dragging the slider always leaves mute behind.
     setMaster({ volume: v, muted: false });
     // Fire-and-forget: COM set is sub-millisecond; awaiting every tick
@@ -120,6 +137,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
 
   async function handleMasterMute() {
     const prev = master;
+    markLocal();
     if (prev.muted || prev.volume === 0) {
       const restore = prev.volume > 0 ? prev.volume : lastMaster.current;
       setMaster({ volume: restore, muted: false });
@@ -146,6 +164,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
   function handleSessionVolume(id: string, v: number) {
     const wasMuted = sessions.find((s) => s.id === id)?.muted ?? false;
     if (v > 0) lastSession.current[id] = v;
+    markLocal();
     setSessions((ss) =>
       ss.map((s) => (s.id === id ? { ...s, volume: v, muted: false } : s)),
     );
@@ -156,6 +175,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
   async function handleSessionMute(id: string) {
     const cur = sessions.find((s) => s.id === id);
     if (!cur) return;
+    markLocal();
     if (cur.muted || cur.volume === 0) {
       const restore = cur.volume > 0 ? cur.volume : (lastSession.current[id] ?? 50);
       setSessions((ss) =>
@@ -199,6 +219,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
 
   async function handleResetAll() {
     setError(null);
+    markLocal();
     try {
       await resetSessionVolumes();
       await refreshSessions();
