@@ -21,29 +21,34 @@ interface CtxMenuProps {
 
 export function ContextMenu({ state, onClose }: CtxMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Hold onClose in a ref so the host's inline `() => storeSet(null)` doesn't
+  // re-bind all four listeners on every render of ContextMenuHost while a
+  // menu is open. Listeners are bound once per `state` flip.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!state) return;
     function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      if (ref.current && !ref.current.contains(e.target as Node)) onCloseRef.current();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
     function onScroll() {
-      onClose();
+      onCloseRef.current();
     }
     document.addEventListener("mousedown", onDoc, true);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("blur", onClose);
+    window.addEventListener("blur", onCloseRef.current);
     window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDoc, true);
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", onClose);
+      window.removeEventListener("blur", onCloseRef.current);
       window.removeEventListener("scroll", onScroll, true);
     };
-  }, [state, onClose]);
+  }, [state]);
 
   if (!state) return null;
 

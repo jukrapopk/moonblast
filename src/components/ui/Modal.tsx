@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "@phosphor-icons/react";
 
@@ -13,15 +13,20 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, subtitle, children, width = "max-w-md" }: ModalProps) {
+  // Hold onClose in a ref so callers passing an inline `() => setX(false)`
+  // don't churn the Escape listener on every parent render. The listener
+  // is bound once per `open` flip and reads the latest callback.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   // Escape closes the modal (also reached via gamepad B).
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <AnimatePresence>
