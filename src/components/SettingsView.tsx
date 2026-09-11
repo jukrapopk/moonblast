@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
+import { Modal } from "./ui/Modal";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
+import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
 
 type TailscaleStatus =
@@ -142,6 +144,175 @@ function MoonlightRow({
   );
 }
 
+function ResolutionPicker({
+  modes,
+  current,
+  onApply,
+  onPendingChange,
+}: {
+  modes: { width: number; height: number; refreshRates: number[] }[] | null | undefined;
+  current: { width: number; height: number; refreshRate: number } | null | undefined;
+  onApply: (width: number, height: number, refreshRate: number) => Promise<void>;
+  /** Notified whenever a pending change becomes live or resolves — the
+   *  parent uses this to revert on Settings unmount. */
+  onPendingChange?: (hasPending: boolean) => void;
+}) {
+  // Local selection state for the two dropdowns. Defaults to the
+  // currently-active mode when it loads; falls back to the first entry
+  // when the current mode isn't in the supported list (shouldn't happen
+  // in practice — the driver only returns modes it can do).
+  const [width, setWidth] = useState<number | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  const [refresh, setRefresh] = useState<number | null>(null);
+  // Confirmation modal state. `pending` holds the values we just
+  // applied; `countdown` ticks 10 → 0 and auto-reverts at 0.
+  const [pending, setPending] = useState<
+    { width: number; height: number; refresh: number } | null
+  >(null);
+  const [countdown, setCountdown] = useState(10);
+  useEffect(() => {
+    if (current) {
+      setWidth(current.width);
+      setHeight(current.height);
+      setRefresh(current.refreshRate);
+    }
+  }, [current?.width, current?.height, current?.refreshRate]);
+  // Countdown timer — only runs while the modal is open and the user
+  // hasn't clicked Keep or Revert.
+  useEffect(() => {
+    if (!pending) return;
+    onPendingChange?.(true);
+    setCountdown(10);
+    const id = setInterval(() => {
+      setCountdown((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [pending, onPendingChange]);
+  // Auto-revert when countdown hits 0.
+  useEffect(() => {
+    if (pending && countdown === 0) {
+      invoke("revert_display_mode").catch(() => {});
+      setPending(null);
+    }
+  }, [countdown, pending]);
+  // Notify parent when pending resolves (Keep / Revert / auto-revert).
+  useEffect(() => {
+    if (pending === null) onPendingChange?.(false);
+  }, [pending, onPendingChange]);
+  const supportedList: { width: number; height: number; refreshRates: number[] }[] = Array.isArray(
+    modes,
+  )
+    ? modes
+    : [];
+  // The currently-picked resolution's available refresh rates.
+  const refreshOptions =
+    width !== null && height !== null
+      ? supportedList.find((m) => m.width === width && m.height === height)?.refreshRates ?? []
+      : [];
+  const canApply =
+    width !== null && height !== null && refresh !== null && (modes === undefined || modes === null || (modes.length > 0));
+  const isCurrent =
+    current !== null &&
+    current !== undefined &&
+    width === current.width &&
+    height === current.height &&
+    refresh === current.refreshRate;
+  function apply() {
+    if (width === null || height === null || refresh === null) return;
+    onApply(width, height, refresh).then(() => {
+      setPending({ width, height, refresh });
+    });
+  }
+  async function keep() {
+    await invoke("keep_display_mode");
+    setPending(null);
+  }
+  async function revert() {
+    await invoke("revert_display_mode");
+    setPending(null);
+  }
+  return (
+    <>
+      <Row
+        label="Resolution"
+        description={
+          modes === undefined
+            ? "Checking…"
+            : modes === null
+              ? "Couldn't read display modes."
+              : current
+                ? `Currently ${current.width} × ${current.height} @ ${current.refreshRate} Hz.`
+                : ""
+        }
+      >
+        <div className="flex items-center gap-2">
+          <Select
+            options={supportedList.map((m) => ({
+              value: `${m.width}x${m.height}`,
+              label: `${m.width} × ${m.height}`,
+            }))}
+            value={width !== null && height !== null ? `${width}x${height}` : ""}
+            onChange={(v) => {
+              const m = supportedList.find((mm) => `${mm.width}x${mm.height}` === v);
+              if (m) {
+                setWidth(m.width);
+                setHeight(m.height);
+                // Pick the highest refresh rate by default when changing
+                // resolution — most users want the smoothest available.
+                const highest = m.refreshRates[m.refreshRates.length - 1];
+                setRefresh(highest ?? null);
+              }
+            }}
+          />
+          <Select
+            options={refreshOptions.map((r) => ({
+              value: String(r),
+              label: `${r} Hz`,
+            }))}
+            value={refresh !== null ? String(refresh) : ""}
+            onChange={(v) => setRefresh(parseInt(v, 10))}
+          />
+          <Button
+            size="md"
+            onClick={apply}
+            disabled={!canApply || isCurrent}
+            className="px-4 py-1.5"
+          >
+            Apply
+          </Button>
+        </div>
+      </Row>
+      <Modal
+        open={pending !== null}
+        onClose={() => {
+          // X button = Revert.
+          revert();
+        }}
+        title="Display changed"
+        subtitle={
+          pending
+            ? `Switching to ${pending.width} × ${pending.height} @ ${pending.refresh} Hz.`
+            : undefined
+        }
+      >
+        <p className="text-sm text-(--color-muted)">
+          {countdown > 0
+            ? `Auto-reverting in ${countdown}s…`
+            : "Reverting…"}
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" size="lg" onClick={revert} className="px-4 font-normal">
+            Revert
+          </Button>
+          <Button size="lg" onClick={keep} className="px-6">
+            Keep
+          </Button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 export function SettingsView({
   moonlightEnabled,
   onToggleMoonlight,
@@ -237,6 +408,45 @@ export function SettingsView({
     }
     await refreshHdr();
   }
+  // Display resolution + refresh picker. Enumerate once on mount, plus
+  // current selection. Picking a new mode opens a confirmation modal
+  // with a 10s auto-revert countdown; the user clicks Keep to commit,
+  // Revert to roll back, or walks away and the OS reverts automatically.
+  // If the user leaves the Settings page with a change pending, we
+  // revert on unmount so a forgotten modal can't leave the display stuck
+  // on a new mode.
+  const [displayModes, setDisplayModes] = useState<
+    { width: number; height: number; refreshRates: number[] }[] | null | undefined
+  >(undefined);
+  const [currentMode, setCurrentMode] = useState<
+    { width: number; height: number; refreshRate: number } | null | undefined
+  >(undefined);
+  const [hasPending, setHasPending] = useState(false);
+  async function refreshDisplay() {
+    try {
+      const [modes, cur] = await Promise.all([
+        invoke<{ width: number; height: number; refreshRates: number[] }[]>("display_modes"),
+        invoke<{ width: number; height: number; refreshRate: number }>("current_display"),
+      ]);
+      setDisplayModes(modes);
+      setCurrentMode(cur);
+    } catch {
+      setDisplayModes(null);
+      setCurrentMode(null);
+    }
+  }
+  useEffect(() => {
+    refreshDisplay();
+  }, []);
+  // Revert any pending change when leaving Settings — the modal-based
+  // confirmation already covers in-page flow.
+  useEffect(() => {
+    return () => {
+      if (hasPending) {
+        invoke("revert_display_mode").catch(() => {});
+      }
+    };
+  }, [hasPending]);
 
   async function checkKey() {
     if (!steamgridKey) return;
@@ -309,6 +519,18 @@ export function SettingsView({
             }
           />
         </Row>
+        <ResolutionPicker
+          modes={displayModes}
+          current={currentMode}
+          onPendingChange={setHasPending}
+          onApply={async (width, height, refreshRate) => {
+            try {
+              await invoke("apply_display_mode", { width, height, refreshRate });
+            } catch {
+              await refreshDisplay();
+            }
+          }}
+        />
       </Section>
 
       <Section title="Customization">

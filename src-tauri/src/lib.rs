@@ -12,6 +12,7 @@ use std::sync::Mutex;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+mod display;
 mod hdr;
 mod logging;
 
@@ -2673,6 +2674,44 @@ fn set_hdr(enabled: bool) -> Result<(), String> {
     hdr::set_hdr(enabled)
 }
 
+/// List every resolution + refresh-rate combination the primary display
+/// reports as monitor-compatible (matches Windows Settings). The frontend
+/// renders this as a two-step picker.
+#[tauri::command]
+fn display_modes() -> Vec<display::DisplayOption> {
+    display::display_modes()
+}
+
+/// Read the primary display's currently-active resolution + refresh rate.
+/// Drives the picker's initial selection.
+#[tauri::command]
+fn current_display() -> Result<display::CurrentDisplay, String> {
+    display::current_display()
+}
+
+/// Apply a new (width, height, refresh_hz) on the primary display via
+/// `ChangeDisplaySettingsExW` with no flags (dynamic — reverts on
+/// sign-out / reboot). Records the prior mode so `revert_display_mode`
+/// can roll back during the 10-second Keep/Revert window.
+#[tauri::command]
+fn apply_display_mode(width: u32, height: u32, refresh_rate: u32) -> Result<(), String> {
+    display::apply_display_mode(width, height, refresh_rate)
+}
+
+/// Revert to the mode that was active before the last `apply_display_mode`.
+/// No-op when no change is pending.
+#[tauri::command]
+fn revert_display_mode() -> Result<(), String> {
+    display::revert_display_mode()
+}
+
+/// Confirm the last applied mode — clears the pending revert so the
+/// 10-second auto-revert timer no longer fires.
+#[tauri::command]
+fn keep_display_mode() -> Result<(), String> {
+    display::keep_display_mode()
+}
+
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 async fn system_power(action: String) -> Result<(), String> {
@@ -2922,7 +2961,12 @@ pub fn run() {
             steamgrid_search,
             steamgrid_icons,
             hdr_status,
-            set_hdr
+            set_hdr,
+            display_modes,
+            current_display,
+            apply_display_mode,
+            revert_display_mode,
+            keep_display_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
