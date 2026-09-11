@@ -156,7 +156,7 @@ export function TopBar({
   displayOpen,
   setDisplayOpen,
 }: {
-  view: View;
+  view: View | null;
   onNavigate: (v: View) => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;

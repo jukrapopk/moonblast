@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
+import { CircleNotch } from "@phosphor-icons/react";
 import { TopBar, type View } from "./components/TopBar";
 import { TitleBar } from "./components/TitleBar";
 import { AppsView } from "./components/AppsView";
@@ -12,25 +13,57 @@ import { useGamepad } from "./hooks/useGamepad";
 import { openPowerMenu } from "./hooks/usePowerMenuTrigger";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 
+// Session-only view override — let users refresh (F5) on the Settings page
+// without losing their place, while still always booting the launcher into
+// the last *content* view (apps or moonlight). sessionStorage is per-tab and
+// cleared at process exit, so a fresh launch never inherits it.
+const SESSION_VIEW_KEY = "moonblast.session_view";
+
+function readSessionView(): View | null {
+  try {
+    const v = sessionStorage.getItem(SESSION_VIEW_KEY);
+    if (v === "apps" || v === "moonlight" || v === "settings") return v;
+  } catch {
+    /* sessionStorage may be unavailable */
+  }
+  return null;
+}
+
+function writeSessionView(v: View) {
+  try {
+    sessionStorage.setItem(SESSION_VIEW_KEY, v);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function App() {
   const { settings, ready, update } = useSettings();
 
-  // Active view is local state; `general.last_view` only records where to *boot*.
-  // Settings is excluded from that recording (so the app opens on apps/moonlight
-  // next launch) — but it must still be reachable, hence the separate state.
-  const [view, setViewState] = useState<View>("apps");
+  // `view` starts at `null` so the first paint doesn't flash the default
+  // (apps) before settings hydrate and we restore the persisted one. The
+  // loader below is shown instead.
+  const [view, setViewState] = useState<View | null>(null);
   const setView = (v: View) => {
     setViewState(v);
+    // Track the active view in sessionStorage so F5 / Ctrl+R on the
+    // Settings page keeps you there, but the persisted `last_view` is
+    // only updated for content views — that's what dictates the next
+    // launch's landing page.
+    writeSessionView(v);
     if (v !== "settings") {
       update((s) => ({ ...s, general: { ...s.general, last_view: v } }));
     }
   };
-  // Settings hydrate asynchronously, so restore the persisted view once, on load.
+  // Settings hydrate asynchronously. Restore the persisted view once, on
+  // load. Order of preference: session-only override (refresh on Settings
+  // page) > persisted last_view > default.
   const restoredView = useRef(false);
   useEffect(() => {
     if (!ready || restoredView.current) return;
     restoredView.current = true;
-    setViewState(settings.general.last_view as View);
+    const sessionView = readSessionView();
+    setViewState(sessionView ?? (settings.general.last_view as View));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
   const [fullscreen, setFullscreen] = useState(false);
@@ -83,6 +116,7 @@ export default function App() {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Tab") {
         e.preventDefault();
+        if (view === null) return;
         const order: View[] = ["apps", "moonlight", "settings"];
         let i = order.indexOf(view);
         if (e.shiftKey) i = (i - 1 + order.length) % order.length;
@@ -266,6 +300,22 @@ export default function App() {
       />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
+          {view === null && (
+            <motion.div
+              key="loading"
+              className="flex h-full items-center justify-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              <CircleNotch
+                size={28}
+                weight="bold"
+                className="animate-spin text-(--color-muted)"
+              />
+            </motion.div>
+          )}
           {view === "apps" && (
             <motion.div key="apps" className="p-8">
               <AppsView />
