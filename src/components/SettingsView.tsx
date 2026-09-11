@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Monitor, WifiHigh, BatteryFull, SpeakerHigh, Clock } from "@phosphor-icons/react";
+import { Monitor, WifiHigh, BatteryFull, SpeakerHigh, Clock, Sun } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
@@ -8,6 +8,7 @@ import { Input } from "./ui/Input";
 import { Modal } from "./ui/Modal";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
+import { Slider } from "./ui/Slider";
 import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
@@ -366,6 +367,23 @@ function ResolutionPicker({
   );
 }
 
+/** Brightness state returned by the `brightness_status` IPC. Mirrors
+ *  `brightness::BrightnessStatus`. */
+interface BrightnessStatus {
+  /** WMI exposes the class — there's a panel with brightness control. */
+  supported: boolean;
+  /** At least one panel reports an active brightness state. */
+  available: boolean;
+  /** Current brightness percent (0–100), or `null` when unknown. */
+  current: number | null;
+  /** Lowest level in the panel's discrete level set. */
+  min: number;
+  /** Highest level (almost always 100). */
+  max: number;
+  /** Number of discrete levels — used for slider `step`. */
+  levels_count: number;
+}
+
 /** Display settings modal — reuses the ResolutionPicker + HDR + Monitor
  *  logic that used to live directly on the Display section. Owns its
  *  own monitor/HDR/display-mode state so the rest of SettingsView
@@ -446,6 +464,27 @@ export function DisplaySettingsModal({
     { width: number; height: number; refreshRate: number } | null | undefined
   >(undefined);
   const [hasPending, setHasPending] = useState(false);
+  // Brightness: 3-state like the rest of the modal. `undefined` =
+  // loading, `null` = error / IPC failed, object = loaded.
+  const [brightness, setBrightness] = useState<BrightnessStatus | null | undefined>(undefined);
+  // Suppresses the next poll after a slider commit so the OS-reported
+  // value can race back in without the poll immediately overwriting the
+  // user's committed level (the OS is slow to commit sometimes).
+  const brightnessPendingCommit = useRef(false);
+  // Throttles slider writes — PowerShell cold-start is ~100 ms, so
+  // dragging fires many ticks and we don't want to queue them all.
+  // Latest-level ref + setTimeout coalesce to one write per 250 ms.
+  const brightnessWriteTimer = useRef<number | null>(null);
+  const brightnessWriteLatest = useRef<number | null>(null);
+
+  async function refreshBrightness() {
+    try {
+      const s = await invoke<BrightnessStatus>("brightness_status");
+      setBrightness(s);
+    } catch {
+      setBrightness(null);
+    }
+  }
 
   async function refreshDisplay() {
     const m = selectedMonitorRef.current;
@@ -484,8 +523,39 @@ export function DisplaySettingsModal({
     refreshMonitors();
     refreshHdr();
     refreshDisplay();
+    refreshBrightness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Poll brightness every 500 ms while the modal is open so keyboard
+  // brightness keys (and any other OS-driven change) reflect on the
+  // slider. Windows has no push event for brightness changes so
+  // polling is the only option — same cadence as the WiFi / battery
+  // chips. Three skip conditions:
+  //   1. `brightnessPendingCommit` — first poll after a throttled
+  //      write fires, so the OS can race back the new value without
+  //      being clobbered by an in-flight read returning the old one.
+  //   2. `brightnessWriteTimer` is set — user is mid-drag, optimistic
+  //      state is the source of truth; reading the OS would flicker
+  //      the thumb back to the pre-drag value.
+  //   3. `brightness` is unsupported / unavailable — no point polling.
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => {
+      if (brightnessWriteTimer.current !== null) return;
+      if (brightnessPendingCommit.current) {
+        brightnessPendingCommit.current = false;
+        return;
+      }
+      // Once we know brightness isn't supported, stop polling — the
+      // row is hidden and the IPC will keep returning the same
+      // `supported=false` answer.
+      if (brightness !== undefined && (brightness === null || !brightness.supported || !brightness.available)) return;
+      void refreshBrightness();
+    }, 500);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, brightness?.supported, brightness?.available]);
 
   useEffect(() => {
     if (!open) return;
@@ -513,6 +583,40 @@ export function DisplaySettingsModal({
       // ignore — refresh will reflect reality
     }
     await refreshHdr();
+  }
+
+  /** Slider commit handler. Updates local state immediately (so the
+   *  thumb tracks the cursor) and coalesces writes through a 250 ms
+   *  timer — each PowerShell roundtrip costs ~100 ms, so without
+   *  throttling, dragging the slider would queue many in-flight
+   *  writes and the OS would land on a stale value.
+   *
+   *  Local state is updated directly so the slider thumb follows the
+   *  pointer without waiting for the OS. The next poll (or the post-
+   *  write re-read) reconciles to the actual brightness value if the
+   *  panel rejected the level. */
+  function commitBrightness(level: number) {
+    // Optimistic local update — the slider thumb follows the user.
+    setBrightness((prev) =>
+      prev && prev.current !== null ? { ...prev, current: level } : prev,
+    );
+    // Coalesce: keep the latest level in a ref and reset the timer.
+    brightnessWriteLatest.current = level;
+    if (brightnessWriteTimer.current !== null) {
+      window.clearTimeout(brightnessWriteTimer.current);
+    }
+    brightnessWriteTimer.current = window.setTimeout(() => {
+      const v = brightnessWriteLatest.current;
+      if (v === null) return;
+      // Skip the next poll so the just-sent value can race back from
+      // the OS without being clobbered by an in-flight read returning
+      // the old value.
+      brightnessPendingCommit.current = true;
+      void invoke("set_brightness", { level: v }).catch(() => {
+        // ignore — refresh on next poll will resync from reality
+      });
+      brightnessWriteTimer.current = null;
+    }, 250);
   }
 
   return (
@@ -576,6 +680,43 @@ export function DisplaySettingsModal({
           />
         )}
       </Row>
+      {/* Brightness — only shown when the OS exposes brightness control
+       *  (i.e. a laptop panel). Hidden on desktops / all-external setups
+       *  where `supported = false`. The 500ms poll keeps keyboard
+       *  brightness keys in sync with the slider; writes during drag
+       *  are throttled to 250ms because each PowerShell roundtrip costs
+       *  ~100ms. */}
+      {brightness?.supported && brightness.available && (
+        <Row
+          label="Brightness"
+          description={
+            brightness.current !== null
+              ? `Currently ${brightness.current}%${brightness.levels_count > 0 ? ` · ${brightness.levels_count} levels` : ""}.`
+              : "Reading…"
+          }
+        >
+          <div className="flex items-center gap-3">
+            <Sun size={18} weight="bold" className="shrink-0 text-(--color-muted)" />
+            <div className="min-w-[160px] flex-1">
+              <Slider
+                value={brightness.current ?? brightness.min}
+                onChange={commitBrightness}
+                label="Brightness"
+                min={brightness.min}
+                max={brightness.max}
+                step={
+                  brightness.levels_count > 1
+                    ? Math.max(1, Math.round((brightness.max - brightness.min) / (brightness.levels_count - 1)))
+                    : 1
+                }
+              />
+            </div>
+            <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
+              {brightness.current ?? "—"}%
+            </span>
+          </div>
+        </Row>
+      )}
       <ResolutionPicker
         modes={displayModes}
         current={currentMode}
