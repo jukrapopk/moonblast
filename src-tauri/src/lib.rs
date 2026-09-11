@@ -1556,26 +1556,13 @@ fn moonlight_stream(
 }
 
 /// Tell the host to stop its currently-running app, then kill the local
-/// streaming window Moonblast launched. We delegate the host-side quit to
-/// Moonlight QT's own CLI: `moonlight quit <host>`, which internally calls
-/// `NvHTTP::quitApp()` — the same HTTPS /cancel path the official client
-/// uses. Driving that directly ourselves ran into two dead ends:
-///
-/// 1. rustls 0.23 panics when both `ring` and `aws-lc-rs` are pulled in
-///    transitively (ureq's default features). Pinning one fixes the panic.
-/// 2. Sunshine ships a self-signed cert that webpki-roots (the public CA
-///    bundle) doesn't trust. Properly handling it means reading the
-///    pinned cert from Sunshine's store per host — significant work.
-///
-/// Letting `moonlight quit` do it sidesteps both: it already handles the
-/// cert pinning, and the panic-on-disconnect bug it used to race with
-/// (where the CLI queried /serverinfo after currentGameId had already
-/// dropped to 0) is no longer relevant because we run it *concurrently*
-/// with the local kill and don't wait for it synchronously.
-///
-/// The CLI does pop up a brief Qt window while it runs. We suppress that
-/// with `CREATE_NO_WINDOW` so it's invisible. Worst case: if the CLI hangs
-/// past 8 s we kill+reap it ourselves so the IPC stays responsive.
+/// streaming window Moonblast launched. The host-side quit is delegated to
+/// Moonlight QT's own CLI (`moonlight quit <host>`, which internally calls
+/// `NvHTTP::quitApp()`); the CLI handles Sunshine's pinned cert for us. We
+/// run it on a dedicated thread with `CREATE_NO_WINDOW` (no Qt dialog
+/// flash) and an 8 s bounded wait, in parallel with a local
+/// `Child::kill` + `bounded_wait(5s)` on moonlight.exe — so the IPC
+/// returns immediately regardless of CLI or child teardown latency.
 #[tauri::command]
 fn moonlight_quit(
     host: String,
@@ -1653,8 +1640,7 @@ fn moonlight_quit(
     }
 
     // Kill the local streaming window immediately. The host-side quit
-    // races in parallel; Sunshine will reap via RTS-socket-close on the
-    // host within ~10 s if `moonlight quit` itself fails.
+    // runs in parallel on its own thread.
     if let Some(mut active) = active {
         let pid = active.child.id();
         moonblast_log!("moonlight_quit: killing child pid={pid}");
