@@ -109,12 +109,20 @@ pub fn read_brightness() -> BrightnessStatus {
 /// Set the monitor brightness in percent (0–100). `fade_sec` is the
 /// OS-driven fade duration in seconds; pass `0` for an instant set
 /// (matches what the slider wants — immediate response during drag).
+///
+/// Uses the legacy `Get-WmiObject | Invoke-WmiMethod` pair rather than
+/// the modern `Invoke-CimMethod -Arguments @{...}`. `WmiMonitorBrightnessMethods`
+/// is a WMI v1 class (no `OutputType` declared, plain `uint32 WmiSetBrightness(
+/// uint32 Timeout, uint8 Brightness)`) and `Invoke-CimMethod` with a named
+/// hashtable silently fails to bind the arguments for legacy WMI methods on
+/// some drivers — the script exits 0 but the brightness never changes.
+/// The legacy cmdlets always work.
 pub fn set_brightness(level: u8, fade_sec: u32) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     let level = level.min(100);
     let script = format!(
-        r#"Invoke-CimMethod -Namespace root\wmi -ClassName WmiMonitorBrightnessMethods -MethodName WmiSetBrightness -Arguments @{{ Timeout = {fade_sec}; Brightness = {level} }} | Out-Null"#
+        r#"(Get-WmiObject -Namespace root\wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness({fade_sec}, {level}) | Out-Null"#
     );
     let out = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
