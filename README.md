@@ -32,7 +32,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - **Saved machines** — user-added hosts (typically Tailscale `*.ts.net` hostnames or remote IPs); probed per-scan (TCP 47984/47989 + `moonlight list`) and shown as Online / Offline.
   - **Per-host actions**: Pair / Stream Desktop / Apps gated on `paired AND reachable`. Right-click menu separates **Forget pairing** (drops the cert) from **Remove saved address** (drops the override).
   - **Resume / Disconnect** during a stream. Duplicate stream spawns for the same host+app are blocked.
-  - Drives the **Moonlight QT client** via its CLI (`list`, `pair`, `stream`); disconnects use `GET /cancel?uniqueid=…` directly, matching Moonlight Qt's `NvHTTP::quitApp`.
+  - Drives the **Moonlight QT client** via its CLI (`list`, `pair`, `stream`, `quit`); disconnects run `moonlight quit <host>` on a dedicated thread with `CREATE_NO_WINDOW` and an 8s bounded wait, in parallel with a bounded reap of the local moonlight.exe window.
 - **Gamepad support** — controller buttons/sticks are bridged to keyboard events in `useGamepad`, so the existing keyboard handlers drive everything: A = Enter, B = Esc, LB/RB = Tab/Shift+Tab (view switching), D-pad / left stick = arrows.
 - **Persistent settings** — all settings survive restarts.
 - **Integrations** — auto-detect Tailscale (CLI, polled while Settings is mounted), select + validate Moonlight install folder, SteamGridDB API key.
@@ -44,7 +44,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - system power: `system_power(sleep|reboot|shutdown)`, `enter_immersive`, `exit_immersive`
   - startup: `set_start_with_windows` (HKCU Run key), `set_replace_desktop` (per-user `Winlogon\Shell` takeover), `booted_as_shell`
   - Tailscale: `tailscale_status`, `tailscale_set`
-  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps` (10s subprocess timeout), `moonlight_pair` (async + 10-min deadline, emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`; kills prior orphan + drains on `close_app`/`Destroyed`), `moonlight_quit` (host + app: `GET /cancel?uniqueid=…&uuid=…` over HTTPS to stop the host's app immediately + bounded reap of the local moonlight.exe; matches Moonlight Qt's `quitApp`)
+  - Moonlight CLI: `validate_moonlight_dir`, `moonlight_list_apps` (10s subprocess timeout), `moonlight_pair` (async + 10-min deadline, emits `pair-complete`), `moonlight_stream` (de-dupes by host+app via `StreamState`; kills prior orphan + drains on `close_app`/`Destroyed`), `moonlight_quit` (host + app: spawns `moonlight quit <host>` on a dedicated thread with 8s bounded wait + bounded reap of the local moonlight.exe; the CLI handles Sunshine's pinned cert internally so we don't have to drive the HTTPS `/cancel` endpoint ourselves)
   - host discovery / pairing: `discover_hosts` (mDNS + per-host `list` probe), `moonlight_paired_hosts` (reads QSettings), `moonlight_probe` (TCP + list check, used for online/offline)
   - apps: `discover_apps` (Start Menu + Store + Steam), `launch_app`
   - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`

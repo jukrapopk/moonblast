@@ -7,11 +7,12 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
+mod logging;
 
 /// Run a `Command` to completion with a hard deadline. Returns the captured
 /// stdout on success. On timeout the child is killed and reaped; stdout is
@@ -54,15 +55,12 @@ where
 }
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
-/// window for the same host+app while one is already running. `ActiveStream`
-/// also carries the host's UUID + cert so we can send the host an explicit
-/// `/cancel` on disconnect (Moonlight's `quit` CLI races with our local
-/// kill — by the time its polling thread queries /serverinfo, the running
-/// app is gone and `quitApp()` short-circuits; sending it ourselves avoids
-/// the race entirely).
+/// window for the same host+app while one is already running. The host-side
+/// quit on disconnect is delegated to Moonlight QT's own CLI
+/// (`moonlight quit <host>`), which handles cert pinning internally — see
+/// the doc comment on `moonlight_quit`.
 pub struct ActiveStream {
     child: Child,
-    uuid: String,
 }
 
 pub struct StreamState(Mutex<HashMap<String, ActiveStream>>);
@@ -1478,7 +1476,11 @@ fn moonlight_stream(
     state: State<'_, settings::SettingsState>,
     streams: State<'_, StreamState>,
 ) -> Result<bool, String> {
-    let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
+    moonblast_log!("moonlight_stream: start (host={host}, app={app})");
+    let exe = moonlight_exe(&state).ok_or_else(|| {
+        moonblast_log!("moonlight_stream: error: Moonlight executable not found");
+        "Moonlight executable not found".to_string()
+    })?;
     let prefs = state.0.lock().unwrap().moonlight.clone();
     let key = format!("{host}\u{1f}{app}");
     let mut map = streams.0.lock().unwrap();
@@ -1493,6 +1495,7 @@ fn moonlight_stream(
     let already_running = match map.get_mut(&key) {
         Some(active) => match active.child.try_wait() {
             Ok(None) => {
+                let pid = active.child.id();
                 // Prior child is alive but may not own a visible window
                 // (connection lost, user closed it, stuck cleanup thread).
                 // If it does have a window, treat as already-running and
@@ -1500,20 +1503,32 @@ fn moonlight_stream(
                 // spawn a fresh one — otherwise `map.insert` later would
                 // silently overwrite and drop the prior `Child` without
                 // killing it, leaving a moonlight.exe running invisibly.
-                if pid_has_visible_window(active.child.id()) {
+                if pid_has_visible_window(pid) {
+                    moonblast_log!(
+                        "moonlight_stream: refusing duplicate (pid={pid} has visible window)"
+                    );
                     true
                 } else {
+                    moonblast_log!(
+                        "moonlight_stream: prior child pid={pid} alive but windowless, killing"
+                    );
                     let _ = active.child.kill();
                     let _ = active.child.wait();
                     map.remove(&key);
                     false
                 }
             }
-            Ok(Some(_)) => {
+            Ok(Some(status)) => {
+                moonblast_log!(
+                    "moonlight_stream: prior entry was already exited ({status:?}), respawning"
+                );
                 map.remove(&key);
                 false
             }
-            Err(_) => false,
+            Err(e) => {
+                moonblast_log!("moonlight_stream: try_wait error: {e}, treating as not-running");
+                false
+            }
         },
         None => false,
     };
@@ -1530,65 +1545,131 @@ fn moonlight_stream(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| e.to_string())?;
-    // Stash the host's UUID (if paired) so disconnect can call /cancel
-    // directly, bypassing the moonlight quit CLI's mDNS+polling race.
-    let uuid = paired_host_uuid(&host).unwrap_or_default();
-    map.insert(key, ActiveStream { child, uuid });
+        .map_err(|e| {
+            moonblast_log!("moonlight_stream: spawn error: {e}");
+            e.to_string()
+        })?;
+    let pid = child.id();
+    map.insert(key, ActiveStream { child });
+    moonblast_log!("moonlight_stream: spawned child pid={pid}");
     Ok(true)
 }
 
-/// Tell the host to stop its currently-running app via
-/// `GET /cancel?uniqueid=<UUID>&uuid=<req-uuid>` (mirroring Moonlight Qt's
-/// `NvHTTP::quitApp()`), then kill the local streaming window Moonblast
-/// launched. The host stops the app immediately on receiving `/cancel` —
-/// without this, Sunshine only notices via the RTS socket closing and waits
-/// for its stream_timeout (default ~10s) before reaping the app.
+/// Tell the host to stop its currently-running app, then kill the local
+/// streaming window Moonblast launched. We delegate the host-side quit to
+/// Moonlight QT's own CLI: `moonlight quit <host>`, which internally calls
+/// `NvHTTP::quitApp()` — the same HTTPS /cancel path the official client
+/// uses. Driving that directly ourselves ran into two dead ends:
 ///
-/// We GET over HTTPS without cert pinning. The pinned server cert (the one
-/// we accepted at pairing time) only matters for app listing, RTS handshake,
-/// etc. — `/cancel` is an idempotent host-side abort signal that doesn't
-/// carry sensitive data; pinning adds complexity (loading the DER → rustls
-/// root store) without a real security gain here. If a MITM is possible on
-/// the user's LAN they already have worse problems than a forged QUIT.
+/// 1. rustls 0.23 panics when both `ring` and `aws-lc-rs` are pulled in
+///    transitively (ureq's default features). Pinning one fixes the panic.
+/// 2. Sunshine ships a self-signed cert that webpki-roots (the public CA
+///    bundle) doesn't trust. Properly handling it means reading the
+///    pinned cert from Sunshine's store per host — significant work.
 ///
-/// `moonlight quit <host>` is no longer used here: its polling thread races
-/// with our local kill (by the time it queries /serverinfo, currentGameId is
-/// already 0 and `quitApp()` short-circuits), and it spawns a visible Qt
-/// dialog that we don't want anyway.
+/// Letting `moonlight quit` do it sidesteps both: it already handles the
+/// cert pinning, and the panic-on-disconnect bug it used to race with
+/// (where the CLI queried /serverinfo after currentGameId had already
+/// dropped to 0) is no longer relevant because we run it *concurrently*
+/// with the local kill and don't wait for it synchronously.
+///
+/// The CLI does pop up a brief Qt window while it runs. We suppress that
+/// with `CREATE_NO_WINDOW` so it's invisible. Worst case: if the CLI hangs
+/// past 8 s we kill+reap it ourselves so the IPC stays responsive.
 #[tauri::command]
 fn moonlight_quit(
     host: String,
     app: String,
     streams: State<'_, StreamState>,
+    state: State<'_, settings::SettingsState>,
 ) -> Result<(), String> {
     let key = format!("{host}\u{1f}{app}");
+    moonblast_log!("moonlight_quit: start (host={host}, app={app}, key={key})");
     // Pop the entry from the map FIRST so a second `moonlight_quit` /
     // `moonlight_stream` call against the same key can proceed immediately
-    // instead of blocking on the mutex while we wait for moonlight.exe to
-    // exit (which can take several seconds during Qt + WebRTC teardown,
-    // and was the cause of the "click Disconnect and Moonblast freezes"
-    // symptom).
+    // instead of blocking on the mutex while moonlight.exe exits (Qt +
+    // WebRTC teardown takes 1-5 s on its own).
     let active = streams.0.lock().unwrap().remove(&key);
+    moonblast_log!(
+        "moonlight_quit: stream entry {}",
+        if active.is_some() { "found" } else { "absent" }
+    );
 
-    // Send /cancel BEFORE killing the local process so the host sees the
-    // abort signal while the app is still running on its end. The local
-    // kill runs after, with bounded waits so we never hang the command.
-    if let Some(active) = &active {
-        if !active.uuid.is_empty() {
-            send_host_cancel(&host, &active.uuid);
-        }
+    // Fire the host-side quit on a dedicated thread so it doesn't block the
+    // IPC. The thread runs `moonlight quit <host>` with CREATE_NO_WINDOW
+    // (so no Qt dialog flashes) and bounds its own wait to 8 s.
+    if let Some(exe) = moonlight_exe(&state) {
+        let host_for_thread = host.clone();
+        std::thread::spawn(move || {
+            moonblast_log!("moonlight quit: spawning CLI");
+            let mut child = match Command::new(&exe)
+                .args(["quit", &host_for_thread])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(0x0800_0000)
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    moonblast_log!("moonlight quit: spawn error: {e}");
+                    return;
+                }
+            };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        moonblast_log!("moonlight quit: CLI exited ({status:?})");
+                        return;
+                    }
+                    Ok(None) => {
+                        if std::time::Instant::now() >= deadline {
+                            moonblast_log!("moonlight quit: CLI timed out, killing");
+                            let _ = child.kill();
+                            let final_until = std::time::Instant::now()
+                                + std::time::Duration::from_secs(2);
+                            while std::time::Instant::now() < final_until {
+                                if let Ok(Some(_)) = child.try_wait() {
+                                    return;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                            }
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(e) => {
+                        moonblast_log!("moonlight quit: wait error: {e}");
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+            }
+        });
+    } else {
+        moonblast_log!("moonlight_quit: Moonlight executable not found, skipping host quit");
     }
 
+    // Kill the local streaming window immediately. The host-side quit
+    // races in parallel; Sunshine will reap via RTS-socket-close on the
+    // host within ~10 s if `moonlight quit` itself fails.
     if let Some(mut active) = active {
-        // TerminateProcess (std::process::Child::kill() on Windows) is
-        // immediate; the wait that follows is for the kernel to finish
-        // DLL-unload notifications + handle cleanup. That can take 1-5s
-        // for a Qt + WebRTC teardown, which is why we can't use plain
-        // `child.wait()` — it would block the command indefinitely.
+        let pid = active.child.id();
+        moonblast_log!("moonlight_quit: killing child pid={pid}");
         let _ = active.child.kill();
         bounded_wait(&mut active.child, std::time::Duration::from_secs(5));
+        match active.child.try_wait() {
+            Ok(Some(status)) => moonblast_log!(
+                "moonlight_quit: child reaped (status={:?})",
+                status
+            ),
+            Ok(None) => moonblast_log!("moonlight_quit: child still unreaped after bounded_wait"),
+            Err(e) => moonblast_log!("moonlight_quit: try_wait error: {e}"),
+        }
     }
+    moonblast_log!("moonlight_quit: done");
     Ok(())
 }
 
@@ -1626,44 +1707,6 @@ fn bounded_wait(child: &mut std::process::Child, deadline: std::time::Duration) 
             Err(_) => return,
         }
     }
-}
-
-/// `GET /cancel?uniqueid=<UUID>&uuid=<req-uuid>` to the host over HTTPS.
-/// Plain HTTP on 47989 is also accepted by Sunshine but HTTPS-on-47984 is
-/// the default and what Moonlight itself uses.
-///
-/// The `uuid` query parameter is the per-request UUID Moonlight Qt sends
-/// (`QUuid::createUuid().toRfc4122().toHex()`). Sunshine uses it to
-/// identify the cancel within its session log; older versions of GFE 3.x
-/// silently 400 without it. We don't bother generating a fresh one per
-/// call — it's a log-correlation token, not a security value.
-fn send_host_cancel(host: &str, uuid: &str) {
-    let url = format!("https://{host}:47984/cancel?uniqueid={uuid}&uuid=00000000-0000-0000-0000-000000000000");
-    // Total deadline of ~4 s worst case. Connect is bounded separately so a
-    // flapping host doesn't eat the whole timeout in TLS handshakes.
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(2))
-        .timeout_read(std::time::Duration::from_secs(2))
-        .tls_config(Arc::new(rustls_config_insecure()))
-        .build();
-    // Ignore the result — the response is empty and the user doesn't need
-    // to know. log failures at debug verbosity for diagnosing issues.
-    let _ = agent.get(&url).call();
-}
-
-fn rustls_config_insecure() -> rustls::ClientConfig {
-    use rustls::ClientConfig;
-    use rustls::RootCertStore;
-    let mut root = RootCertStore::empty();
-    // Add webpki-roots so the agent at least validates the chain against
-    // the public CA store. We deliberately skip cert *pinning* here (see
-    // the comment in `moonlight_quit`); what we want is for a bogus cert
-    // from an unknown authority to be rejected, not a mis-issued cert
-    // from a trusted CA.
-    root.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    ClientConfig::builder()
-        .with_root_certificates(root)
-        .with_no_client_auth()
 }
 
 /// Discover Sunshine/GameStream hosts on the LAN via mDNS, and classify each as
@@ -1991,10 +2034,10 @@ fn read_registry_paired_hosts() -> Vec<PairedHost> {
     out
 }
 
-/// Look up the UUID of a paired host by its IP / hostname. The UUID is
-/// what the host's `/cancel?uniqueid=<UUID>` endpoint requires, so we
-/// cache it at stream-start time (when we know the host is paired) and
-/// stash it in `ActiveStream` for the disconnect path.
+/// Look up the UUID of a paired host by its IP / hostname. Currently
+/// unused — left in place in case a future feature needs to correlate
+/// streams with their paired record. Suppress the dead-code warning.
+#[allow(dead_code)]
 fn paired_host_uuid(address: &str) -> Option<String> {
     let host_lower = address.to_lowercase();
     read_registry_paired_hosts()
@@ -2715,10 +2758,23 @@ fn exit_windows(reboot: bool) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Open the log file before Tauri starts so any panic during setup
+    // (e.g. window creation, plugin init) is captured. The data dir is
+    // resolved the same way `settings.json` is — `%LOCALAPPDATA%\<id>\`.
+    // `app_data_dir` isn't callable without an `AppHandle`, so we fall back
+    // to a known sentinel path that's at least on disk if resolution fails.
+    let data_dir = std::env::var("LOCALAPPDATA")
+        .map(|p| std::path::PathBuf::from(p).join("com.moonblast.app"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("moonblast-local"));
+    if let Err(e) = logging::init(data_dir) {
+        eprintln!("moonblast: failed to init log: {e}");
+    }
+    moonblast_log!("run() entering tauri::Builder");
     tauri::Builder::default()
         .on_window_event(|window, event| {
             // If the app is closed while in Immersive Mode, bring the shell back.
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                moonblast_log!("window event: Destroyed");
                 // Also kill any streaming children — without this, the OS
                 // would keep them alive as invisible processes (Child::drop
                 // on Windows only closes the handle, doesn't kill).
@@ -2727,6 +2783,7 @@ pub fn run() {
                 }
                 suppress_shell(false);
             } else if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                moonblast_log!("window event: CloseRequested (immersive={})", EXPLORER_KILLED.load(Ordering::SeqCst));
                 // Only intercept Alt+F4 / taskbar-Close while in Immersive
                 // Mode. Outside Immersive, the window can close normally —
                 // the user just wants to quit the launcher. EXPLORER_KILLED
