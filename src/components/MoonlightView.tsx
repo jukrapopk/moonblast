@@ -78,6 +78,76 @@ interface HostEntry {
   probe?: MoonlightProbe;
 }
 
+/**
+ * Pure function — builds the unified host set from the three sources.
+ * Extracted out of `useMemo` so `scan()` can call it synchronously on
+ * fresh data without going through the React state cycle.
+ *
+ * Dedup key is the case-insensitive name (not address) because the
+ * whole point of the Saved Machines override is the same host living
+ * at different addresses without showing two cards. Override
+ * precedence is: saved address > paired address > discovered address.
+ */
+function buildUnified(
+  discovered: DiscoveredHost[],
+  paired: PairedHost[],
+  machines: Host[],
+): HostEntry[] {
+  const byKey = new Map<string, HostEntry>();
+  const lower = (s: string) => s.toLowerCase();
+  for (const d of discovered) {
+    const key = lower(d.name);
+    byKey.set(key, {
+      name: d.name,
+      key,
+      address: d.address,
+      paired: d.paired,
+      saved: false,
+      discovery: true,
+      discoveredInfo: d,
+    });
+  }
+  for (const p of paired) {
+    const key = lower(p.name);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.paired = true;
+      existing.pairedInfo = p;
+      if (existing.discovery && !existing.saved) existing.address = p.address;
+    } else {
+      byKey.set(key, {
+        name: p.name,
+        key,
+        address: p.address,
+        paired: true,
+        saved: false,
+        discovery: false,
+        pairedInfo: p,
+      });
+    }
+  }
+  for (const s of machines) {
+    const key = lower(s.name);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.saved = true;
+      existing.savedInfo = s;
+      existing.address = s.address;
+    } else {
+      byKey.set(key, {
+        name: s.name,
+        key,
+        address: s.address,
+        paired: false,
+        saved: true,
+        discovery: false,
+        savedInfo: s,
+      });
+    }
+  }
+  return [...byKey.values()];
+}
+
 function formatElapsed(startedAt: number, now: number) {
   const total = Math.max(0, Math.floor((now - startedAt) / 1000));
   const m = Math.floor(total / 60);
@@ -471,70 +541,10 @@ export function MoonlightView() {
    * addresses (LAN vs Tailscale) without showing two cards. The override
    * precedence is: saved address > paired address > discovered address.
    */
-  const unifiedHosts = useMemo<HostEntry[]>(() => {
-    const byKey = new Map<string, HostEntry>();
-    const lower = (s: string) => s.toLowerCase();
-    // Pass 1: discovered (seed). mDNS gives us the name + address for free.
-    for (const d of discovered) {
-      const key = lower(d.name);
-      byKey.set(key, {
-        name: d.name,
-        key,
-        address: d.address,
-        paired: d.paired,
-        saved: false,
-        discovery: true,
-        discoveredInfo: d,
-      });
-    }
-    // Pass 2: paired. Adds `paired: true` (a discovery entry can be unpaired
-    // even if we have a registry entry, if the registry is stale). Name
-    // wins from the paired record because the user's stored name is
-    // authoritative when the host is paired.
-    for (const p of pairedHosts) {
-      const key = lower(p.name);
-      const existing = byKey.get(key);
-      if (existing) {
-        existing.paired = true;
-        existing.pairedInfo = p;
-        if (existing.discovery && !existing.saved) existing.address = p.address;
-      } else {
-        byKey.set(key, {
-          name: p.name,
-          key,
-          address: p.address,
-          paired: true,
-          saved: false,
-          discovery: false,
-          pairedInfo: p,
-        });
-      }
-    }
-    // Pass 3: saved. Address from settings.machines always wins; this is
-    // the manual override that fixes the "LAN IP changed to a Tailscale
-    // IP" problem. Name from settings also wins because if the user
-    // typed it explicitly they probably want it visible.
-    for (const s of machines) {
-      const key = lower(s.name);
-      const existing = byKey.get(key);
-      if (existing) {
-        existing.saved = true;
-        existing.savedInfo = s;
-        existing.address = s.address;
-      } else {
-        byKey.set(key, {
-          name: s.name,
-          key,
-          address: s.address,
-          paired: false,
-          saved: true,
-          discovery: false,
-          savedInfo: s,
-        });
-      }
-    }
-    return [...byKey.values()];
-  }, [discovered, pairedHosts, machines]);
+  const unifiedHosts = useMemo<HostEntry[]>(
+    () => buildUnified(discovered, pairedHosts, machines),
+    [discovered, pairedHosts, machines],
+  );
 
   const [probes, setProbes] = useState<Record<string, MoonlightProbe>>({});
   // Stitch the latest probes onto each HostEntry so the card can read its
@@ -564,6 +574,10 @@ export function MoonlightView() {
   // `scan` always sees the latest values without forcing a re-create.
   const unifiedHostsRef = useRef(unifiedHosts);
   unifiedHostsRef.current = unifiedHosts;
+  // Same pattern for `machines` — `scan` reads from this ref so it can
+  // build a fresh unified set without depending on the React state cycle.
+  const machinesRef = useRef(machines);
+  machinesRef.current = machines;
 
   const scan = useCallback(async (opts: { force?: boolean } = {}) => {
     if (!opts.force) {
@@ -581,11 +595,15 @@ export function MoonlightView() {
       ]);
       setDiscovered(list);
       setPairedHosts(paired);
-      // Probe the unified set with the live ref so we don't depend on the
-      // list going through React state first. Saved + paired entries get
-      // a real probe; discovery-only entries skip it (mDNS is the signal).
+      // Build the unified set from the FRESH lists (not the stale ref) so
+      // we probe exactly the addresses the next render will use. Without
+      // this, an address that just changed (LAN → Tailscale, new host
+      // appeared, etc.) gets probed under its old key and the new entry
+      // lands on the page with `probe === undefined` — stuck on the
+      // "Checking" pill until the next scan.
+      const freshUnified = buildUnified(list, paired, machinesRef.current);
       const addresses = new Set<string>();
-      for (const e of unifiedHostsRef.current) {
+      for (const e of freshUnified) {
         if (e.saved || e.paired) addresses.add(e.address);
       }
       const entries = await Promise.all(
