@@ -743,6 +743,45 @@ fn launch_app(path: String, kind: String) -> Result<(), String> {
     }
 }
 
+/// Launch every `app_shortcuts` entry flagged with `auto_launch`. Used at sign-in
+/// (when the launcher was started by the shell stub). Each launch is staggered
+/// ~250 ms so multiple autolaunch apps don't all fight for focus. Failures on any
+/// individual app are logged and skipped — one bad shortcut shouldn't block the
+/// rest. Runs on `spawn_blocking` because `launch_app` can hit the registry / COM
+/// paths; gating *when* this fires stays in the frontend (`is_autostart`).
+#[tauri::command]
+async fn launch_autolaunch_apps(
+    state: State<'_, settings::SettingsState>,
+) -> Result<usize, String> {
+    // Snapshot the list under the lock so the loop doesn't hold it for the
+    // whole launch sequence (which can span multiple seconds with stagger).
+    let targets: Vec<(String, String)> = {
+        let guard = state.0.lock().unwrap();
+        guard
+            .app_shortcuts
+            .iter()
+            .filter(|s| s.auto_launch)
+            .map(|s| (s.path.clone(), s.kind.clone()))
+            .collect()
+    };
+    moonblast_log!("launch_autolaunch_apps: {} flagged", targets.len());
+    tauri::async_runtime::spawn_blocking(move || {
+        let n = targets.len();
+        for (i, (path, kind)) in targets.into_iter().enumerate() {
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            moonblast_log!("launch_autolaunch_apps: launching [{}/{}] {} kind={}", i + 1, n, path, kind);
+            if let Err(e) = launch_app(path.clone(), kind) {
+                moonblast_log!("launch_autolaunch_apps: failed [{}] path={} err={}", i + 1, path, e);
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(0)
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -2980,6 +3019,7 @@ pub fn run() {
             client_display,
             discover_apps,
             launch_app,
+            launch_autolaunch_apps,
             app_icon,
             cache_steamgrid_icon,
             import_app_icon,

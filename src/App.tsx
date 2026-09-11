@@ -265,7 +265,14 @@ export default function App() {
     if (!settings.fullscreen.auto_immersive) return;
     void invoke<boolean>("booted_as_shell")
       .then((boot) => {
-        if (boot) void enterImmersive();
+        if (boot) {
+          void enterImmersive();
+          // Apps flagged with `auto_launch` fire here too — staggered 250 ms
+          // apart on the Rust side so multiple autolaunch apps don't fight
+          // for focus. Gated on `booted_as_shell` because manual launches
+          // shouldn't surprise the user with an autostart cascade.
+          void invoke("launch_autolaunch_apps").catch(() => {});
+        }
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps

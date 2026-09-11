@@ -77,6 +77,11 @@ pub struct AppShortcut {
     pub use_desktop_icon: bool,
     #[serde(default)]
     pub steamgrid_icon: Option<String>,
+    /// Launch this app automatically when Moonblast boots from the shell
+    /// stub at sign-in (`--autostart`). Gated on the caller — Rust just
+    /// launches; deciding *when* belongs in the frontend.
+    #[serde(default)]
+    pub auto_launch: bool,
 }
 
 fn default_kind() -> String {

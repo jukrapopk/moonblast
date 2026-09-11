@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText, CheckFat } from "@phosphor-icons/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
@@ -34,6 +34,7 @@ interface Shortcut {
   custom_icon: string | null;
   use_desktop_icon: boolean;
   steamgrid_icon: string | null;
+  auto_launch: boolean; // launch at sign-in when auto_immersive boots the shell stub
 }
 
 /** Effective display label: display_name overrides the original name. */
@@ -538,7 +539,7 @@ export function AppsView() {
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; source?: string; kind: string }) {
-    const entry: Shortcut = { name: a.name, path: a.path, source: a.source ?? "", kind: a.kind, display_name: null, custom_icon: null, use_desktop_icon: false, steamgrid_icon: null };
+    const entry: Shortcut = { name: a.name, path: a.path, source: a.source ?? "", kind: a.kind, display_name: null, custom_icon: null, use_desktop_icon: false, steamgrid_icon: null, auto_launch: false };
     if (existingPaths.has(entry.path.toLowerCase())) return;
     update((s) => ({ ...s, app_shortcuts: [...s.app_shortcuts, entry] }));
   }
@@ -610,6 +611,16 @@ export function AppsView() {
           refreshIcon(a);
         },
       },
+      {
+        // When toggled on, a filled `CheckFat` (fill weight) confirms the
+        // intent; when off, no icon — keeps the row visually identical to
+        // other menu items. 16px gives presence against the long label.
+        // Toggling is a no-op until the next sign-in that boots Moonblast
+        // via the shell stub (`--autostart`).
+        icon: a.auto_launch ? <CheckFat size={16} weight="fill" /> : null,
+        label: "Autolaunch with Auto Immersive Mode",
+        onClick: () => setAutoLaunch(a.path, !a.auto_launch),
+      },
       { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
     ]);
   }
@@ -622,6 +633,12 @@ export function AppsView() {
     update((s) => ({
       ...s,
       app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, use_desktop_icon: v } : x)),
+    }));
+  }
+  function setAutoLaunch(path: string, v: boolean) {
+    update((s) => ({
+      ...s,
+      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, auto_launch: v } : x)),
     }));
   }
   function setSteamgridIcon(path: string, url: string | null) {
