@@ -3942,6 +3942,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "ureq",
+ "windows",
  "windows-sys 0.59.0",
  "winreg 0.52.0",
 ]

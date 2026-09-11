@@ -12,6 +12,7 @@ use std::sync::Mutex;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+mod hdr;
 mod logging;
 
 /// Run a `Command` to completion with a hard deadline. Returns the captured
@@ -2658,6 +2659,20 @@ async fn audio_reset_sessions() -> Result<usize, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Read the primary display's HDR state. Sync — two DisplayConfig*
+/// syscalls, no IO, runs in microseconds. See `hdr.rs` for the rationale.
+#[tauri::command]
+fn hdr_status() -> hdr::HdrStatus {
+    hdr::hdr_status()
+}
+
+/// Toggle HDR on the primary display. Returns an error when the OS
+/// rejects the call (e.g. driver said no, or no active path exists).
+#[tauri::command]
+fn set_hdr(enabled: bool) -> Result<(), String> {
+    hdr::set_hdr(enabled)
+}
+
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 async fn system_power(action: String) -> Result<(), String> {
@@ -2905,7 +2920,9 @@ pub fn run() {
             clipboard_icon_import,
             check_steamgrid_key,
             steamgrid_search,
-            steamgrid_icons
+            steamgrid_icons,
+            hdr_status,
+            set_hdr
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

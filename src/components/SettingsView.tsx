@@ -206,6 +206,37 @@ export function SettingsView({
       alive = false;
     };
   }, []);
+  // HDR on the primary display. `undefined` while we haven't checked yet
+  // (description says "Checking…"); `null` after a failed IPC read; an
+  // object with `supported: false` means the panel/driver don't advertise
+  // HDR (toggle disabled); `locked: true` means the OS has wideColorEnforced
+  // or advancedColorForceDisabled set — the SET request would be silently
+  // ignored, so the toggle is disabled with a "Change in Windows display
+  // settings" hint.
+  const [hdrStatus, setHdrStatus] = useState<
+    { supported: boolean; enabled: boolean; locked: boolean } | null | undefined
+  >(undefined);
+  async function refreshHdr() {
+    try {
+      const s = await invoke<{ supported: boolean; enabled: boolean; locked: boolean }>(
+        "hdr_status",
+      );
+      setHdrStatus(s);
+    } catch {
+      setHdrStatus(null);
+    }
+  }
+  useEffect(() => {
+    refreshHdr();
+  }, []);
+  async function toggleHdr(enabled: boolean) {
+    try {
+      await invoke("set_hdr", { enabled });
+    } catch {
+      // ignore — refresh will reflect reality
+    }
+    await refreshHdr();
+  }
 
   async function checkKey() {
     if (!steamgridKey) return;
@@ -248,6 +279,36 @@ export function SettingsView({
             disabled={!startWithWindows}
           />
         </div>
+      </Section>
+
+      <Section title="Display">
+        <Row
+          label="HDR"
+          description={
+            hdrStatus === undefined
+              ? "Checking…"
+              : hdrStatus === null
+                ? "Couldn't detect display capabilities."
+                : !hdrStatus.supported
+                  ? "This display doesn't support HDR."
+                  : hdrStatus.locked
+                    ? "Locked by Windows color settings — change HDR / wide-color in Display Settings."
+                    : hdrStatus.enabled
+                      ? "HDR is on."
+                      : "HDR is off."
+          }
+        >
+          <Toggle
+            checked={hdrStatus?.enabled ?? false}
+            onChange={toggleHdr}
+            disabled={
+              hdrStatus === undefined ||
+              hdrStatus === null ||
+              !hdrStatus.supported ||
+              hdrStatus.locked
+            }
+          />
+        </Row>
       </Section>
 
       <Section title="Customization">
