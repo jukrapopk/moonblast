@@ -10,6 +10,7 @@ import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
 import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
+import { LoadingChip } from "./ui/LoadingChip";
 
 type TailscaleStatus =
   | "not-found"
@@ -148,6 +149,7 @@ function MoonlightRow({
 function ResolutionPicker({
   modes,
   current,
+  loading = false,
   onApply,
   onPendingChange,
   onResolved,
@@ -155,6 +157,10 @@ function ResolutionPicker({
 }: {
   modes: { width: number; height: number; refreshRates: number[] }[] | null | undefined;
   current: { width: number; height: number; refreshRate: number } | null | undefined;
+  /** True while the parent is fetching modes for the selected monitor.
+   *  Renders a loading chip in place of both dropdowns so the row
+   *  doesn't show an empty `Select` for the IPC roundtrip. */
+  loading?: boolean;
   /** Apply handler — invoked immediately when the user picks a new
    *  resolution or refresh rate. The picker no longer has its own
    *  "Apply" button; the keep/revert modal handles confirmation. */
@@ -261,63 +267,75 @@ function ResolutionPicker({
       <Row
         label="Resolution"
         description={
-          modes === undefined
-            ? "Checking"
-            : modes === null
-              ? "Couldn't read display modes."
-              : current
-                ? `Currently ${current.width} × ${current.height} @ ${current.refreshRate} Hz.`
-                : ""
+          loading
+            ? "Reading display modes…"
+            : modes === undefined
+              ? "Checking"
+              : modes === null
+                ? "Couldn't read display modes."
+                : current
+                  ? `Currently ${current.width} × ${current.height} @ ${current.refreshRate} Hz.`
+                  : ""
         }
       >
         <div className="flex items-center gap-2">
-          <Select
-            options={supportedList.map((m) => ({
-              value: `${m.width}x${m.height}`,
-              label: `${m.width} × ${m.height}`,
-            }))}
-            value={width !== null && height !== null ? `${width}x${height}` : ""}
-            onChange={(v) => {
-              const m = supportedList.find((mm) => `${mm.width}x${mm.height}` === v);
-              if (!m) return;
-              const sameRes = m.width === width && m.height === height;
-              let nextRefresh = refresh;
-              if (sameRes) {
-                // No-op — same resolution picked again. We still
-                // re-apply only if the user later changes refresh.
-              } else if (refresh !== null && m.refreshRates.includes(refresh)) {
-                nextRefresh = refresh;
-              } else {
-                nextRefresh = m.refreshRates[m.refreshRates.length - 1] ?? null;
-              }
-              if (nextRefresh === null) return;
-              apply(m.width, m.height, nextRefresh);
-            }}
-          />
+          {loading ? (
+            <LoadingChip label="Reading modes…" />
+          ) : (
+            <Select
+              options={supportedList.map((m) => ({
+                value: `${m.width}x${m.height}`,
+                label: `${m.width} × ${m.height}`,
+              }))}
+              value={width !== null && height !== null ? `${width}x${height}` : ""}
+              onChange={(v) => {
+                const m = supportedList.find((mm) => `${mm.width}x${mm.height}` === v);
+                if (!m) return;
+                const sameRes = m.width === width && m.height === height;
+                let nextRefresh = refresh;
+                if (sameRes) {
+                  // No-op — same resolution picked again. We still
+                  // re-apply only if the user later changes refresh.
+                } else if (refresh !== null && m.refreshRates.includes(refresh)) {
+                  nextRefresh = refresh;
+                } else {
+                  nextRefresh = m.refreshRates[m.refreshRates.length - 1] ?? null;
+                }
+                if (nextRefresh === null) return;
+                apply(m.width, m.height, nextRefresh);
+              }}
+            />
+          )}
         </div>
       </Row>
       <Row
         label="Refresh rate"
         description={
-          current
-            ? `Currently ${current.refreshRate} Hz.`
-            : refreshOptions.length > 0
-              ? `${refreshOptions.length} options.`
-              : ""
+          loading
+            ? "Reading display modes…"
+            : current
+              ? `Currently ${current.refreshRate} Hz.`
+              : refreshOptions.length > 0
+                ? `${refreshOptions.length} options.`
+                : ""
         }
       >
-        <Select
-          options={refreshOptions.map((r) => ({
-            value: String(r),
-            label: `${r} Hz`,
-          }))}
-          value={refresh !== null ? String(refresh) : ""}
-          onChange={(v) => {
-            const r = parseInt(v, 10);
-            if (width === null || height === null) return;
-            apply(width, height, r);
-          }}
-        />
+        {loading ? (
+          <LoadingChip label="Reading modes…" />
+        ) : (
+          <Select
+            options={refreshOptions.map((r) => ({
+              value: String(r),
+              label: `${r} Hz`,
+            }))}
+            value={refresh !== null ? String(refresh) : ""}
+            onChange={(v) => {
+              const r = parseInt(v, 10);
+              if (width === null || height === null) return;
+              apply(width, height, r);
+            }}
+          />
+        )}
       </Row>
       <Modal
         open={pending !== null}
@@ -363,15 +381,19 @@ export function DisplaySettingsModal({
     { supported: boolean; enabled: boolean; locked: boolean } | null | undefined
   >(undefined);
   const [monitors, setMonitors] = useState<
-    {
-      deviceName: string;
-      friendlyName: string;
-      primary: boolean;
-      disabled: boolean;
-    }[]
+    | {
+        deviceName: string;
+        friendlyName: string;
+        primary: boolean;
+        disabled: boolean;
+      }[]
     | null
-  >(null);
+    | undefined
+  >(undefined);
   const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
+  // `monitors ?? []` while monitors is `undefined` (loading) — the
+  // `.find` will simply miss and `selectedMonitor` stays null, which
+  // gates `refreshDisplay` from racing a stale selection.
   const selectedMonitor =
     selectedDeviceName === null
       ? null
@@ -401,6 +423,7 @@ export function DisplaySettingsModal({
         setSelectedDeviceName(primary?.deviceName ?? null);
       }
     } catch {
+      // `null` = error. `undefined` = loading (set on first mount).
       setMonitors(null);
     }
   }
@@ -427,10 +450,18 @@ export function DisplaySettingsModal({
   async function refreshDisplay() {
     const m = selectedMonitorRef.current;
     if (!m) {
-      setDisplayModes(null);
-      setCurrentMode(null);
+      // No monitor selected yet (still loading monitors, or none
+      // available). Leave displayModes/currentMode as `undefined` so
+      // the rows keep showing the loading chip — setting `null` here
+      // would flash an error description before the user has seen a
+      // load attempt.
       return;
     }
+    // Mark as loading so the Resolution / Refresh rows show the
+    // spinner chip until the new modes arrive (otherwise the row
+    // briefly shows stale modes from the previous monitor).
+    setDisplayModes(undefined);
+    setCurrentMode(undefined);
     try {
       const [modes, cur] = await Promise.all([
         invoke<{ width: number; height: number; refreshRates: number[] }[]>("display_modes", {
@@ -489,30 +520,36 @@ export function DisplaySettingsModal({
       <Row
         label="Monitor"
         description={
-          monitors === null
-            ? "Couldn't enumerate monitors."
-            : selectedMonitor
-              ? selectedMonitor.disabled
-                ? `${selectedMonitor.friendlyName} (disabled — not in the desktop)`
-                : `Resolution target: ${selectedMonitor.friendlyName}${selectedMonitor.primary ? " (primary)" : ""}.`
-              : ""
+          monitors === undefined
+            ? "Detecting monitors…"
+            : monitors === null
+              ? "Couldn't enumerate monitors."
+              : selectedMonitor
+                ? selectedMonitor.disabled
+                  ? `${selectedMonitor.friendlyName} (disabled — not in the desktop)`
+                  : `Resolution target: ${selectedMonitor.friendlyName}${selectedMonitor.primary ? " (primary)" : ""}.`
+                : "No monitors detected."
         }
       >
-        <Select
-          options={(monitors ?? []).map((m) => ({
-            value: m.deviceName,
-            label: `${m.friendlyName}${m.primary ? " (primary)" : ""}${m.disabled ? " — disabled" : ""}`,
-            disabled: m.disabled,
-          }))}
-          value={selectedDeviceName ?? ""}
-          onChange={setSelectedDeviceName}
-        />
+        {monitors === undefined ? (
+          <LoadingChip label="Detecting…" />
+        ) : (
+          <Select
+            options={(monitors ?? []).map((m) => ({
+              value: m.deviceName,
+              label: `${m.friendlyName}${m.primary ? " (primary)" : ""}${m.disabled ? " — disabled" : ""}`,
+              disabled: m.disabled,
+            }))}
+            value={selectedDeviceName ?? ""}
+            onChange={setSelectedDeviceName}
+          />
+        )}
       </Row>
       <Row
         label="HDR"
         description={
           hdrStatus === undefined
-            ? "Checking"
+            ? "Checking HDR support…"
             : hdrStatus === null
               ? "Couldn't detect display capabilities."
               : !hdrStatus.supported
@@ -524,20 +561,25 @@ export function DisplaySettingsModal({
                     : "HDR is off (primary display)."
         }
       >
-        <Toggle
-          checked={hdrStatus?.enabled ?? false}
-          onChange={toggleHdr}
-          disabled={
-            hdrStatus === undefined ||
-            hdrStatus === null ||
-            !hdrStatus.supported ||
-            hdrStatus.locked
-          }
-        />
+        {hdrStatus === undefined ? (
+          <LoadingChip label="Checking" />
+        ) : (
+          <Toggle
+            checked={hdrStatus?.enabled ?? false}
+            onChange={toggleHdr}
+            disabled={
+              hdrStatus === undefined ||
+              hdrStatus === null ||
+              !hdrStatus.supported ||
+              hdrStatus.locked
+            }
+          />
+        )}
       </Row>
       <ResolutionPicker
         modes={displayModes}
         current={currentMode}
+        loading={displayModes === undefined}
         onPendingChange={setHasPending}
         onResolved={refreshDisplay}
         deviceName={selectedMonitor?.deviceName ?? null}
