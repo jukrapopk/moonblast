@@ -30,12 +30,11 @@ function SectionLabel({ children }: { children: string }) {
 }
 
 /**
- * "1 h 42 min" / "12 min" / "Calculating…". `sec` is the raw OS value:
- * `null` = unknown, `0` = known-to-be-zero (charging, no rate), `n > 0` = estimate.
+ * "1 h 42 min" / "12 min". `sec` is the raw OS value: `null` = unknown,
+ * `n > 0` = estimate. The modal hides the row entirely when the value is
+ * `null` / `0`, so this helper is only called with a real estimate.
  */
-function formatDuration(sec: number | null): string {
-  if (sec === null) return "Calculating…";
-  if (sec === 0) return "Calculating…";
+function formatDuration(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.round((sec % 3600) / 60);
   if (h > 0 && m > 0) return `${h} h ${m} min`;
@@ -118,14 +117,20 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
             />
           )}
         </div>
-        <div className="mt-3 flex items-center justify-between text-sm">
-          <span className="text-(--color-muted)">
-            {charging ? "Time to full" : "Time remaining"}
-          </span>
-          <span className="tabular-nums text-(--color-text)">
-            {formatDuration(timeSec)}
-          </span>
-        </div>
+        {/* Time row only when the OS has an estimate. Win32 doesn't
+          *  expose time-to-full — BatteryLifeTime returns -1 on AC per
+          *  MS docs — so while charging/on-AC the row is hidden instead
+          *  of showing a permanent "Calculating…". */}
+        {timeSec !== null && timeSec > 0 && (
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span className="text-(--color-muted)">
+              {charging ? "Time to full" : "Time remaining"}
+            </span>
+            <span className="tabular-nums text-(--color-text)">
+              {formatDuration(timeSec)}
+            </span>
+          </div>
+        )}
       </div>
 
       <SectionLabel>Power source</SectionLabel>

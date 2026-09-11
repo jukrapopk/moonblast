@@ -2494,13 +2494,14 @@ fn battery() -> Option<BatteryStatus> {
     let mut s: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
     let ok = unsafe { GetSystemPowerStatus(&mut s) };
     if ok == 0 {
+        moonblast_log!("battery: GetSystemPowerStatus returned ok=0");
         return None;
     }
     // BatteryFlag bit 0x80 = "no system battery" (desktop / no battery fitted).
     if s.BatteryFlag & 0x80 != 0 {
         return None;
     }
-    Some(BatteryStatus {
+    let status = BatteryStatus {
         // BatteryLifePercent is 0–100, or 255 when unknown. We surface -1 for
         // unknown so the UI can fall back to a charging icon without a percent.
         percent: if s.BatteryLifePercent == 255 { -1 } else { s.BatteryLifePercent as i32 },
@@ -2510,16 +2511,24 @@ fn battery() -> Option<BatteryStatus> {
         charging: if s.BatteryFlag != 255 { s.BatteryFlag & 0x08 != 0 } else { s.ACLineStatus == 1 },
         // ACLineStatus: 1 = online, 0 = offline, 255 = unknown.
         pluggedIn: s.ACLineStatus == 1,
-        // BatteryLifeTime: seconds until empty on battery; 0 = charging /
-        // not supported; -1 (cast to DWORD = 0xFFFFFFFF) = unknown.
-        // The charging-while-no-rate case surfaces as Some(0), which the
-        // modal renders as "Calculating…" — distinct from None (the OS
-        // reporting an honest "I don't know").
+        // Per MS docs, BatteryLifeTime is "the number of seconds of battery
+        // life remaining, or -1 if remaining seconds are unknown or if the
+        // device is connected to AC power" — i.e. Win32 never tells us
+        // time-to-full. We map -1 (0xFFFFFFFF) to None, 0 to None (OS
+        // reports no estimate / charging but no rate yet), otherwise the
+        // remaining seconds. The frontend hides the time row when this is
+        // None so we never show "Calculating…" while on AC.
         timeRemainingSec: match s.BatteryLifeTime {
             0xFFFFFFFF => None,
+            0 => None,
             v => Some(v),
         },
-    })
+    };
+    moonblast_log!(
+        "battery: flag=0x{:02x} ac={} pct={} life={:?}",
+        s.BatteryFlag, s.ACLineStatus, status.percent, status.timeRemainingSec
+    );
+    Some(status)
 }
 
 /// Current WiFi connection for the chip in the TopBar. Returns `None` when
