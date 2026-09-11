@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { Monitor, WifiHigh, BatteryFull, SpeakerHigh, Clock } from "@phosphor-icons/react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -154,6 +155,9 @@ function ResolutionPicker({
 }: {
   modes: { width: number; height: number; refreshRates: number[] }[] | null | undefined;
   current: { width: number; height: number; refreshRate: number } | null | undefined;
+  /** Apply handler — invoked immediately when the user picks a new
+   *  resolution or refresh rate. The picker no longer has its own
+   *  "Apply" button; the keep/revert modal handles confirmation. */
   onApply: (width: number, height: number, refreshRate: number) => Promise<void>;
   /** Notified whenever a pending change becomes live or resolves — the
    *  parent uses this to revert on Settings unmount. */
@@ -221,29 +225,24 @@ function ResolutionPicker({
     width !== null && height !== null
       ? supportedList.find((m) => m.width === width && m.height === height)?.refreshRates ?? []
       : [];
-  const canApply =
-    width !== null &&
-    height !== null &&
-    refresh !== null &&
-    Array.isArray(modes) &&
-    modes.length > 0;
-  const isCurrent =
-    current !== null &&
-    current !== undefined &&
-    width === current.width &&
-    height === current.height &&
-    refresh === current.refreshRate;
-  function apply() {
-    if (width === null || height === null || refresh === null) return;
+  // Apply handler shared by both dropdowns. Called immediately on
+  // change; the keep/revert modal handles confirmation. We bail if the
+  // pick is the current selection (no-op) or if any field is unset
+  // (modes haven't loaded yet).
+  function apply(width: number, height: number, refresh: number) {
+    if (current && width === current.width && height === current.height && refresh === current.refreshRate) {
+      return;
+    }
+    setWidth(width);
+    setHeight(height);
+    setRefresh(refresh);
     onApply(width, height, refresh)
       .then(() => {
-        // Refresh the "current" reading so the dropdown reflects the
-        // mode we just applied, then open the confirmation modal.
         onResolved?.();
         setPending({ width, height, refresh });
       })
       .catch(() => {
-        // apply failed -- onApply already invoked refreshDisplay itself
+        // apply failed — onApply already invoked refreshDisplay itself
         setPending(null);
       });
   }
@@ -282,39 +281,43 @@ function ResolutionPicker({
               const m = supportedList.find((mm) => `${mm.width}x${mm.height}` === v);
               if (!m) return;
               const sameRes = m.width === width && m.height === height;
-              setWidth(m.width);
-              setHeight(m.height);
-              // Preserve the user's current refresh if it exists in the
-              // new resolution's options — otherwise fall back to the
-              // highest available. Picking the same resolution re-selects
-              // doesn't bump the refresh.
+              let nextRefresh = refresh;
               if (sameRes) {
-                // Keep `refresh` as-is; the dropdown's value will re-render
-                // against the (unchanged) refreshOptions.
+                // No-op — same resolution picked again. We still
+                // re-apply only if the user later changes refresh.
               } else if (refresh !== null && m.refreshRates.includes(refresh)) {
-                setRefresh(refresh);
+                nextRefresh = refresh;
               } else {
-                setRefresh(m.refreshRates[m.refreshRates.length - 1] ?? null);
+                nextRefresh = m.refreshRates[m.refreshRates.length - 1] ?? null;
               }
+              if (nextRefresh === null) return;
+              apply(m.width, m.height, nextRefresh);
             }}
           />
-          <Select
-            options={refreshOptions.map((r) => ({
-              value: String(r),
-              label: `${r} Hz`,
-            }))}
-            value={refresh !== null ? String(refresh) : ""}
-            onChange={(v) => setRefresh(parseInt(v, 10))}
-          />
-          <Button
-            size="md"
-            onClick={apply}
-            disabled={!canApply || isCurrent}
-            className="px-4 py-1.5"
-          >
-            Apply
-          </Button>
         </div>
+      </Row>
+      <Row
+        label="Refresh rate"
+        description={
+          current
+            ? `Currently ${current.refreshRate} Hz.`
+            : refreshOptions.length > 0
+              ? `${refreshOptions.length} options.`
+              : ""
+        }
+      >
+        <Select
+          options={refreshOptions.map((r) => ({
+            value: String(r),
+            label: `${r} Hz`,
+          }))}
+          value={refresh !== null ? String(refresh) : ""}
+          onChange={(v) => {
+            const r = parseInt(v, 10);
+            if (width === null || height === null) return;
+            apply(width, height, r);
+          }}
+        />
       </Row>
       <Modal
         open={pending !== null}
@@ -330,9 +333,7 @@ function ResolutionPicker({
         }
       >
         <p className="text-sm text-(--color-muted)">
-          {countdown > 0
-            ? `Auto-reverting in ${countdown}s…`
-            : "Reverting…"}
+          {countdown > 0 ? `Auto-reverting in ${countdown}s…` : "Reverting…"}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="lg" onClick={revert} className="px-4 font-normal">
@@ -347,80 +348,20 @@ function ResolutionPicker({
   );
 }
 
-export function SettingsView({
-  moonlightEnabled,
-  onToggleMoonlight,
-  moonlightDir,
-  onSelectMoonlight,
-  appsEnabled,
-  onToggleApps,
-  steamgridKey,
-  onSetSteamgridKey,
-  startWithWindows,
-  onToggleStartWithWindows,
-  autoImmersive,
-  onToggleAutoImmersive,
-  showTime,
-  onToggleShowTime,
-  showDate,
-  onToggleShowDate,
-  showWifi,
-  onToggleShowWifi,
-  showBattery,
-  onToggleShowBattery,
-  showAudio,
-  onToggleShowAudio,
+/** Display settings modal — reuses the ResolutionPicker + HDR + Monitor
+ *  logic that used to live directly on the Display section. Owns its
+ *  own monitor/HDR/display-mode state so the rest of SettingsView
+ *  doesn't need to track display internals. */
+export function DisplaySettingsModal({
+  open,
+  onClose,
 }: {
-  moonlightEnabled: boolean;
-  onToggleMoonlight: (v: boolean) => void;
-  moonlightDir: string | null;
-  onSelectMoonlight: (dir: string) => void;
-  appsEnabled: boolean;
-  onToggleApps: (v: boolean) => void;
-  steamgridKey: string | null;
-  onSetSteamgridKey: (k: string) => void;
-  startWithWindows: boolean;
-  onToggleStartWithWindows: (v: boolean) => void;
-  autoImmersive: boolean;
-  onToggleAutoImmersive: (v: boolean) => void;
-  showTime: boolean;
-  onToggleShowTime: (v: boolean) => void;
-  showDate: boolean;
-  onToggleShowDate: (v: boolean) => void;
-  showWifi: boolean;
-  onToggleShowWifi: (v: boolean) => void;
-  showBattery: boolean;
-  onToggleShowBattery: (v: boolean) => void;
-  showAudio: boolean;
-  onToggleShowAudio: (v: boolean) => void;
+  open: boolean;
+  onClose: () => void;
 }) {
-  const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
-  // Battery hardware presence — one-shot read on mount. `undefined`
-  // while checking; the toggle stays disabled until we know.
-  const [hasBattery, setHasBattery] = useState<boolean | undefined>(undefined);
-  useEffect(() => {
-    let alive = true;
-    invoke<{ percent: number; charging: boolean } | null>("battery")
-      .then((s) => {
-        if (alive) setHasBattery(s !== null);
-      })
-      .catch(() => {
-        if (alive) setHasBattery(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  // HDR on the primary display. `undefined` while we haven't checked yet
-  // (description says "Checking…"); `null` after a failed IPC read; an
-  // object with `supported: false` means the panel/driver don't advertise
-  // HDR (toggle disabled); `locked: true` means the OS has wideColorEnforced
-  // or advancedColorForceDisabled set — the SET request would be silently
-  // Monitor picker. `list_monitors` returns every attached GDI adapter
-  // (`\\.\DISPLAYn`) with its friendly name and the active/primary flags.
-  // The dropdown drives the resolution picker — HDR always targets the
-  // primary display because there's no public Win32 API to map a GDI
-  // adapter name back to a `DISPLAYCONFIG_PATH_INFO`.
+  const [hdrStatus, setHdrStatus] = useState<
+    { supported: boolean; enabled: boolean; locked: boolean } | null | undefined
+  >(undefined);
   const [monitors, setMonitors] = useState<
     {
       deviceName: string;
@@ -441,48 +382,6 @@ export function SettingsView({
   const selectedMonitorRef = useRef(selectedMonitor);
   selectedMonitorRef.current = selectedMonitor;
 
-  // HDR (toggle disabled); `locked: true` means the OS has wideColorEnforced
-  // or advancedColorForceDisabled set — the SET request would be silently
-  // ignored, so the toggle is disabled with a "Change in Windows display
-  // settings" hint.
-  const [hdrStatus, setHdrStatus] = useState<
-    { supported: boolean; enabled: boolean; locked: boolean } | null | undefined
-  >(undefined);
-  async function refreshHdr() {
-    try {
-      const s = await invoke<{ supported: boolean; enabled: boolean; locked: boolean }>(
-        "hdr_status",
-      );
-      setHdrStatus(s);
-    } catch {
-      setHdrStatus(null);
-    }
-  }
-  useEffect(() => {
-    refreshHdr();
-  }, []);
-  async function toggleHdr(enabled: boolean) {
-    try {
-      await invoke("set_hdr", { enabled });
-    } catch {
-      // ignore — refresh will reflect reality
-    }
-    await refreshHdr();
-  }
-  // Display resolution + refresh picker. Enumerate once on mount, plus
-  // current selection. Picking a new mode opens a confirmation modal
-  // with a 10s auto-revert countdown; the user clicks Keep to commit,
-  // Revert to roll back, or walks away and the OS reverts automatically.
-  // If the user leaves the Settings page with a change pending, we
-  // revert on unmount so a forgotten modal can't leave the display stuck
-  // on a new mode.
-  const [displayModes, setDisplayModes] = useState<
-    { width: number; height: number; refreshRates: number[] }[] | null | undefined
-  >(undefined);
-  const [currentMode, setCurrentMode] = useState<
-    { width: number; height: number; refreshRate: number } | null | undefined
-  >(undefined);
-  const [hasPending, setHasPending] = useState(false);
   async function refreshMonitors() {
     try {
       const list = await invoke<
@@ -494,13 +393,10 @@ export function SettingsView({
         }[]
       >("list_monitors");
       setMonitors(list);
-      // Auto-pick the primary monitor the first time we see a list;
-      // after that, keep whatever the user selected.
       if (selectedDeviceName === null) {
         const primary = list.find((m) => m.primary && !m.disabled) ?? list.find((m) => !m.disabled);
         if (primary) setSelectedDeviceName(primary.deviceName);
       } else if (!list.some((m) => m.deviceName === selectedDeviceName)) {
-        // The selected monitor was unplugged — fall back to the primary.
         const primary = list.find((m) => m.primary && !m.disabled) ?? list.find((m) => !m.disabled);
         setSelectedDeviceName(primary?.deviceName ?? null);
       }
@@ -508,6 +404,26 @@ export function SettingsView({
       setMonitors(null);
     }
   }
+
+  async function refreshHdr() {
+    try {
+      const s = await invoke<{ supported: boolean; enabled: boolean; locked: boolean }>(
+        "hdr_status",
+      );
+      setHdrStatus(s);
+    } catch {
+      setHdrStatus(null);
+    }
+  }
+
+  const [displayModes, setDisplayModes] = useState<
+    { width: number; height: number; refreshRates: number[] }[] | null | undefined
+  >(undefined);
+  const [currentMode, setCurrentMode] = useState<
+    { width: number; height: number; refreshRate: number } | null | undefined
+  >(undefined);
+  const [hasPending, setHasPending] = useState(false);
+
   async function refreshDisplay() {
     const m = selectedMonitorRef.current;
     if (!m) {
@@ -531,18 +447,23 @@ export function SettingsView({
       setCurrentMode(null);
     }
   }
+
   useEffect(() => {
+    if (!open) return;
     refreshMonitors();
-  }, []);
-  // Re-fetch modes + current when the user picks a different monitor.
-  // HDR refresh is wired through refreshHdr's effect above.
-  useEffect(() => {
+    refreshHdr();
     refreshDisplay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    refreshDisplay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDeviceName]);
-  // Revert any pending change when leaving Settings — the modal-based
-  // confirmation already covers in-page flow. Use a ref so the cleanup
-  // always reads the latest hasPending value at unmount (without
-  // re-firing on every state flip).
+
+  // Revert any pending change when the modal unmounts so a forgotten
+  // confirmation modal can't leave the display stuck on a new mode.
   const hasPendingRef = useRef(hasPending);
   hasPendingRef.current = hasPending;
   useEffect(() => {
@@ -554,6 +475,328 @@ export function SettingsView({
     };
   }, []);
 
+  async function toggleHdr(enabled: boolean) {
+    try {
+      await invoke("set_hdr", { enabled });
+    } catch {
+      // ignore — refresh will reflect reality
+    }
+    await refreshHdr();
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Display" width="max-w-lg">
+      <Row
+        label="Monitor"
+        description={
+          monitors === null
+            ? "Couldn't enumerate monitors."
+            : selectedMonitor
+              ? selectedMonitor.disabled
+                ? `${selectedMonitor.friendlyName} (disabled — not in the desktop)`
+                : `Resolution target: ${selectedMonitor.friendlyName}${selectedMonitor.primary ? " (primary)" : ""}.`
+              : ""
+        }
+      >
+        <Select
+          options={(monitors ?? []).map((m) => ({
+            value: m.deviceName,
+            label: `${m.friendlyName}${m.primary ? " (primary)" : ""}${m.disabled ? " — disabled" : ""}`,
+            disabled: m.disabled,
+          }))}
+          value={selectedDeviceName ?? ""}
+          onChange={setSelectedDeviceName}
+        />
+      </Row>
+      <Row
+        label="HDR"
+        description={
+          hdrStatus === undefined
+            ? "Checking…"
+            : hdrStatus === null
+              ? "Couldn't detect display capabilities."
+              : !hdrStatus.supported
+                ? "This display doesn't support HDR."
+                : hdrStatus.locked
+                  ? "Locked by Windows color settings — change HDR / wide-color in Display Settings."
+                  : hdrStatus.enabled
+                    ? "HDR is on (primary display)."
+                    : "HDR is off (primary display)."
+        }
+      >
+        <Toggle
+          checked={hdrStatus?.enabled ?? false}
+          onChange={toggleHdr}
+          disabled={
+            hdrStatus === undefined ||
+            hdrStatus === null ||
+            !hdrStatus.supported ||
+            hdrStatus.locked
+          }
+        />
+      </Row>
+      <ResolutionPicker
+        modes={displayModes}
+        current={currentMode}
+        onPendingChange={setHasPending}
+        onResolved={refreshDisplay}
+        deviceName={selectedMonitor?.deviceName ?? null}
+        onApply={async (width, height, refreshRate) => {
+          try {
+            await invoke("apply_display_mode", {
+              deviceName: selectedMonitor?.deviceName ?? null,
+              width,
+              height,
+              refreshRate,
+            });
+          } catch {
+            await refreshDisplay();
+          }
+        }}
+      />
+    </Modal>
+  );
+}
+
+/** Preferences section — one group per TopBar system item. Each
+ *  group has a title + a gear (opens the existing system modal) on the
+ *  right, and below it the "Show X in Top Bar" sub-toggles. */
+function PreferencesSection({
+  showTime,
+  showDate,
+  showDisplay,
+  showWifi,
+  showBattery,
+  showAudio,
+  onToggleShowTime,
+  onToggleShowDate,
+  onToggleShowDisplay,
+  onToggleShowWifi,
+  onToggleShowBattery,
+  onToggleShowAudio,
+  onOpenWifi,
+  onOpenAudio,
+  onOpenBattery,
+  onOpenDisplay,
+  hasBattery,
+}: {
+  showTime: boolean;
+  showDate: boolean;
+  showDisplay: boolean;
+  showWifi: boolean;
+  showBattery: boolean;
+  showAudio: boolean;
+  onToggleShowTime: (v: boolean) => void;
+  onToggleShowDate: (v: boolean) => void;
+  onToggleShowDisplay: (v: boolean) => void;
+  onToggleShowWifi: (v: boolean) => void;
+  onToggleShowBattery: (v: boolean) => void;
+  onToggleShowAudio: (v: boolean) => void;
+  onOpenWifi: () => void;
+  onOpenAudio: () => void;
+  onOpenBattery: () => void;
+  onOpenDisplay: () => void;
+  hasBattery: boolean | undefined;
+}) {
+  // Display has its own richer modal (Monitor / Resolution / Refresh /
+  // HDR). The other groups share their existing TopBar modals — gear
+  // click opens the same modal the chip would.
+
+  return (
+    <Section title="Preferences">
+      <PreferenceGroup
+        title="Date & Time"
+        icon={<Clock size={20} weight="bold" />}
+      >
+        <Row
+          label="Show Time in Top Bar"
+          description="Show the clock in the TopBar."
+        >
+          <Toggle checked={showTime} onChange={onToggleShowTime} />
+        </Row>
+        <Row
+          label="Show Date in Top Bar"
+          description="Show the date beside the clock in the TopBar."
+        >
+          <Toggle checked={showDate} onChange={onToggleShowDate} />
+        </Row>
+      </PreferenceGroup>
+
+      <PreferenceGroup
+        title="Display"
+        icon={<Monitor size={20} weight="bold" />}
+        onIconClick={onOpenDisplay}
+      >
+        <Row
+          label="Show Display in Top Bar"
+          description="Show the display indicator in the TopBar."
+        >
+          <Toggle checked={showDisplay} onChange={onToggleShowDisplay} />
+        </Row>
+      </PreferenceGroup>
+
+      <PreferenceGroup
+        title="Wi-Fi"
+        icon={<WifiHigh size={20} weight="bold" />}
+        onIconClick={onOpenWifi}
+      >
+        <Row
+          label="Show Wi-Fi in Top Bar"
+          description="Show the WiFi status icon in the TopBar."
+        >
+          <Toggle checked={showWifi} onChange={onToggleShowWifi} />
+        </Row>
+      </PreferenceGroup>
+
+      {hasBattery === true && (
+        <PreferenceGroup
+          title="Battery"
+          icon={<BatteryFull size={20} weight="bold" />}
+          onIconClick={onOpenBattery}
+        >
+          <Row
+            label="Show Battery in Top Bar"
+            description="Show the battery status icon in the TopBar."
+          >
+            <Toggle checked={showBattery} onChange={onToggleShowBattery} />
+          </Row>
+        </PreferenceGroup>
+      )}
+
+      <PreferenceGroup
+        title="Audio"
+        icon={<SpeakerHigh size={20} weight="bold" />}
+        onIconClick={onOpenAudio}
+      >
+        <Row
+          label="Show Audio in Top Bar"
+          description="Show the volume control in the TopBar."
+        >
+          <Toggle checked={showAudio} onChange={onToggleShowAudio} />
+        </Row>
+      </PreferenceGroup>
+
+      {/* <DisplaySettingsModal> is rendered at the App level so both the
+       *  TopBar Display chip and the Preferences gear open the same
+       *  instance. The open state lives in App. */}
+    </Section>
+  );
+}
+
+/** A preference group: a header row with the title on the left. When
+ *  `onIconClick` is provided, a gear-shaped button (with the item's
+ *  own icon inside, color-coded) appears on the right. Clicking opens
+ *  additional settings for that item. When omitted, no button is
+ *  rendered — used for groups with no deeper settings today. */
+function PreferenceGroup({
+  title,
+  icon,
+  onIconClick,
+  children,
+}: {
+  title: string;
+  icon: ReactNode;
+  onIconClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="pt-4 pb-2">
+      <div className="mb-1 flex items-center justify-between pl-1 pr-1">
+        <span className="text-base font-medium text-(--color-text)">{title}</span>
+        {onIconClick && (
+          <button
+            onClick={onIconClick}
+            aria-label={`${title} settings`}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface-2) hover:text-(--color-text)"
+          >
+            {icon}
+          </button>
+        )}
+      </div>
+      <div className="pl-9">{children}</div>
+    </div>
+  );
+}
+
+export function SettingsView({
+  moonlightEnabled,
+  onToggleMoonlight,
+  moonlightDir,
+  onSelectMoonlight,
+  appsEnabled,
+  onToggleApps,
+  steamgridKey,
+  onSetSteamgridKey,
+  startWithWindows,
+  onToggleStartWithWindows,
+  autoImmersive,
+  onToggleAutoImmersive,
+  showTime,
+  onToggleShowTime,
+  showDate,
+  onToggleShowDate,
+  showDisplay,
+  onToggleShowDisplay,
+  showWifi,
+  onToggleShowWifi,
+  showBattery,
+  onToggleShowBattery,
+  showAudio,
+  onToggleShowAudio,
+  onOpenWifi,
+  onOpenAudio,
+  onOpenBattery,
+  onOpenDisplay,
+}: {
+  moonlightEnabled: boolean;
+  onToggleMoonlight: (v: boolean) => void;
+  moonlightDir: string | null;
+  onSelectMoonlight: (dir: string) => void;
+  appsEnabled: boolean;
+  onToggleApps: (v: boolean) => void;
+  steamgridKey: string | null;
+  onSetSteamgridKey: (k: string) => void;
+  startWithWindows: boolean;
+  onToggleStartWithWindows: (v: boolean) => void;
+  autoImmersive: boolean;
+  onToggleAutoImmersive: (v: boolean) => void;
+  showTime: boolean;
+  onToggleShowTime: (v: boolean) => void;
+  showDate: boolean;
+  onToggleShowDate: (v: boolean) => void;
+  showDisplay: boolean;
+  onToggleShowDisplay: (v: boolean) => void;
+  showWifi: boolean;
+  onToggleShowWifi: (v: boolean) => void;
+  showBattery: boolean;
+  onToggleShowBattery: (v: boolean) => void;
+  showAudio: boolean;
+  onToggleShowAudio: (v: boolean) => void;
+  onOpenWifi: () => void;
+  onOpenAudio: () => void;
+  onOpenBattery: () => void;
+  onOpenDisplay: () => void;
+}) {
+  const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
+  // Battery hardware presence — one-shot read on mount. `undefined`
+  // while checking; the toggle stays disabled until we know.
+  const [hasBattery, setHasBattery] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    invoke<{ percent: number; charging: boolean } | null>("battery")
+      .then((s) => {
+        if (alive) setHasBattery(s !== null);
+      })
+      .catch(() => {
+        if (alive) setHasBattery(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // HDR on the primary display. `undefined` while we haven't checked yet
+  // (description says "Checking…"); `null` after a failed IPC read; an
+  // object with `supported: false` means the panel/driver don't advertise
   async function checkKey() {
     if (!steamgridKey) return;
     setSgStatus("checking");
@@ -597,101 +840,25 @@ export function SettingsView({
         </div>
       </Section>
 
-      <Section title="Display">
-        <Row
-          label="Monitor"
-          description={
-            monitors === null
-              ? "Couldn't enumerate monitors."
-              : selectedMonitor
-                ? selectedMonitor.disabled
-                  ? `${selectedMonitor.friendlyName} (disabled — not in the desktop)`
-                  : `Resolution target: ${selectedMonitor.friendlyName}${selectedMonitor.primary ? " (primary)" : ""}.`
-                : ""
-          }
-        >
-          <Select
-            options={(monitors ?? []).map((m) => ({
-              value: m.deviceName,
-              label: `${m.friendlyName}${m.primary ? " (primary)" : ""}${m.disabled ? " — disabled" : ""}`,
-              // Disabled monitors are in the list for visibility but
-              // can't be selected — the dropdown greys them out. The
-              // auto-pick on first load skips disabled entries, and
-              // the resolution picker only operates on active paths.
-              disabled: m.disabled,
-            }))}
-            value={selectedDeviceName ?? ""}
-            onChange={setSelectedDeviceName}
-          />
-        </Row>
-        <Row
-          label="HDR"
-          description={
-            hdrStatus === undefined
-              ? "Checking…"
-              : hdrStatus === null
-                ? "Couldn't detect display capabilities."
-                : !hdrStatus.supported
-                  ? "This display doesn't support HDR."
-                  : hdrStatus.locked
-                    ? "Locked by Windows color settings — change HDR / wide-color in Display Settings."
-                    : hdrStatus.enabled
-                      ? "HDR is on (primary display)."
-                      : "HDR is off (primary display)."
-          }
-        >
-          <Toggle
-            checked={hdrStatus?.enabled ?? false}
-            onChange={toggleHdr}
-            disabled={
-              hdrStatus === undefined ||
-              hdrStatus === null ||
-              !hdrStatus.supported ||
-              hdrStatus.locked
-            }
-          />
-        </Row>
-        <ResolutionPicker
-          modes={displayModes}
-          current={currentMode}
-          onPendingChange={setHasPending}
-          onResolved={refreshDisplay}
-          deviceName={selectedMonitor?.deviceName ?? null}
-          onApply={async (width, height, refreshRate) => {
-            await invoke("apply_display_mode", {
-              deviceName: selectedMonitor?.deviceName ?? null,
-              width,
-              height,
-              refreshRate,
-            });
-          }}
-        />
-      </Section>
-
-      <Section title="Customization">
-        <Row label="Show Time" description="Show the clock in the TopBar.">
-          <Toggle checked={showTime} onChange={onToggleShowTime} />
-        </Row>
-        <Row label="Show Date" description="Show the date beside the clock in the TopBar.">
-          <Toggle checked={showDate} onChange={onToggleShowDate} />
-        </Row>
-        <Row
-          label="Show Battery"
-          description={
-            hasBattery === false
-              ? "No battery detected on this machine."
-              : "Only shown on battery-powered machines."
-          }
-        >
-          <Toggle checked={showBattery} onChange={onToggleShowBattery} disabled={hasBattery !== true} />
-        </Row>
-        <Row label="Show WiFi" description="Show the WiFi status icon in the TopBar.">
-          <Toggle checked={showWifi} onChange={onToggleShowWifi} />
-        </Row>
-        <Row label="Show Audio" description="Show the volume control in the TopBar.">
-          <Toggle checked={showAudio} onChange={onToggleShowAudio} />
-        </Row>
-      </Section>
+      <PreferencesSection
+        showTime={showTime}
+        showDate={showDate}
+        showDisplay={showDisplay}
+        showBattery={showBattery}
+        showWifi={showWifi}
+        showAudio={showAudio}
+        onToggleShowTime={onToggleShowTime}
+        onToggleShowDate={onToggleShowDate}
+        onToggleShowDisplay={onToggleShowDisplay}
+        onToggleShowBattery={onToggleShowBattery}
+        onToggleShowWifi={onToggleShowWifi}
+        onToggleShowAudio={onToggleShowAudio}
+        onOpenWifi={onOpenWifi}
+        onOpenAudio={onOpenAudio}
+        onOpenBattery={onOpenBattery}
+        onOpenDisplay={onOpenDisplay}
+        hasBattery={hasBattery}
+      />
 
       <Section title="Integrations">
         <TailscaleRow />

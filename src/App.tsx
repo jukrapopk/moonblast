@@ -6,7 +6,7 @@ import { TopBar, type View } from "./components/TopBar";
 import { TitleBar } from "./components/TitleBar";
 import { AppsView } from "./components/AppsView";
 import { MoonlightView } from "./components/MoonlightView";
-import { SettingsView } from "./components/SettingsView";
+import { SettingsView, DisplaySettingsModal } from "./components/SettingsView";
 import { useSettings } from "./settings/SettingsContext";
 import { useGamepad } from "./hooks/useGamepad";
 import { openPowerMenu } from "./hooks/usePowerMenuTrigger";
@@ -99,6 +99,17 @@ export default function App() {
     if (!appsEnabled && view === "apps") setView("moonlight");
   }, [appsEnabled, view]);
 
+  // Modal open state — owned at the App level so both the TopBar chips
+  // and the Preferences gear buttons in Settings can open the same
+  // WifiModal / AudioModal / BatteryModal. The modals themselves stay
+  // in TopBar (rendered alongside the chips) since they need the hook
+  // data (currentSsid, master volume, battery percent) that's bound
+  // there.
+  const [wifiOpen, setWifiOpen] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [batteryOpen, setBatteryOpen] = useState(false);
+  const [displayOpen, setDisplayOpen] = useState(false);
+
   function setAppsEnabled(v: boolean) {
     update((s) => ({ ...s, integrations: { ...s.integrations, apps_enabled: v } }));
   }
@@ -140,6 +151,9 @@ export default function App() {
   }
   function setShowDate(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_date: v } }));
+  }
+  function setShowDisplay(v: boolean) {
+    update((s) => ({ ...s, customization: { ...s.customization, show_display: v } }));
   }
   function setShowWifi(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_wifi: v } }));
@@ -237,9 +251,18 @@ export default function App() {
         showApps={appsEnabled}
         showTime={settings.customization.show_time}
         showDate={settings.customization.show_date}
+        showDisplay={settings.customization.show_display}
         showWifi={settings.customization.show_wifi}
         showBattery={settings.customization.show_battery}
         showAudio={settings.customization.show_audio}
+        wifiOpen={wifiOpen}
+        setWifiOpen={setWifiOpen}
+        audioOpen={audioOpen}
+        setAudioOpen={setAudioOpen}
+        batteryOpen={batteryOpen}
+        setBatteryOpen={setBatteryOpen}
+        displayOpen={displayOpen}
+        setDisplayOpen={setDisplayOpen}
       />
       <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
@@ -272,12 +295,18 @@ export default function App() {
                 onToggleShowTime={setShowTime}
                 showDate={settings.customization.show_date}
                 onToggleShowDate={setShowDate}
+                showDisplay={settings.customization.show_display}
+                onToggleShowDisplay={setShowDisplay}
                 showWifi={settings.customization.show_wifi}
                 onToggleShowWifi={setShowWifi}
                 showBattery={settings.customization.show_battery}
                 onToggleShowBattery={setShowBattery}
                 showAudio={settings.customization.show_audio}
                 onToggleShowAudio={setShowAudio}
+                onOpenWifi={() => setWifiOpen(true)}
+                onOpenAudio={() => setAudioOpen(true)}
+                onOpenBattery={() => setBatteryOpen(true)}
+                onOpenDisplay={() => setDisplayOpen(true)}
               />
             </motion.div>
           )}
@@ -285,6 +314,10 @@ export default function App() {
       </main>
       {/* Single global context menu — all views share it. */}
       <ContextMenuHost />
+      <DisplaySettingsModal
+        open={displayOpen}
+        onClose={() => setDisplayOpen(false)}
+      />
     </div>
   );
 }

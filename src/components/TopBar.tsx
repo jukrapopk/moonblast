@@ -56,10 +56,13 @@ function Status({
   onWifiClick,
   onAudioClick,
   onBatteryClick,
+  onDisplayClick,
   batteryOpen,
+  displayOpen,
   battery,
   wifi,
   audio,
+  showDisplay,
   showWifi,
   showBattery,
   showAudio,
@@ -67,10 +70,13 @@ function Status({
   onWifiClick: () => void;
   onAudioClick: () => void;
   onBatteryClick: () => void;
+  onDisplayClick: () => void;
   batteryOpen: boolean;
+  displayOpen: boolean;
   battery: BatteryStatus | null;
   wifi: WifiConnection | null | undefined;
   audio: AudioMaster | undefined;
+  showDisplay: boolean;
   showWifi: boolean;
   showBattery: boolean;
   showAudio: boolean;
@@ -114,6 +120,14 @@ function Status({
           onClick={onAudioClick}
         />
       )}
+      {showDisplay && (
+        <TopBarButton
+          label="Display"
+          icon={<Monitor size={24} weight="bold" />}
+          onClick={onDisplayClick}
+          active={displayOpen}
+        />
+      )}
     </div>
   );
 }
@@ -129,9 +143,18 @@ export function TopBar({
   showApps,
   showTime,
   showDate,
+  showDisplay,
   showWifi,
   showBattery,
   showAudio,
+  wifiOpen,
+  setWifiOpen,
+  audioOpen,
+  setAudioOpen,
+  batteryOpen,
+  setBatteryOpen,
+  displayOpen,
+  setDisplayOpen,
 }: {
   view: View;
   onNavigate: (v: View) => void;
@@ -143,9 +166,21 @@ export function TopBar({
   showApps: boolean;
   showTime: boolean;
   showDate: boolean;
+  showDisplay: boolean;
   showWifi: boolean;
   showBattery: boolean;
   showAudio: boolean;
+  // Modal open state — owned by the App level so the Preferences gear
+  // buttons in Settings can also open these (TopBar renders the modals
+  // because that's where the data hooks live).
+  wifiOpen: boolean;
+  setWifiOpen: (v: boolean) => void;
+  audioOpen: boolean;
+  setAudioOpen: (v: boolean) => void;
+  batteryOpen: boolean;
+  setBatteryOpen: (v: boolean) => void;
+  displayOpen: boolean;
+  setDisplayOpen: (v: boolean) => void;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
   const visibleLeft = leftItems.filter((i) => {
@@ -155,9 +190,6 @@ export function TopBar({
   });
   const rightItems = items.filter((i) => i.nav === "right");
   const [powerOpen, setPowerOpen] = useState(false);
-  const [wifiOpen, setWifiOpen] = useState(false);
-  const [audioOpen, setAudioOpen] = useState(false);
-  const [batteryOpen, setBatteryOpen] = useState(false);
   // Rust intercepts Alt+F4 (and taskbar-Close) while in Immersive Mode
   // and asks us to open the Power menu via the global trigger. Subscribe
   // directly so every request reaches us even if the menu is already
@@ -230,10 +262,13 @@ export function TopBar({
         onWifiClick={() => setWifiOpen(true)}
         onAudioClick={() => setAudioOpen(true)}
         onBatteryClick={() => setBatteryOpen(true)}
+        onDisplayClick={() => setDisplayOpen(true)}
         batteryOpen={batteryOpen}
+        displayOpen={displayOpen}
         battery={battery}
         wifi={wifi}
         audio={audio}
+        showDisplay={showDisplay}
         showWifi={showWifi}
         showBattery={showBattery}
         showAudio={showAudio}
