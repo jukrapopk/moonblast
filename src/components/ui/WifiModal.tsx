@@ -2,11 +2,6 @@ import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import {
-  WifiHigh,
-  WifiLow,
-  WifiMedium,
-  WifiNone,
-  WifiSlash,
   Lock,
   ArrowsClockwise,
   CaretRight,
@@ -14,6 +9,7 @@ import {
   Eye,
   EyeSlash,
 } from "@phosphor-icons/react";
+import { WifiIcon } from "./WifiIcon";
 import {
   fetchWifiCurrent,
   useWifiScan,
@@ -60,13 +56,10 @@ interface WifiModalProps {
   radioOn: boolean | null;
 }
 
-function signalIcon(signal: number) {
-  const weight = "bold" as const;
-  if (signal >= 75) return <WifiHigh size={20} weight={weight} />;
-  if (signal >= 50) return <WifiMedium size={20} weight={weight} />;
-  if (signal >= 25) return <WifiLow size={20} weight={weight} />;
-  if (signal > 0) return <WifiNone size={20} weight={weight} />;
-  return <WifiSlash size={20} weight={weight} />;
+function signalIcon(signal: number, radioOn: boolean | null) {
+  // Per-row signal only renders when the radio is on (the modal skips
+  // scan + hides the list when off), so we treat null/true the same.
+  return <WifiIcon signal={signal} radioOn={radioOn ?? true} size={20} />;
 }
 
 function signalTone(signal: number) {
@@ -166,6 +159,7 @@ function PasswordForm({
 function NetworkRow({
   net,
   currentSsid,
+  radioOn,
   onConnect,
   onNeedsPassword,
   onDisconnect,
@@ -178,6 +172,8 @@ function NetworkRow({
 }: {
   net: WifiNetwork;
   currentSsid: string | null;
+  /** Radio state — used by the signal icon to render `WifiX` when off. */
+  radioOn: boolean | null;
   onConnect: (ssid: string) => void;
   /** Click on a secured network with no saved profile — show the
    *  in-app password prompt instead of opening Windows settings. */
@@ -209,7 +205,7 @@ function NetworkRow({
   const rowBody = (
     <>
       <div className="relative flex w-7 shrink-0 items-center justify-center">
-        <span className={signalTone(net.signal)}>{signalIcon(net.signal)}</span>
+        <span className={signalTone(net.signal)}>{signalIcon(net.signal, radioOn)}</span>
         {net.gen && (
           <span className="absolute -bottom-0.5 right-0.5 text-[10px] font-bold leading-none text-(--color-muted)">
             {net.gen}
@@ -485,6 +481,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
                     key={net.ssid}
                     net={net}
                     currentSsid={liveSsid}
+                    radioOn={radioOn}
                     onConnect={handleConnect}
                     onNeedsPassword={setPasswordTarget}
                     onDisconnect={handleDisconnect}

@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { BatteryIcon } from "./ui/BatteryIcon";
+import { WifiIcon } from "./ui/WifiIcon";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
@@ -37,14 +38,7 @@ function batteryIcon(percent: number, charging: boolean) {
 }
 
 function wifiChipIcon(wifi: WifiConnection) {
-  const weight = "bold" as const;
-  if (!wifi.radioOn) return <WifiX size={24} weight={weight} />;
-  const signal = wifi.signal;
-  if (signal >= 75) return <WifiHigh size={24} weight={weight} />;
-  if (signal >= 50) return <WifiMedium size={24} weight={weight} />;
-  if (signal >= 25) return <WifiLow size={24} weight={weight} />;
-  if (signal > 0) return <WifiNone size={24} weight={weight} />;
-  return <WifiSlash size={24} weight={weight} />;
+  return <WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />;
 }
 
 /** Speaker glyph matching the main mixer level + mute state. */
