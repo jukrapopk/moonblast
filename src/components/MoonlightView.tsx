@@ -130,18 +130,28 @@ function HostCard({
     entry.saved &&
     !!entry.pairedInfo &&
     entry.savedInfo?.address !== entry.pairedInfo.address;
+  // Probe is still in flight for saved/paired hosts — we render a "Checking…"
+  // pill and reserve the action-button slots in their disabled final size so
+  // nothing jumps when the probe lands. Only applies to paired/saved hosts;
+  // unpaired discovery-only entries never get probed (mDNS is the signal)
+  // and resolve straight to "online".
+  const pending = !streaming && (entry.paired || entry.saved) && entry.probe === undefined;
   // Online/offline pill: prefer the explicit probe (works for saved +
   // paired entries); fall back to mDNS visibility for unpaired discovery
-  // entries that never get probed.
-  const status: "streaming" | "online" | "offline" | null = streaming
+  // entries that never get probed. While pending we surface a "Checking…"
+  // pill so the wait is visible — the alternative was a 3–5 s gap with
+  // just a name + address and no signal that anything was happening.
+  const status: "streaming" | "online" | "offline" | "checking" | null = streaming
     ? "streaming"
-    : entry.probe
-      ? entry.probe.reachable
-        ? "online"
-        : "offline"
-      : entry.discovery && !entry.paired
-        ? "online"
-        : null;
+    : pending
+      ? "checking"
+      : entry.probe
+        ? entry.probe.reachable
+          ? "online"
+          : "offline"
+        : entry.discovery && !entry.paired
+          ? "online"
+          : null;
   // Reachability (with a small unpaired-discovery fallback). Used to gate
   // both Stream and Pair buttons — Pair can't fetch a cert from an
   // unreachable host, and Stream needs a paired host to talk to GameStream.
@@ -154,6 +164,11 @@ function HostCard({
   // and right-click is the escape hatch.
   const showStream = !streaming && entry.paired && reachable;
   const showPair = !streaming && !entry.paired && reachable;
+  // During pending we still want the Desktop/Apps buttons visible (disabled)
+  // so the card layout doesn't shift when the probe lands — only the
+  // disabled state flips. The Pair button is hidden because pairing only
+  // applies to unpaired hosts, which aren't pending.
+  const renderStream = showStream || (pending && entry.paired);
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -175,6 +190,7 @@ function HostCard({
             {status === "streaming" && <StatusPill pulse>Streaming</StatusPill>}
             {status === "online" && <StatusPill tone="accent">Online</StatusPill>}
             {status === "offline" && <StatusPill tone="muted">Offline</StatusPill>}
+            {status === "checking" && <StatusPill tone="muted" pulse>Checking…</StatusPill>}
           </div>
           <div className="mt-0.5 truncate text-xs text-(--color-muted)">{entry.address}</div>
         </div>
@@ -190,12 +206,12 @@ function HostCard({
             />
           ) : (
             <>
-              {showStream && (
+              {renderStream && (
                 <>
                   <Button
                     size="md"
                     onClick={onDesktop}
-                    disabled={busy}
+                    disabled={busy || pending}
                     icon={<Play size={15} weight="fill" />}
                     className="px-4 py-2 font-semibold"
                   >
@@ -205,7 +221,7 @@ function HostCard({
                     variant="outline"
                     size="md"
                     onClick={onApps}
-                    disabled={busy}
+                    disabled={busy || pending}
                     icon={<GameController size={14} weight="bold" />}
                     className="py-2"
                   >
