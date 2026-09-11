@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -149,6 +149,7 @@ function ResolutionPicker({
   current,
   onApply,
   onPendingChange,
+  onResolved,
 }: {
   modes: { width: number; height: number; refreshRates: number[] }[] | null | undefined;
   current: { width: number; height: number; refreshRate: number } | null | undefined;
@@ -156,6 +157,10 @@ function ResolutionPicker({
   /** Notified whenever a pending change becomes live or resolves — the
    *  parent uses this to revert on Settings unmount. */
   onPendingChange?: (hasPending: boolean) => void;
+  /** Notified when the OS display state changes (apply success, keep,
+   *  revert, auto-revert) so the parent can re-read the current mode and
+   *  refresh the dropdown selection. */
+  onResolved?: () => void;
 }) {
   // Local selection state for the two dropdowns. Defaults to the
   // currently-active mode when it loads; falls back to the first entry
@@ -191,10 +196,12 @@ function ResolutionPicker({
   // Auto-revert when countdown hits 0.
   useEffect(() => {
     if (pending && countdown === 0) {
-      invoke("revert_display_mode").catch(() => {});
+      invoke("revert_display_mode")
+        .catch(() => {})
+        .finally(() => onResolved?.());
       setPending(null);
     }
-  }, [countdown, pending]);
+  }, [countdown, pending, onResolved]);
   // Notify parent when pending resolves (Keep / Revert / auto-revert).
   useEffect(() => {
     if (pending === null) onPendingChange?.(false);
@@ -219,16 +226,26 @@ function ResolutionPicker({
     refresh === current.refreshRate;
   function apply() {
     if (width === null || height === null || refresh === null) return;
-    onApply(width, height, refresh).then(() => {
-      setPending({ width, height, refresh });
-    });
+    onApply(width, height, refresh)
+      .then(() => {
+        // Refresh the "current" reading so the dropdown reflects the
+        // mode we just applied, then open the confirmation modal.
+        onResolved?.();
+        setPending({ width, height, refresh });
+      })
+      .catch(() => {
+        // apply failed -- onApply already invoked refreshDisplay itself
+        setPending(null);
+      });
   }
   async function keep() {
     await invoke("keep_display_mode");
+    onResolved?.();
     setPending(null);
   }
   async function revert() {
     await invoke("revert_display_mode");
+    onResolved?.();
     setPending(null);
   }
   return (
@@ -439,14 +456,18 @@ export function SettingsView({
     refreshDisplay();
   }, []);
   // Revert any pending change when leaving Settings — the modal-based
-  // confirmation already covers in-page flow.
+  // confirmation already covers in-page flow. Use a ref so the cleanup
+  // always reads the latest hasPending value at unmount (without
+  // re-firing on every state flip).
+  const hasPendingRef = useRef(hasPending);
+  hasPendingRef.current = hasPending;
   useEffect(() => {
     return () => {
-      if (hasPending) {
+      if (hasPendingRef.current) {
         invoke("revert_display_mode").catch(() => {});
       }
     };
-  }, [hasPending]);
+  }, []);
 
   async function checkKey() {
     if (!steamgridKey) return;
@@ -523,12 +544,9 @@ export function SettingsView({
           modes={displayModes}
           current={currentMode}
           onPendingChange={setHasPending}
+          onResolved={refreshDisplay}
           onApply={async (width, height, refreshRate) => {
-            try {
-              await invoke("apply_display_mode", { width, height, refreshRate });
-            } catch {
-              await refreshDisplay();
-            }
+            await invoke("apply_display_mode", { width, height, refreshRate });
           }}
         />
       </Section>
