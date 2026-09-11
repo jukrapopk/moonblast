@@ -611,16 +611,21 @@ export function AppsView() {
           refreshIcon(a);
         },
       },
-      {
-        // When toggled on, a filled `CheckFat` (fill weight) confirms the
-        // intent; when off, no icon — keeps the row visually identical to
-        // other menu items. 16px gives presence against the long label.
-        // Toggling is a no-op until the next sign-in that boots Moonblast
-        // via the shell stub (`--autostart`).
-        icon: a.auto_launch ? <CheckFat size={16} weight="fill" /> : null,
-        label: "Autolaunch with Auto Immersive Mode",
-        onClick: () => setAutoLaunch(a.path, !a.auto_launch),
-      },
+      ...(settings.fullscreen.auto_immersive
+        ? [
+            {
+              // When toggled on, a filled `CheckFat` (fill weight) confirms
+              // the intent; when off, no icon — keeps the row visually
+              // identical to other menu items. 16px gives presence against
+              // the long label. Hidden entirely when Auto Immersive Mode is
+              // off because the toggle is a no-op then (the shell stub
+              // never fires).
+              icon: a.auto_launch ? <CheckFat size={16} weight="fill" /> : null,
+              label: "Autolaunch with Auto Immersive Mode",
+              onClick: () => setAutoLaunch(a.path, !a.auto_launch),
+            },
+          ]
+        : []),
       { label: "Remove", danger: true, onClick: () => removeShortcut(a.path) },
     ]);
   }
