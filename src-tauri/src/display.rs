@@ -23,6 +23,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 
 #[derive(serde::Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
 pub struct DisplayMode {
     pub width: u32,
     pub height: u32,
@@ -30,6 +31,7 @@ pub struct DisplayMode {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DisplayOption {
     pub width: u32,
     pub height: u32,
