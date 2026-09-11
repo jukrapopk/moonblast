@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { BatteryCharging, BatteryEmpty, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning, WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
+import { WifiHigh, WifiLow, WifiMedium, WifiNone, WifiSlash, WifiX, SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
 import { SpeakerIcon } from "./ui/SpeakerIcon";
+import { BatteryIcon } from "./ui/BatteryIcon";
 import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
@@ -32,14 +33,7 @@ function formatDurationShort(sec: number | null): string {
 
 /** Pick the right battery glyph for the current level + charging state. */
 function batteryIcon(percent: number, charging: boolean) {
-  const size = 24;
-  const weight = "bold" as const;
-  if (charging) return <BatteryCharging size={size} weight={weight} />;
-  if (percent < 0) return <BatteryWarning size={size} weight={weight} />;
-  if (percent <= 10) return <BatteryEmpty size={size} weight={weight} />;
-  if (percent <= 35) return <BatteryLow size={size} weight={weight} />;
-  if (percent <= 75) return <BatteryMedium size={size} weight={weight} />;
-  return <BatteryFull size={size} weight={weight} />;
+  return <BatteryIcon percent={percent} charging={charging} size={24} />;
 }
 
 function wifiChipIcon(wifi: WifiConnection) {
