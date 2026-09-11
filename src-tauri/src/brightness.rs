@@ -37,10 +37,6 @@ pub struct BrightnessStatus {
     pub min: u8,
     /// Highest level in the panel's discrete level set (almost always 100).
     pub max: u8,
-    /// Number of discrete levels (e.g. 101 for 0–100 in 1 % steps).
-    /// Frontend uses this to compute the slider `step` so values snap
-    /// to allowed levels.
-    pub levels_count: u32,
 }
 
 impl Default for BrightnessStatus {
@@ -51,7 +47,6 @@ impl Default for BrightnessStatus {
             current: None,
             min: 0,
             max: 0,
-            levels_count: 0,
         }
     }
 }
@@ -69,7 +64,7 @@ pub fn read_brightness() -> BrightnessStatus {
     //
     // NB: single physical line — PowerShell's `-Command` parses on
     // newlines.
-    let script = r#"$b = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue; if ($b) { $active = $b | Where-Object { $_.Active } | Select-Object -First 1; if (-not $active) { $active = $b | Select-Object -First 1 }; $lvls = @($active.Level); [PSCustomObject]@{s=$true;a=$true;c=[int]$active.CurrentBrightness;min=[int]($lvls | Measure-Object -Minimum).Minimum;max=[int]($lvls | Measure-Object -Maximum).Maximum;h=[int]$lvls.Count} | ConvertTo-Json -Compress } else { '{"s":false,"a":false,"c":null,"min":0,"max":0,"h":0}' }"#;
+    let script = r#"$b = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue; if ($b) { $active = $b | Where-Object { $_.Active } | Select-Object -First 1; if (-not $active) { $active = $b | Select-Object -First 1 }; $lvls = @($active.Level); [PSCustomObject]@{s=$true;a=$true;c=[int]$active.CurrentBrightness;min=[int]($lvls | Measure-Object -Minimum).Minimum;max=[int]($lvls | Measure-Object -Maximum).Maximum} | ConvertTo-Json -Compress } else { '{"s":false,"a":false,"c":null,"min":0,"max":0}' }"#;
     let Ok(out) = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
         .creation_flags(0x0800_0000)
@@ -102,7 +97,6 @@ pub fn read_brightness() -> BrightnessStatus {
         current: v.get("c").and_then(|x| x.as_u64()).map(|n| n.min(255) as u8),
         min: v.get("min").and_then(|x| x.as_u64()).map(|n| n.min(255) as u8).unwrap_or(0),
         max: v.get("max").and_then(|x| x.as_u64()).map(|n| n.min(255) as u8).unwrap_or(0),
-        levels_count: v.get("h").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
     }
 }
 
@@ -121,8 +115,12 @@ pub fn set_brightness(level: u8, fade_sec: u32) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     let level = level.min(100);
+    // `$m.WmiSetBrightness(...)` on `Get-WmiObject` (legacy WMI) is the
+    // pair that actually binds the method args for WMI v1 classes. The
+    // `Get-CimInstance | Invoke-CimMethod -Arguments @{...}` modern path
+    // silently no-ops on this class.
     let script = format!(
-        r#"(Get-WmiObject -Namespace root\wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness({fade_sec}, {level}) | Out-Null"#
+        r#"$m = Get-WmiObject -Namespace root\wmi -Class WmiMonitorBrightnessMethods; if ($m) {{ $m.WmiSetBrightness({fade_sec}, {level}) | Out-Null }} else {{ Write-Error 'WmiMonitorBrightnessMethods not found' }}"#
     );
     let out = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])

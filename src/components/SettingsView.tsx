@@ -380,8 +380,6 @@ interface BrightnessStatus {
   min: number;
   /** Highest level (almost always 100). */
   max: number;
-  /** Number of discrete levels — used for slider `step`. */
-  levels_count: number;
 }
 
 /** Display settings modal — reuses the ResolutionPicker + HDR + Monitor
@@ -612,8 +610,11 @@ export function DisplaySettingsModal({
       // the OS without being clobbered by an in-flight read returning
       // the old value.
       brightnessPendingCommit.current = true;
-      void invoke("set_brightness", { level: v }).catch(() => {
-        // ignore — refresh on next poll will resync from reality
+      void invoke("set_brightness", { level: v }).catch((e) => {
+        // Surface in dev console — the OS-level error is the actionable
+        // signal (panel rejected the level, WMI not available, etc.). The
+        // next poll will still resync to reality even if the write failed.
+        console.error("set_brightness failed:", e);
       });
       brightnessWriteTimer.current = null;
     }, 250);
@@ -690,9 +691,7 @@ export function DisplaySettingsModal({
         <Row
           label="Brightness"
           description={
-            brightness.current !== null
-              ? `Currently ${brightness.current}%${brightness.levels_count > 0 ? ` · ${brightness.levels_count} levels` : ""}.`
-              : "Reading…"
+            brightness.current !== null ? `Currently ${brightness.current}%` : "Reading…"
           }
         >
           <div className="flex items-center gap-3">
@@ -704,11 +703,7 @@ export function DisplaySettingsModal({
                 label="Brightness"
                 min={brightness.min}
                 max={brightness.max}
-                step={
-                  brightness.levels_count > 1
-                    ? Math.max(1, Math.round((brightness.max - brightness.min) / (brightness.levels_count - 1)))
-                    : 1
-                }
+                step={1}
               />
             </div>
             <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
