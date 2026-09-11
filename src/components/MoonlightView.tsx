@@ -130,7 +130,7 @@ function HostCard({
     entry.saved &&
     !!entry.pairedInfo &&
     entry.savedInfo?.address !== entry.pairedInfo.address;
-  // Probe is still in flight for saved/paired hosts — we render a "Checking…"
+  // Probe is still in flight for saved/paired hosts — we render a "Checking"
   // pill and reserve the action-button slots in their disabled final size so
   // nothing jumps when the probe lands. Only applies to paired/saved hosts;
   // unpaired discovery-only entries never get probed (mDNS is the signal)
@@ -138,7 +138,7 @@ function HostCard({
   const pending = !streaming && (entry.paired || entry.saved) && entry.probe === undefined;
   // Online/offline pill: prefer the explicit probe (works for saved +
   // paired entries); fall back to mDNS visibility for unpaired discovery
-  // entries that never get probed. While pending we surface a "Checking…"
+  // entries that never get probed. While pending we surface a "Checking"
   // pill so the wait is visible — the alternative was a 3–5 s gap with
   // just a name + address and no signal that anything was happening.
   const status: "streaming" | "online" | "offline" | "checking" | null = streaming
@@ -190,7 +190,7 @@ function HostCard({
             {status === "streaming" && <StatusPill pulse>Streaming</StatusPill>}
             {status === "online" && <StatusPill tone="accent">Online</StatusPill>}
             {status === "offline" && <StatusPill tone="muted">Offline</StatusPill>}
-            {status === "checking" && <StatusPill tone="muted" pulse>Checking…</StatusPill>}
+            {status === "checking" && <StatusPill tone="muted" pulse>Checking</StatusPill>}
           </div>
           <div className="mt-0.5 truncate text-xs text-(--color-muted)">{entry.address}</div>
         </div>

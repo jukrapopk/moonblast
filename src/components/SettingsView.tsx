@@ -53,7 +53,7 @@ type TailscaleStatus =
     if (status === null) {
       return (
         <Row label="Tailscale">
-          <span className="text-sm text-(--color-muted)">Checking…</span>
+          <span className="text-sm text-(--color-muted)">Checking</span>
         </Row>
       );
     }
@@ -262,7 +262,7 @@ function ResolutionPicker({
         label="Resolution"
         description={
           modes === undefined
-            ? "Checking…"
+            ? "Checking"
             : modes === null
               ? "Couldn't read display modes."
               : current
@@ -512,7 +512,7 @@ export function DisplaySettingsModal({
         label="HDR"
         description={
           hdrStatus === undefined
-            ? "Checking…"
+            ? "Checking"
             : hdrStatus === null
               ? "Couldn't detect display capabilities."
               : !hdrStatus.supported
@@ -795,7 +795,7 @@ export function SettingsView({
     };
   }, []);
   // HDR on the primary display. `undefined` while we haven't checked yet
-  // (description says "Checking…"); `null` after a failed IPC read; an
+  // (description says "Checking"); `null` after a failed IPC read; an
   // object with `supported: false` means the panel/driver don't advertise
   async function checkKey() {
     if (!steamgridKey) return;
@@ -898,7 +898,7 @@ export function SettingsView({
               }`}
           >
             {sgStatus === "checking"
-              ? "Checking…"
+              ? "Checking"
               : sgStatus === "valid"
                 ? "✓ Key is valid."
                 : sgStatus === "invalid"
