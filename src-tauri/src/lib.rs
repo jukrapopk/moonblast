@@ -2662,6 +2662,12 @@ async fn audio_reset_sessions() -> Result<usize, String> {
 
 /// Read the primary display's HDR state. Sync — two DisplayConfig*
 /// syscalls, no IO, runs in microseconds. See `hdr.rs` for the rationale.
+///
+/// HDR always targets the primary display: the GDI adapter name
+/// (`\\.\DISPLAYn`) can't be mapped back to a `DISPLAYCONFIG_PATH_INFO`
+/// via any public API, so per-monitor HDR targeting isn't possible from
+/// the Settings picker. The Monitor dropdown is for the resolution
+/// picker only.
 #[tauri::command]
 fn hdr_status() -> hdr::HdrStatus {
     hdr::hdr_status()
@@ -2674,42 +2680,56 @@ fn set_hdr(enabled: bool) -> Result<(), String> {
     hdr::set_hdr(enabled)
 }
 
-/// List every resolution + refresh-rate combination the primary display
-/// reports as monitor-compatible (matches Windows Settings). The frontend
-/// renders this as a two-step picker.
+/// List every attached GDI monitor. Each entry's `device_name` is the
+/// `\\.\DISPLAYn` string the rest of the API uses to identify the adapter.
+/// Disabled (attached-but-not-in-desktop) monitors come through too with
+/// `disabled = true` so the frontend can show them as a non-selectable row.
 #[tauri::command]
-fn display_modes() -> Vec<display::DisplayOption> {
-    display::display_modes()
+fn list_monitors() -> Vec<display::Monitor> {
+    display::list_monitors()
 }
 
-/// Read the primary display's currently-active resolution + refresh rate.
+/// List every resolution + refresh-rate combination the named monitor
+/// reports as monitor-compatible (matches Windows Settings). Pass `None`
+/// for the primary monitor.
+#[tauri::command]
+fn display_modes(device_name: Option<String>) -> Vec<display::DisplayOption> {
+    display::display_modes_for(device_name.as_deref())
+}
+
+/// Read the named monitor's currently-active resolution + refresh rate.
 /// Drives the picker's initial selection.
 #[tauri::command]
-fn current_display() -> Result<display::CurrentDisplay, String> {
-    display::current_display()
+fn current_display(device_name: Option<String>) -> Result<display::CurrentDisplay, String> {
+    display::current_display_for(device_name.as_deref())
 }
 
-/// Apply a new (width, height, refresh_hz) on the primary display via
+/// Apply a new (width, height, refresh_hz) on the named monitor via
 /// `ChangeDisplaySettingsExW` with no flags (dynamic — reverts on
 /// sign-out / reboot). Records the prior mode so `revert_display_mode`
 /// can roll back during the 10-second Keep/Revert window.
 #[tauri::command]
-fn apply_display_mode(width: u32, height: u32, refresh_rate: u32) -> Result<(), String> {
-    display::apply_display_mode(width, height, refresh_rate)
+fn apply_display_mode(
+    device_name: Option<String>,
+    width: u32,
+    height: u32,
+    refresh_rate: u32,
+) -> Result<(), String> {
+    display::apply_display_mode_for(device_name.as_deref(), width, height, refresh_rate)
 }
 
-/// Revert to the mode that was active before the last `apply_display_mode`.
-/// No-op when no change is pending.
+/// Revert to the mode that was active before the last `apply_display_mode`
+/// for the named monitor. No-op when no change is pending for it.
 #[tauri::command]
-fn revert_display_mode() -> Result<(), String> {
-    display::revert_display_mode()
+fn revert_display_mode(device_name: Option<String>) -> Result<(), String> {
+    display::revert_display_mode_for(device_name.as_deref())
 }
 
-/// Confirm the last applied mode — clears the pending revert so the
-/// 10-second auto-revert timer no longer fires.
+/// Confirm the last applied mode on the named monitor — clears the
+/// pending revert so the 10-second auto-revert timer no longer fires.
 #[tauri::command]
-fn keep_display_mode() -> Result<(), String> {
-    display::keep_display_mode()
+fn keep_display_mode(device_name: Option<String>) -> Result<(), String> {
+    display::keep_display_mode_for(device_name.as_deref())
 }
 
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
@@ -2962,6 +2982,7 @@ pub fn run() {
             steamgrid_icons,
             hdr_status,
             set_hdr,
+            list_monitors,
             display_modes,
             current_display,
             apply_display_mode,

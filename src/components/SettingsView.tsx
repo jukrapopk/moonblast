@@ -150,6 +150,7 @@ function ResolutionPicker({
   onApply,
   onPendingChange,
   onResolved,
+  deviceName,
 }: {
   modes: { width: number; height: number; refreshRates: number[] }[] | null | undefined;
   current: { width: number; height: number; refreshRate: number } | null | undefined;
@@ -161,6 +162,10 @@ function ResolutionPicker({
    *  revert, auto-revert) so the parent can re-read the current mode and
    *  refresh the dropdown selection. */
   onResolved?: () => void;
+  /** GDI device name (`\\.\DISPLAYn`) of the monitor to target — threaded
+   *  through every apply/keep/revert IPC call so multi-monitor setups
+   *  don't always hit the primary. */
+  deviceName: string | null;
 }) {
   // Local selection state for the two dropdowns. Defaults to the
   // currently-active mode when it loads; falls back to the first entry
@@ -196,7 +201,7 @@ function ResolutionPicker({
   // Auto-revert when countdown hits 0.
   useEffect(() => {
     if (pending && countdown === 0) {
-      invoke("revert_display_mode")
+      invoke("revert_display_mode", { deviceName })
         .catch(() => {})
         .finally(() => onResolved?.());
       setPending(null);
@@ -243,12 +248,12 @@ function ResolutionPicker({
       });
   }
   async function keep() {
-    await invoke("keep_display_mode");
+    await invoke("keep_display_mode", { deviceName });
     onResolved?.();
     setPending(null);
   }
   async function revert() {
-    await invoke("revert_display_mode");
+    await invoke("revert_display_mode", { deviceName });
     onResolved?.();
     setPending(null);
   }
@@ -411,6 +416,33 @@ export function SettingsView({
   // object with `supported: false` means the panel/driver don't advertise
   // HDR (toggle disabled); `locked: true` means the OS has wideColorEnforced
   // or advancedColorForceDisabled set — the SET request would be silently
+  // Monitor picker. `list_monitors` returns every attached GDI adapter
+  // (`\\.\DISPLAYn`) with its friendly name and the active/primary flags.
+  // The dropdown drives the resolution picker — HDR always targets the
+  // primary display because there's no public Win32 API to map a GDI
+  // adapter name back to a `DISPLAYCONFIG_PATH_INFO`.
+  const [monitors, setMonitors] = useState<
+    {
+      deviceName: string;
+      friendlyName: string;
+      primary: boolean;
+      disabled: boolean;
+    }[]
+    | null
+  >(null);
+  const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
+  const selectedMonitor =
+    selectedDeviceName === null
+      ? null
+      : (monitors ?? []).find((m) => m.deviceName === selectedDeviceName) ?? null;
+  // Stable ref so async refresh callbacks can read the live selection
+  // without re-binding effects on every change. Shared by refreshHdr,
+  // refreshDisplay, and the unmount-cleanup revert path.
+  const selectedMonitorRef = useRef(selectedMonitor);
+  selectedMonitorRef.current = selectedMonitor;
+
+  // HDR (toggle disabled); `locked: true` means the OS has wideColorEnforced
+  // or advancedColorForceDisabled set — the SET request would be silently
   // ignored, so the toggle is disabled with a "Change in Windows display
   // settings" hint.
   const [hdrStatus, setHdrStatus] = useState<
@@ -451,11 +483,46 @@ export function SettingsView({
     { width: number; height: number; refreshRate: number } | null | undefined
   >(undefined);
   const [hasPending, setHasPending] = useState(false);
+  async function refreshMonitors() {
+    try {
+      const list = await invoke<
+        {
+          deviceName: string;
+          friendlyName: string;
+          primary: boolean;
+          disabled: boolean;
+        }[]
+      >("list_monitors");
+      setMonitors(list);
+      // Auto-pick the primary monitor the first time we see a list;
+      // after that, keep whatever the user selected.
+      if (selectedDeviceName === null) {
+        const primary = list.find((m) => m.primary && !m.disabled) ?? list.find((m) => !m.disabled);
+        if (primary) setSelectedDeviceName(primary.deviceName);
+      } else if (!list.some((m) => m.deviceName === selectedDeviceName)) {
+        // The selected monitor was unplugged — fall back to the primary.
+        const primary = list.find((m) => m.primary && !m.disabled) ?? list.find((m) => !m.disabled);
+        setSelectedDeviceName(primary?.deviceName ?? null);
+      }
+    } catch {
+      setMonitors(null);
+    }
+  }
   async function refreshDisplay() {
+    const m = selectedMonitorRef.current;
+    if (!m) {
+      setDisplayModes(null);
+      setCurrentMode(null);
+      return;
+    }
     try {
       const [modes, cur] = await Promise.all([
-        invoke<{ width: number; height: number; refreshRates: number[] }[]>("display_modes"),
-        invoke<{ width: number; height: number; refreshRate: number }>("current_display"),
+        invoke<{ width: number; height: number; refreshRates: number[] }[]>("display_modes", {
+          deviceName: m.deviceName,
+        }),
+        invoke<{ width: number; height: number; refreshRate: number }>("current_display", {
+          deviceName: m.deviceName,
+        }),
       ]);
       setDisplayModes(modes);
       setCurrentMode(cur);
@@ -465,8 +532,13 @@ export function SettingsView({
     }
   }
   useEffect(() => {
-    refreshDisplay();
+    refreshMonitors();
   }, []);
+  // Re-fetch modes + current when the user picks a different monitor.
+  // HDR refresh is wired through refreshHdr's effect above.
+  useEffect(() => {
+    refreshDisplay();
+  }, [selectedDeviceName]);
   // Revert any pending change when leaving Settings — the modal-based
   // confirmation already covers in-page flow. Use a ref so the cleanup
   // always reads the latest hasPending value at unmount (without
@@ -476,7 +548,8 @@ export function SettingsView({
   useEffect(() => {
     return () => {
       if (hasPendingRef.current) {
-        invoke("revert_display_mode").catch(() => {});
+        const m = selectedMonitorRef.current;
+        invoke("revert_display_mode", { deviceName: m?.deviceName ?? null }).catch(() => {});
       }
     };
   }, []);
@@ -526,6 +599,27 @@ export function SettingsView({
 
       <Section title="Display">
         <Row
+          label="Monitor"
+          description={
+            monitors === null
+              ? "Couldn't enumerate monitors."
+              : selectedMonitor
+                ? selectedMonitor.disabled
+                  ? `${selectedMonitor.friendlyName} (disabled — not in the desktop)`
+                  : `Resolution target: ${selectedMonitor.friendlyName}${selectedMonitor.primary ? " (primary)" : ""}.`
+                : ""
+          }
+        >
+          <Select
+            options={(monitors ?? []).map((m) => ({
+              value: m.deviceName,
+              label: `${m.friendlyName}${m.primary ? " (primary)" : ""}${m.disabled ? " — disabled" : ""}`,
+            }))}
+            value={selectedDeviceName ?? ""}
+            onChange={setSelectedDeviceName}
+          />
+        </Row>
+        <Row
           label="HDR"
           description={
             hdrStatus === undefined
@@ -537,8 +631,8 @@ export function SettingsView({
                   : hdrStatus.locked
                     ? "Locked by Windows color settings — change HDR / wide-color in Display Settings."
                     : hdrStatus.enabled
-                      ? "HDR is on."
-                      : "HDR is off."
+                      ? "HDR is on (primary display)."
+                      : "HDR is off (primary display)."
           }
         >
           <Toggle
@@ -557,8 +651,14 @@ export function SettingsView({
           current={currentMode}
           onPendingChange={setHasPending}
           onResolved={refreshDisplay}
+          deviceName={selectedMonitor?.deviceName ?? null}
           onApply={async (width, height, refreshRate) => {
-            await invoke("apply_display_mode", { width, height, refreshRate });
+            await invoke("apply_display_mode", {
+              deviceName: selectedMonitor?.deviceName ?? null,
+              width,
+              height,
+              refreshRate,
+            });
           }}
         />
       </Section>

@@ -64,6 +64,12 @@ impl Default for HdrStatus {
     }
 }
 
+/// `DisplayConfigGetDeviceInfo` returns the raw HRESULT as `i32`. Zero is
+/// ERROR_SUCCESS; anything else is treated as "unsupported".
+const fn hr_ok(hr: i32) -> bool {
+    hr == 0
+}
+
 /// Look up the first active display path. Returns `(adapter_id, target_id)`
 /// or `None` if there are no active paths / the API call fails.
 ///
@@ -101,17 +107,11 @@ fn first_active_path() -> Option<(windows::Win32::Foundation::LUID, u32)> {
     }
 }
 
-/// `DisplayConfigGetDeviceInfo` returns the raw HRESULT as `i32`. Zero is
-/// ERROR_SUCCESS; anything else is treated as "unsupported".
-const fn hr_ok(hr: i32) -> bool {
-    hr == 0
-}
-
-pub fn hdr_status() -> HdrStatus {
+pub fn hdr_status_for(adapter_low: u32, adapter_high: i32, target_id: u32) -> HdrStatus {
     unsafe {
-        let Some((adapter_id, target_id)) = first_active_path() else {
-            moonblast_log!("hdr_status: no active path");
-            return HdrStatus::default();
+        let adapter_id = windows::Win32::Foundation::LUID {
+            LowPart: adapter_low,
+            HighPart: adapter_high,
         };
         let mut info: DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO = std::mem::zeroed();
         info.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
@@ -144,10 +144,29 @@ pub fn hdr_status() -> HdrStatus {
     }
 }
 
-pub fn set_hdr(enabled: bool) -> Result<(), String> {
+/// Convenience wrapper: HDR always targets the first active display path.
+/// The Settings Monitor dropdown is for the resolution picker only — HDR
+/// has no per-monitor targeting because the GDI-name-to-DisplayConfig-
+/// adapterId mapping isn't exposed by any public Win32 API.
+pub fn hdr_status() -> HdrStatus {
+    let Some((adapter_id, target_id)) = first_active_path() else {
+        moonblast_log!("hdr_status: no active path");
+        return HdrStatus::default();
+    };
+    hdr_status_for(adapter_id.LowPart, adapter_id.HighPart, target_id)
+}
+
+pub fn set_hdr_for(
+    adapter_low: u32,
+    adapter_high: i32,
+    target_id: u32,
+    enabled: bool,
+) -> Result<(), String> {
     unsafe {
-        let (adapter_id, target_id) =
-            first_active_path().ok_or_else(|| "No active display path found".to_string())?;
+        let adapter_id = windows::Win32::Foundation::LUID {
+            LowPart: adapter_low,
+            HighPart: adapter_high,
+        };
         let mut packet: DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE = std::mem::zeroed();
         packet.header.r#type = DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE;
         packet.header.size = std::mem::size_of::<DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE>() as u32;
@@ -169,4 +188,11 @@ pub fn set_hdr(enabled: bool) -> Result<(), String> {
         }
         Ok(())
     }
+}
+
+/// Convenience wrapper — see `hdr_status`.
+pub fn set_hdr(enabled: bool) -> Result<(), String> {
+    let (adapter_id, target_id) =
+        first_active_path().ok_or_else(|| "No active display path found".to_string())?;
+    set_hdr_for(adapter_id.LowPart, adapter_id.HighPart, target_id, enabled)
 }
