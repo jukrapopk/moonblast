@@ -2,6 +2,7 @@ import {
   BatteryCharging,
   BatteryEmpty,
   BatteryFull,
+  BatteryHigh,
   BatteryLow,
   BatteryMedium,
   BatteryWarning,
@@ -15,53 +16,33 @@ interface BatteryIconProps {
 }
 
 /**
- * Single battery glyph used by the TopBar chip. Normal state is a dimmed
- * level-based base (Empty / Low / Medium / Full) with a full-brightness
- * `BatteryCharging` overlay directly on top when charging — mirroring
- * `SpeakerIcon`'s stacked-icon pattern so the chip "feels" the same as
- * the audio and WiFi indicators. Unknown (`percent < 0`) renders a lone
- * `BatteryWarning` with no overlay.
+ * Single battery glyph used by the TopBar chip. One glyph, picked by
+ * state — no layering:
  *
- * At 100% the bold-outline `BatteryFull` silhouette has no internal bar
- * segments (they collapse into the outline at full charge), so the
- * dimmed 40%-opacity treatment reads as "off / muted" — same as a
- * powered-down chip. Fix: render a fully-filled `BatteryFull` (fill
- * weight) at 100% opacity when `percent >= 100`. The chip reads as
- * "topped up" instead of dead, while still staying distinct from the
- * partial states (Medium/Low/Empty) that the outline-with-bars style
- * continues to carry.
+ *   - charging wins over level (the OS-driven "actively accepting
+ *     current" indicator is the actionable signal)
+ *   - unknown (`percent < 0`) → `BatteryWarning`
+ *   - 81–100% → `BatteryFull`
+ *   - 61–80%  → `BatteryHigh`
+ *   - 36–60%  → `BatteryMedium`
+ *   - 11–35%  → `BatteryLow`
+ *   - 0–10%   → `BatteryEmpty`
  */
 export function BatteryIcon({ percent, charging, size = 24 }: BatteryIconProps) {
   if (percent < 0) {
     return <BatteryWarning size={size} weight="bold" />;
   }
-  // Exact 100% only — partial states keep the outline-with-bars style
-  // so the level is still legible.
-  const isFull = percent >= 100;
-  if (isFull) {
-    return (
-      <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
-        <BatteryFull size={size} weight="fill" className="absolute inset-0" />
-        {charging && (
-          <BatteryCharging size={size} weight="bold" className="absolute inset-0" />
-        )}
-      </span>
-    );
+  if (charging) {
+    return <BatteryCharging size={size} weight="bold" />;
   }
   const Base = pickBase(percent);
-  return (
-    <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
-      <Base size={size} weight="bold" className="absolute inset-0 opacity-40" />
-      {charging && (
-        <BatteryCharging size={size} weight="bold" className="absolute inset-0" />
-      )}
-    </span>
-  );
+  return <Base size={size} weight="bold" />;
 }
 
 function pickBase(percent: number) {
   if (percent <= 10) return BatteryEmpty;
   if (percent <= 35) return BatteryLow;
-  if (percent <= 75) return BatteryMedium;
+  if (percent <= 60) return BatteryMedium;
+  if (percent <= 80) return BatteryHigh;
   return BatteryFull;
 }
