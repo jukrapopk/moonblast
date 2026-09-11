@@ -217,7 +217,11 @@ function ResolutionPicker({
       ? supportedList.find((m) => m.width === width && m.height === height)?.refreshRates ?? []
       : [];
   const canApply =
-    width !== null && height !== null && refresh !== null && (modes === undefined || modes === null || (modes.length > 0));
+    width !== null &&
+    height !== null &&
+    refresh !== null &&
+    Array.isArray(modes) &&
+    modes.length > 0;
   const isCurrent =
     current !== null &&
     current !== undefined &&
@@ -271,13 +275,21 @@ function ResolutionPicker({
             value={width !== null && height !== null ? `${width}x${height}` : ""}
             onChange={(v) => {
               const m = supportedList.find((mm) => `${mm.width}x${mm.height}` === v);
-              if (m) {
-                setWidth(m.width);
-                setHeight(m.height);
-                // Pick the highest refresh rate by default when changing
-                // resolution — most users want the smoothest available.
-                const highest = m.refreshRates[m.refreshRates.length - 1];
-                setRefresh(highest ?? null);
+              if (!m) return;
+              const sameRes = m.width === width && m.height === height;
+              setWidth(m.width);
+              setHeight(m.height);
+              // Preserve the user's current refresh if it exists in the
+              // new resolution's options — otherwise fall back to the
+              // highest available. Picking the same resolution re-selects
+              // doesn't bump the refresh.
+              if (sameRes) {
+                // Keep `refresh` as-is; the dropdown's value will re-render
+                // against the (unchanged) refreshOptions.
+              } else if (refresh !== null && m.refreshRates.includes(refresh)) {
+                setRefresh(refresh);
+              } else {
+                setRefresh(m.refreshRates[m.refreshRates.length - 1] ?? null);
               }
             }}
           />
