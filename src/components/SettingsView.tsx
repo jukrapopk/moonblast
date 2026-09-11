@@ -614,6 +614,11 @@ export function SettingsView({
             options={(monitors ?? []).map((m) => ({
               value: m.deviceName,
               label: `${m.friendlyName}${m.primary ? " (primary)" : ""}${m.disabled ? " — disabled" : ""}`,
+              // Disabled monitors are in the list for visibility but
+              // can't be selected — the dropdown greys them out. The
+              // auto-pick on first load skips disabled entries, and
+              // the resolution picker only operates on active paths.
+              disabled: m.disabled,
             }))}
             value={selectedDeviceName ?? ""}
             onChange={setSelectedDeviceName}

@@ -3,6 +3,13 @@ import { CaretDown } from "@phosphor-icons/react";
 interface SelectOption {
   label: string;
   value: string;
+  /**
+   * Render the option as non-selectable. The browser disables click +
+   * keyboard selection; the option still appears in the dropdown for
+   * visibility but is greyed out. Caller is responsible for not
+   * passing a `value` that matches a disabled option.
+   */
+  disabled?: boolean;
 }
 export type SelectOptionInput = string | SelectOption;
 
@@ -27,7 +34,7 @@ export function Select({ options, value, onChange }: SelectProps) {
         {options.map((o) => {
           const opt = toOption(o);
           return (
-            <option key={opt.value} value={opt.value}>
+            <option key={opt.value} value={opt.value} disabled={opt.disabled}>
               {opt.label}
             </option>
           );
