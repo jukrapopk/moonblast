@@ -85,7 +85,7 @@ function Status({
   // static `danger` red threshold so the chip never doubles up.
   const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
   return (
-    <div className="flex items-center">
+    <div className="flex items-center gap-1">
       {showBattery && battery && (
         <motion.div
           animate={critical ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
@@ -189,7 +189,7 @@ export function TopBar({
   const time = useTime();
 
   return (
-    <header className="relative flex h-14 shrink-0 items-center gap-4 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
+    <header className="relative flex h-14 shrink-0 items-center gap-2 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       <nav className="flex items-center gap-1">
         {visibleLeft.map((item) => (
           <TopBarButton
@@ -226,19 +226,20 @@ export function TopBar({
         )}
       </div>
 
-      <div className="relative flex items-center gap-1">
-        <Status
-          onWifiClick={() => setWifiOpen(true)}
-          onAudioClick={() => setAudioOpen(true)}
-          onBatteryClick={() => setBatteryOpen(true)}
-          batteryOpen={batteryOpen}
-          battery={battery}
-          wifi={wifi}
-          audio={audio}
-          showWifi={showWifi}
-          showBattery={showBattery}
-          showAudio={showAudio}
-        />
+      <Status
+        onWifiClick={() => setWifiOpen(true)}
+        onAudioClick={() => setAudioOpen(true)}
+        onBatteryClick={() => setBatteryOpen(true)}
+        batteryOpen={batteryOpen}
+        battery={battery}
+        wifi={wifi}
+        audio={audio}
+        showWifi={showWifi}
+        showBattery={showBattery}
+        showAudio={showAudio}
+      />
+      <div className="flex items-center gap-1">
+        <div aria-hidden className="mx-1 h-6 w-px bg-(--color-border)" />
         {rightItems.map((item) => (
           <TopBarButton
             key={item.id}
@@ -248,31 +249,24 @@ export function TopBar({
             onClick={() => onNavigate(item.id)}
           />
         ))}
-        <button
+        <TopBarButton
+          label="Power"
+          icon={<Power size={24} weight="bold" />}
+          active={powerOpen}
           onClick={() => setPowerOpen((o) => !o)}
-          title="Power"
-          aria-label="Power"
-          aria-expanded={powerOpen}
-          className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors ${
-            powerOpen
-              ? "bg-(--color-accent-soft) text-(--color-accent)"
-              : "text-(--color-muted) hover:text-(--color-text)"
-          }`}
-        >
-          <Power size={24} weight="bold" />
-        </button>
-        <PowerMenu
-          open={powerOpen}
-          onClose={closePower}
-          fullscreen={fullscreen}
-          onToggleFullscreen={onToggleFullscreen}
-          immersive={immersive}
-          onToggleImmersive={onToggleImmersive}
         />
-        <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} radioOn={wifi?.radioOn ?? null} />
-        <AudioModal open={audioOpen} onClose={() => setAudioOpen(false)} onChanged={refreshAudio} />
-        <BatteryModal open={batteryOpen} onClose={() => setBatteryOpen(false)} />
       </div>
+      <PowerMenu
+        open={powerOpen}
+        onClose={closePower}
+        fullscreen={fullscreen}
+        onToggleFullscreen={onToggleFullscreen}
+        immersive={immersive}
+        onToggleImmersive={onToggleImmersive}
+      />
+      <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} radioOn={wifi?.radioOn ?? null} />
+      <AudioModal open={audioOpen} onClose={() => setAudioOpen(false)} onChanged={refreshAudio} />
+      <BatteryModal open={batteryOpen} onClose={() => setBatteryOpen(false)} />
     </header>
   );
 }
