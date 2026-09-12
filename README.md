@@ -28,11 +28,10 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - **Battery** — current %, plug state, time-remaining / time-to-full in the tooltip; modal shows the full percent bar, time-remaining, and power source. Updates every 5s (2s in the modal) without Rust push events.
   - **WiFi** — connected network + signal; modal is an in-app picker with one-tap connect/scan/disconnect, password form for secured networks, per-row in-flight state, generation badge (4/5/6/7), Forget for saved profiles. Radio on/off lives in the OS.
   - **Audio** — current output device + volume; modal is the full mixer (output-device picker, master slider + mute, per-app sliders grouped by exe, Reset all). Push model via Core Audio COM, no polling.
-  - **Display** — opens the Display modal: Monitor, HDR toggle, Brightness slider, Resolution, Refresh rate. See Display section below.
+  - **Display** — opens the Display modal: Monitor, HDR toggle, Resolution, Refresh rate. See Display section below.
 - **Display modal** — top-level system control surface, separate from the Settings page:
   - **Monitor picker** — every connected monitor via `EnumDisplayDevices`, deduplicated by `DeviceID` (multi-head GPUs that report the same panel under several aliases collapse to one). Friendly names come from WMI `WmiMonitorID.UserFriendlyName` via PowerShell (EDID-derived model names like "BenQ EX2780Q"); falls back to the GDI `DeviceString`, then to the GPU adapter name.
   - **HDR** — `DisplayConfigGetDeviceInfo` / `SetDeviceInfo` against the first active display path (Windows Advanced Color). Toggle row shows a description that adapts to panel capability / OS lock state; disabled (visually off) when the OS has locked the toggle or the panel doesn't support HDR.
-  - **Brightness** — WMI `WmiMonitorBrightness` read + `WmiSetBrightness` write via PowerShell. Slider is hidden entirely when no panel reports brightness (desktops / external-only setups). Polls every 500 ms while the modal is open so keyboard brightness keys reflect on the slider; writes are throttled to 250 ms during drag because each PowerShell roundtrip costs ~100 ms.
   - **Resolution + Refresh** — `EnumDisplaySettingsExW` per selected monitor, with a confirmation modal (`Keep` / `Revert`, 10-second auto-revert) for new modes — same UX as Windows' built-in keep-changes dialog but in-app. Pending changes revert on Settings unmount so a forgotten confirmation can't strand a display.
   - **Loading chips** — every row that does an IPC roundtrip (Monitor / HDR / Resolution / Refresh) renders a small spinner chip while the call is in flight instead of an empty `Select` / `Toggle`.
 - **Moonlight tab** — machines + streaming:
@@ -61,7 +60,7 @@ A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher** fo
   - icons: `app_icon`, `cache_steamgrid_icon`, `import_app_icon`, `clear_cached_icon`
   - WiFi: `wifi_current` (netsh-based, no 1168 bug; exposes `radioOn`), `wifi_scan` (WlanScan + 2.5s + netsh, `async`+`spawn_blocking`), `wifi_connect(ssid)`, `wifi_connect_with_password(ssid, password, auth)`, `wifi_disconnect`, `wifi_forget(ssid)` (idempotent) — radio on/off lives in the OS
   - audio: `audio_devices`, `audio_set_default_device(id)` (all roles, like the Sound panel), `audio_master`, `audio_set_master_volume`, `audio_set_master_mute`, `audio_sessions` (grouped by exe), `audio_set_session_volume/mute`, `audio_reset_sessions` (all to max + unmuted) — Core Audio COM via hand-declared vtables in `audio.rs`, all `async`+`spawn_blocking`. WiFi and Audio modals keep everything in-app; no `ms-settings:` handoffs.
-  - display / HDR / brightness: `list_monitors` (`display.rs`, GDI + WMI for friendly names, deduplicated by DeviceID), `display_modes` / `current_display` / `apply_display_mode` / `keep_display_mode` / `revert_display_mode` (per-monitor via `EnumDisplaySettingsExW` + `ChangeDisplaySettingsExW`), `hdr_status` / `set_hdr` (`hdr.rs`, `DisplayConfig*` against the active path via the `windows` 0.61 typed crate), `brightness_status` / `set_brightness` (`brightness.rs`, WMI via PowerShell with `CREATE_NO_WINDOW`; only exposed on internal panels)
+  - display / HDR: `list_monitors` (`display.rs`, GDI + WMI for friendly names, deduplicated by DeviceID), `display_modes` / `current_display` / `apply_display_mode` / `keep_display_mode` / `revert_display_mode` (per-monitor via `EnumDisplaySettingsExW` + `ChangeDisplaySettingsExW`), `hdr_status` / `set_hdr` (`hdr.rs`, `DisplayConfig*` against the active path via the `windows` 0.61 typed crate)
   - clipboard icons: `clipboard_icon_hint`, `clipboard_icon_import`
   - SteamGridDB: `check_steamgrid_key`, `steamgrid_search`, `steamgrid_icons`
 - **Settings** (`src-tauri/src/settings.rs`) — a typed, versioned `Settings` struct persisted as JSON, written atomically (tmp + rename); emits a `settings-changed` event.
@@ -97,7 +96,6 @@ src-tauri/                    # Rust backend
   src/shell.rs                # Windows shell (desktop) replacement + boot stub
   src/display.rs              # multi-monitor enumeration + mode apply/revert (GDI + WMI)
   src/hdr.rs                  # Windows Advanced Color (DisplayConfig*) — windows 0.61 typed crate
-  src/brightness.rs           # WmiMonitorBrightness / WmiSetBrightness via PowerShell
   src/wifi.rs                 # netsh-based WiFi
   src/audio.rs                # Core Audio COM (hand-declared vtables)
   src/logging.rs              # file logger + panic hook

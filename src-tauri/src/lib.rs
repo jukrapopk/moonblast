@@ -77,7 +77,6 @@ mod settings;
 mod shell;
 mod wifi;
 mod audio;
-mod brightness;
 
 pub use shell::run_shell_stub;
 
@@ -2729,27 +2728,6 @@ fn set_hdr(enabled: bool) -> Result<(), String> {
     hdr::set_hdr(enabled)
 }
 
-/// Read the current monitor brightness state. Returns `supported=false`
-/// on desktops and external-only setups — `WmiMonitorBrightness` is
-/// exposed only by the laptop-panel `MonitorClass` driver.
-#[tauri::command]
-async fn brightness_status() -> brightness::BrightnessStatus {
-    tauri::async_runtime::spawn_blocking(brightness::read_brightness)
-        .await
-        .unwrap_or_default()
-}
-
-/// Set monitor brightness in percent (0–100). Always uses an instant
-/// fade so slider drag feels immediate; the keyboard's smooth fade
-/// would feel laggy in comparison. Returns an error when the OS
-/// rejects the call (e.g. unsupported monitor).
-#[tauri::command]
-async fn set_brightness(level: u8) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || brightness::set_brightness(level, 0))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 /// List every attached GDI monitor. Each entry's `device_name` is the
 /// `\\.\DISPLAYn` string the rest of the API uses to identify the adapter.
 /// Disabled (attached-but-not-in-desktop) monitors come through too with
@@ -3053,8 +3031,6 @@ pub fn run() {
             steamgrid_icons,
             hdr_status,
             set_hdr,
-            brightness_status,
-            set_brightness,
             list_monitors,
             display_modes,
             current_display,
