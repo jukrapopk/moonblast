@@ -4,8 +4,29 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/moonblast.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>Moonblast</title>
+    <script>
+      // Set initial data-theme before first paint so the user never
+      // sees a dark flash before React mounts. ThemeProvider will
+      // re-apply the persisted theme once settings hydrate.
+      // Defaults to matching the OS preference when theme is "auto".
+      (function () {
+        try {
+          var stored = localStorage.getItem("moonblast.theme");
+          var theme = stored || "dark";
+          if (theme === "auto") {
+            theme = window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+          }
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
 
   <body>

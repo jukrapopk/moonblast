@@ -1,7 +1,19 @@
 @import "tailwindcss";
 
+/* ─── Theme tokens ────────────────────────────────────────────────────
+ *
+ * Two surface palettes share the same token names, so components stay
+ * theme-agnostic. The base block below is the dark palette; the
+ * `[data-theme="light"]` block below re-binds the same names for light.
+ * The active theme is set as `data-theme` on <html> by ThemeProvider.
+ *
+ * Accent colors are runtime variables on :root (set inline by the
+ * theme provider from settings), so they're theme-independent — both
+ * palettes consume the same --color-accent.
+ */
+
 @theme {
-  /* Moonblast palette - muted, low-glare dark theme */
+  /* Dark palette (default — current Moonblast look). */
   --color-bg: #0d1017;
   --color-surface: #161923;
   --color-surface-2: #1d2230;
@@ -12,7 +24,7 @@
   --color-accent-2: #4aa49b;
   --color-danger: #c96060;
 
-  /* Derived/alpha tokens */
+  /* Derived/alpha tokens. */
   --color-accent-soft: rgb(111 120 200 / 0.16);
   --color-surface-ghost: rgb(22 25 35 / 0.6);
   --color-overlay: rgb(0 0 0 / 0.6);
@@ -20,6 +32,32 @@
   --color-muted-soft: rgb(144 153 172 / 0.5);
 
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html[data-theme="light"] {
+  /* Pure-ish white surfaces — standard light mode. */
+  --color-bg: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f3;
+  --color-border: #d8dbe2;
+  --color-muted: #6c7280;
+  --color-text: #1a1d23;
+  --color-accent-soft: rgb(74 96 220 / 0.12);
+  --color-surface-ghost: rgb(255 255 255 / 0.7);
+  --color-overlay: rgb(20 22 28 / 0.45);
+  --color-overlay-soft: rgb(20 22 28 / 0.08);
+  --color-muted-soft: rgb(108 114 128 / 0.5);
+  /* --color-accent, --color-accent-2, --color-danger stay themed by
+   * the runtime accent; only the surface tones flip for light mode. */
+}
+
+/* Native scrollbar follows the active theme. */
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border: 2px solid var(--color-bg);
+}
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
 }
 
 html,
@@ -33,6 +71,8 @@ body,
   -webkit-font-smoothing: antialiased;
   user-select: none;
   overflow: hidden;
+  /* Theme transitions are intentionally disabled — instant switching
+   * is the standard Windows app behavior and avoids mid-frame flicker. */
 }
 
 /* Big Picture style: scale the whole rem-based UI up for larger, clearer type */

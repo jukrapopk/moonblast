@@ -11,6 +11,8 @@ import { Section } from "./ui/Section";
 import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
+import { Segmented } from "./ui/Segmented";
+import { ACCENT_PRESETS } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
   | "not-found"
@@ -600,6 +602,155 @@ export function DisplaySettingsModal({
   );
 }
 
+/** Appearance section — light/dark/auto theme + color picker.
+ *  Theme + color are persisted in `settings.appearance`; the
+ *  ThemeProvider (above App) reads them and applies to <html>. The
+ *  Windows OS app mode + accent color are queried via Rust IPC and
+ *  pushed as `windows-theme-changed` / `windows-accent-changed`
+ *  events by the Rust watcher. */
+function AppearanceSection({
+  theme,
+  accent,
+  customAccent,
+  windowsAccent,
+  onSetTheme,
+  onSetAccent,
+  onSetCustomAccent,
+}: {
+  theme: string;
+  accent: string;
+  customAccent: string | null;
+  windowsAccent: string | null;
+  onSetTheme: (v: string) => void;
+  onSetAccent: (id: string) => void;
+  onSetCustomAccent: (hex: string | null) => void;
+}) {
+  return (
+    <Section title="Appearance">
+      <Row label="Theme">
+        <Segmented
+          variant="value"
+          options={[
+            { id: "dark", label: "Dark" },
+            { id: "light", label: "Light" },
+            { id: "auto", label: "Auto" },
+          ]}
+          value={theme}
+          onChange={onSetTheme}
+        />
+      </Row>
+      <Row
+        label="Color"
+        description={
+          accent === "auto"
+            ? `Following Windows — ${windowsAccent ?? "reading"}`
+            : undefined
+        }
+      >
+        <ColorPicker
+          accent={accent}
+          customAccent={customAccent}
+          windowsAccent={windowsAccent}
+          onSetAccent={onSetAccent}
+          onSetCustomAccent={onSetCustomAccent}
+        />
+      </Row>
+    </Section>
+  );
+}
+
+/** 12 named swatches + "Auto" (uses the live Windows accent) +
+ *  "Custom" (opens a color picker + hex input). Active swatch gets a
+ *  ring. The Auto swatch shows the current Windows accent as a
+ *  diagonal split so the user can see what they're getting without
+ *  needing to commit to it. */
+function ColorPicker({
+  accent,
+  customAccent,
+  windowsAccent,
+  onSetAccent,
+  onSetCustomAccent,
+}: {
+  accent: string;
+  customAccent: string | null;
+  windowsAccent: string | null;
+  onSetAccent: (id: string) => void;
+  onSetCustomAccent: (hex: string | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {ACCENT_PRESETS.map((p) => {
+        const active = accent === p.id;
+        // Auto shows the live Windows accent; presets show their
+        // own color. The Auto swatch uses a slightly different
+        // gradient cue so it reads as "the OS one" rather than
+        // another preset.
+        const swatchColor =
+          p.id === "auto"
+            ? (windowsAccent ?? "#6f78c8")
+            : p.color;
+        return (
+          <button
+            key={p.id}
+            onClick={() => onSetAccent(p.id)}
+            title={p.id === "auto" ? `Auto — ${windowsAccent ?? "reading"}` : p.label}
+            aria-label={p.label}
+            aria-pressed={active}
+            className={`h-7 w-7 rounded-full border-2 transition ${
+              active
+                ? "scale-110 border-(--color-text)"
+                : "border-(--color-border) hover:border-(--color-muted)"
+            }`}
+            style={{ background: swatchColor }}
+          />
+        );
+      })}
+      <button
+        onClick={() => onSetAccent("custom")}
+        title="Custom color"
+        aria-label="Custom color"
+        aria-pressed={accent === "custom"}
+        className={`h-7 w-7 overflow-hidden rounded-full border-2 transition ${
+          accent === "custom"
+            ? "scale-110 border-(--color-text)"
+            : "border-(--color-border) hover:border-(--color-muted)"
+        }`}
+        style={{
+          background: customAccent ?? "#6f78c8",
+          backgroundImage:
+            accent === "custom"
+              ? undefined
+              : "conic-gradient(from 0deg, #e74c3c, #f1c40f, #2ecc71, #3498db, #9b59b6, #e74c3c)",
+        }}
+      />
+      {accent === "custom" && (
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={customAccent ?? "#6f78c8"}
+            onChange={(e) => onSetCustomAccent(e.currentTarget.value)}
+            className="h-7 w-10 cursor-pointer rounded border border-(--color-border) bg-transparent"
+            aria-label="Custom color"
+          />
+          <input
+            type="text"
+            value={customAccent ?? ""}
+            onChange={(e) => {
+              const v = e.currentTarget.value.trim();
+              if (/^#[0-9a-fA-F]{6}$/.test(v) || v === "") {
+                onSetCustomAccent(v === "" ? null : v);
+              }
+            }}
+            placeholder="#6f78c8"
+            maxLength={7}
+            className="h-7 w-24 rounded border border-(--color-border) bg-(--color-surface-2) px-2 font-mono text-xs text-(--color-text) outline-none focus:border-(--color-accent)"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Preferences section — one group per TopBar system item. Each
  *  group has a title + a gear (opens the existing system modal) on the
  *  right, and below it the "Show X in Top Bar" sub-toggles. */
@@ -769,6 +920,13 @@ export function SettingsView({
   onOpenAudio,
   onOpenBattery,
   onOpenDisplay,
+  theme,
+  onSetTheme,
+  accent,
+  customAccent,
+  windowsAccent,
+  onSetAccent,
+  onSetCustomAccent,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -796,6 +954,13 @@ export function SettingsView({
   onOpenAudio: () => void;
   onOpenBattery: () => void;
   onOpenDisplay: () => void;
+  theme: string;
+  onSetTheme: (v: string) => void;
+  accent: string;
+  customAccent: string | null;
+  windowsAccent: string | null;
+  onSetAccent: (id: string) => void;
+  onSetCustomAccent: (hex: string | null) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
   // Battery hardware presence — one-shot read on mount. `undefined`
@@ -842,6 +1007,16 @@ export function SettingsView({
           <Toggle checked={autoImmersive} onChange={onToggleAutoImmersive} />
         </div>
       </Section>
+
+      <AppearanceSection
+        theme={theme}
+        accent={accent}
+        customAccent={customAccent}
+        windowsAccent={windowsAccent}
+        onSetTheme={onSetTheme}
+        onSetAccent={onSetAccent}
+        onSetCustomAccent={onSetCustomAccent}
+      />
 
       <PreferencesSection
         showTime={showTime}

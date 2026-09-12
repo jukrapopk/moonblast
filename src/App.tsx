@@ -68,6 +68,22 @@ export default function App() {
   }, [ready]);
   const [fullscreen, setFullscreen] = useState(false);
   const [immersive, setImmersive] = useState(false);
+  // Current Windows accent color (DWM colorization). Pushed by the
+  // Rust watcher via `windows-accent-changed`. Surfaced into the
+  // Appearance → Color picker so the "Auto" swatch can preview the
+  // live value.
+  const [windowsAccent, setWindowsAccent] = useState<string | null>(null);
+  useEffect(() => {
+    invoke<string | null>("windows_accent_color")
+      .then(setWindowsAccent)
+      .catch(() => {});
+    const unlistenP = listen<string>("windows-accent-changed", (e) => {
+      setWindowsAccent(e.payload);
+    });
+    return () => {
+      unlistenP.then((f) => f());
+    };
+  }, []);
 
   const moonlightEnabled = settings.integrations.moonlight_enabled;
   const moonlightDir = settings.integrations.moonlight_folder;
@@ -187,6 +203,19 @@ export default function App() {
   }
   function setShowAudio(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_audio: v } }));
+  }
+  // Appearance — ThemeProvider observes settings.appearance via the
+  // SettingsContext, so writing here triggers a re-apply on the next
+  // render. The inline bootstrap script in index.html reads
+  // localStorage to avoid a flash on subsequent loads.
+  function setTheme(v: string) {
+    update((s) => ({ ...s, appearance: { ...s.appearance, theme: v } }));
+  }
+  function setAccent(id: string) {
+    update((s) => ({ ...s, appearance: { ...s.appearance, accent: id } }));
+  }
+  function setCustomAccent(hex: string | null) {
+    update((s) => ({ ...s, appearance: { ...s.appearance, custom_accent: hex } }));
   }
 
   // Sync the initial fullscreen state.
@@ -352,6 +381,13 @@ export default function App() {
                 onOpenAudio={() => setAudioOpen(true)}
                 onOpenBattery={() => setBatteryOpen(true)}
                 onOpenDisplay={() => setDisplayOpen(true)}
+                theme={settings.appearance.theme}
+                onSetTheme={setTheme}
+                accent={settings.appearance.accent}
+                customAccent={settings.appearance.custom_accent}
+                windowsAccent={windowsAccent}
+                onSetAccent={setAccent}
+                onSetCustomAccent={setCustomAccent}
               />
             </motion.div>
           )}

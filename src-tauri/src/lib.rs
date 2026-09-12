@@ -75,6 +75,7 @@ impl Default for StreamState {
 
 mod settings;
 mod shell;
+mod theme;
 mod wifi;
 mod audio;
 
@@ -2786,6 +2787,24 @@ fn keep_display_mode(device_name: Option<String>) -> Result<(), String> {
     display::keep_display_mode_for(device_name.as_deref())
 }
 
+/// Read the user's current Windows app-mode setting ("light" or "dark").
+/// Used by the Appearance theme picker for the "Auto" / follow-Windows
+/// option. The Rust watcher thread emits `windows-theme-changed` on
+/// changes so the UI doesn't need to poll.
+#[tauri::command]
+fn windows_app_mode() -> &'static str {
+    theme::windows_app_mode()
+}
+
+/// Read the user's current Windows accent color (DWM colorization,
+/// including the auto-picked variant on Win11 22H2+). Returns `None`
+/// if the OS query fails. Used by the Appearance color picker when
+/// the user picks "Auto" so the theme color follows the OS setting.
+#[tauri::command]
+fn windows_accent_color() -> Option<String> {
+    theme::windows_accent_color()
+}
+
 /// Trigger a Windows power action: "sleep", "reboot", or "shutdown".
 #[tauri::command]
 async fn system_power(action: String) -> Result<(), String> {
@@ -2929,6 +2948,10 @@ pub fn run() {
                     let _ = window.set_icon(icon.clone());
                 }
             }
+            // Start the Windows app-mode watcher — used by the
+            // Appearance theme picker when `theme` is "auto".
+            theme::publish_initial(app.handle());
+            theme::install_watcher(app.handle().clone());
             // Auto Immersive Mode both registers Moonblast as the Windows shell
             // and enters Immersive Mode — but only on a real sign-in, which the
             // stub signals with `--autostart`. Toggling the setting mid-session
@@ -3047,7 +3070,9 @@ pub fn run() {
             current_display,
             apply_display_mode,
             revert_display_mode,
-            keep_display_mode
+            keep_display_mode,
+            windows_app_mode,
+            windows_accent_color
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -17,6 +17,36 @@ pub struct Settings {
     #[serde(default)]
     pub app_shortcuts: Vec<AppShortcut>,
     pub customization: Customization,
+    pub appearance: Appearance,
+}
+
+/// Color theme + accent color. `theme` selects the light/dark surface
+/// palette (or "auto" to follow Windows app mode); `accent` selects a
+/// preset color or "custom" + `custom_accent` for an arbitrary hex.
+/// All fields have `#[serde(default)]` so the appearance section is
+/// optional in old settings.json files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// "dark" | "light" | "auto" (follow Windows app mode).
+    pub theme: String,
+    /// Accent preset id, or "custom" to use `custom_accent`.
+    pub accent: String,
+    /// Hex color (`#rrggbb`); only meaningful when `accent == "custom"`.
+    pub custom_accent: Option<String>,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: "dark".to_string(),
+            // Default to "neutral" so new installs look identical to
+            // the legacy Moonblast palette. Users opt into a tint
+            // (or Windows-follow) from the Appearance → Color picker.
+            accent: "neutral".to_string(),
+            custom_accent: None,
+        }
+    }
 }
 
 /// TopBar system-status visibility. All default on; `show_battery` is
@@ -223,6 +253,7 @@ impl Default for Settings {
             machines: Vec::new(),
             app_shortcuts: Vec::new(),
             customization: Customization::default(),
+            appearance: Appearance::default(),
         }
     }
 }
