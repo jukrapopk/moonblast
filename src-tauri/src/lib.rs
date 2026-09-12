@@ -1412,12 +1412,16 @@ fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
         "h.264" => push_choice("--video-codec", "H.264"),
         "hevc" => push_choice("--video-codec", "HEVC"),
         "av1" => push_choice("--video-codec", "AV1"),
-        _ => {}
+        // Always pass the flag, including "auto" / unknown — Moonlight keeps
+        // its QSettings value if the flag is omitted, so dropping it lets a
+        // prior "HEVC" choice survive a switch back to "Auto".
+        _ => push_choice("--video-codec", "auto"),
     }
     match prefs.video_decoder.to_lowercase().as_str() {
         "software" => push_choice("--video-decoder", "software"),
         "hardware" => push_choice("--video-decoder", "hardware"),
-        _ => {}
+        // Same stale-state reason as codec.
+        _ => push_choice("--video-decoder", "auto"),
     }
     let mode = prefs.display_mode.to_lowercase();
     if !mode.is_empty() {
@@ -1438,7 +1442,9 @@ fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
     match prefs.capture_system_keys.to_lowercase().as_str() {
         "fullscreen" => push_choice("--capture-system-keys", "fullscreen"),
         "always" => push_choice("--capture-system-keys", "always"),
-        _ => {}
+        // Same stale-state reason as codec — drop the flag and a prior
+        // "fullscreen" / "always" survives in Moonlight's QSettings.
+        _ => push_choice("--capture-system-keys", "never"),
     }
 
     // Boolean toggles: always pass --name / --no-name (the last one wins).
