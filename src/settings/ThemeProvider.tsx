@@ -244,16 +244,22 @@ function derivePalette(
 
   // Bg: tinted presets derive from the swatch (dark: rich deep
   // room; light: pale wash). Untinted presets pass through.
+  // Dark mode darkens more aggressively + desaturates so every
+  // preset sits in the same low-luminance band — neutral reads
+  // at ~0.005, tinted at ~0.008-0.012. The whole palette drops
+  // together for a moody, harmonized room.
   const bg = isUntinted
     ? swatch
     : dark
-      ? desaturate(darken(swatch, 0.7), 0.55)
+      ? desaturate(darken(swatch, 0.82), 0.55)
       : mix(swatch, { r: 255, g: 255, b: 255 }, 0.82);
 
   // Surfaces step on top of the bg.
   //  - Neutral: legacy Moonblast palette (slight cool tint)
   //  - Gray: pure desaturated steps (no chroma)
-  //  - Tinted: derived from the bg's brightness
+  //  - Tinted: derived from the bg's brightness. Dark mode
+  //    uses flatter steps (6% / 10%) so cards sit close to the
+  //    floor — the room reads as one surface, not stacked layers.
   const surface = isNeutral
     ? (dark ? { r: 0x16, g: 0x19, b: 0x23 } : { r: 0xf5, g: 0xf6, b: 0xf8 })
     : isGray
@@ -266,27 +272,27 @@ function derivePalette(
     : isGray
       ? (dark ? { r: 0x2e, g: 0x2e, b: 0x2e } : { r: 0xca, g: 0xca, b: 0xca })
       : dark
-        ? lighten(bg, 0.12)
+        ? lighten(bg, 0.1)
         : darken(bg, 0.05);
 
   // Text / muted are always neutral so the UI keeps one consistent
   // text vocabulary regardless of which color preset the user
-  // picked. Borders stay tinted (sit just above the surface tone)
-  // so they read as a quiet outline against cards/menus even when
-  // the bg is strongly themed — neutral borders on tinted bgs
-  // either disappear or read as noise.
+  // picked. Dark text is dimmed (`#c8ccd6`, lum 0.60) so it
+  // doesn't shout against the dark bg — calmer room, easier
+  // reading at Big-Picture scale. Borders stay tinted (sit just
+  // above the surface tone) so they read as a quiet outline.
   const text = dark
-    ? { r: 0xd9, g: 0xdd, b: 0xe8 }
+    ? { r: 0xc8, g: 0xcc, b: 0xd6 }
     : { r: 0x1a, g: 0x1d, b: 0x23 };
   const muted = dark
-    ? { r: 0x90, g: 0x99, b: 0xac }
+    ? { r: 0x7a, g: 0x82, b: 0x94 }
     : { r: 0x6c, g: 0x72, b: 0x80 };
   const border = isNeutral
     ? (dark ? { r: 0x26, g: 0x2c, b: 0x3a } : { r: 0xd8, g: 0xdb, b: 0xe2 })
     : isGray
       ? (dark ? { r: 0x38, g: 0x38, b: 0x38 } : { r: 0xc0, g: 0xc0, b: 0xc0 })
       : dark
-        ? lighten(surface2, 0.08)
+        ? lighten(surface2, 0.06)
         : darken(surface2, 0.06);
 
   // Overlay: scrim used behind modals. Heavier on light bg.
