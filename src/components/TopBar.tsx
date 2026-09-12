@@ -8,6 +8,7 @@ import { PowerMenu } from "./PowerMenu";
 import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
 import { BatteryModal } from "./ui/BatteryModal";
+import { formatDuration } from "./ui/formatDuration";
 import { useTime, formatClock, formatDate } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
 import { useBattery, type BatteryStatus } from "../hooks/useBattery";
@@ -21,35 +22,6 @@ const items: { id: View; label: string; nav: "left" | "right"; icon: ReactNode }
   { id: "moonlight", label: "Moonlight", nav: "left", icon: <Monitor size={24} weight="bold" /> },
   { id: "settings", label: "Settings", nav: "right", icon: <Gear size={24} weight="bold" /> },
 ];
-
-/** "1 h 42 min" / "12 min" / "—" — used for the chip's hover tooltip. */
-function formatDurationShort(sec: number | null): string {
-  if (sec === null || sec === 0) return "calculating…";
-  const h = Math.floor(sec / 3600);
-  const m = Math.round((sec % 3600) / 60);
-  if (h > 0 && m > 0) return `${h}h ${m}m`;
-  if (h > 0) return `${h}h`;
-  return `${m}m`;
-}
-
-/** Pick the right battery glyph for the current level + charging state. */
-function batteryIcon(percent: number, charging: boolean) {
-  return <BatteryIcon percent={percent} charging={charging} size={24} />;
-}
-
-function wifiChipIcon(wifi: WifiConnection) {
-  return <WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />;
-}
-
-/** Speaker glyph matching the main mixer level + mute state. */
-function audioChipIcon(master: AudioMaster) {
-  return <SpeakerIcon volume={master.volume} muted={master.muted} size={24} />;
-}
-
-/** Placeholder while the master read is in flight — avoids icon pop-in. */
-function audioChipFallback() {
-  return <SpeakerIcon volume={100} muted={false} size={24} />;
-}
 
 /** Battery / WiFi / audio icon buttons shown in the TopBar's right cluster. */
 function Status({
@@ -84,8 +56,8 @@ function Status({
   // Tooltip doubles as the aria-label: status · percent · time-remaining.
   const batteryLabel = battery
     ? battery.charging
-      ? `Charging · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDurationShort(battery.timeRemainingSec)} to full`
-      : `On battery · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDurationShort(battery.timeRemainingSec)} left`
+      ? `Charging · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDuration(battery.timeRemainingSec, "short")} to full`
+      : `On battery · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDuration(battery.timeRemainingSec, "short")} left`
     : "Battery";
   // Critical flash at ≤5% on battery (the OS-driven warning band). Below the
   // static `danger` red threshold so the chip never doubles up.
@@ -99,7 +71,7 @@ function Status({
         >
           <TopBarButton
             label={batteryLabel}
-            icon={batteryIcon(battery.percent, battery.charging)}
+            icon={<BatteryIcon percent={battery.percent} charging={battery.charging} size={24} />}
             onClick={onBatteryClick}
             active={batteryOpen}
             danger={!battery.charging && battery.percent >= 0 && battery.percent <= 10}
@@ -109,14 +81,20 @@ function Status({
       {showWifi && wifi && (
         <TopBarButton
           label={wifi.radioOn ? "WiFi" : "WiFi off"}
-          icon={wifiChipIcon(wifi)}
+          icon={<WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />}
           onClick={onWifiClick}
         />
       )}
       {showAudio && (
         <TopBarButton
           label={audio ? (audio.muted || audio.volume === 0 ? "Muted" : `Volume · ${audio.volume}%`) : "Audio"}
-          icon={audio ? audioChipIcon(audio) : audioChipFallback()}
+          icon={
+            <SpeakerIcon
+              volume={audio ? audio.volume : 100}
+              muted={audio ? audio.muted : false}
+              size={24}
+            />
+          }
           onClick={onAudioClick}
         />
       )}

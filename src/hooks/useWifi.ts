@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useDebouncedRead } from "./useDebouncedRead";
 
 export interface WifiConnection {
   /** Connected SSID. Empty when not connected. */
@@ -41,66 +42,16 @@ export interface WifiNetwork {
  *     connect/disconnect so the chip reflects the new state
  *     immediately, not on the next user focus).
  *
- * The wlan service's netsh read takes ~200ms; calling it on focus
- * is cheap.
+ * Back-to-back calls collapse to a single IPC (2 s window) — the wlan
+ * service doesn't change state that fast, and the previous read's
+ * `current` is still fresh.
  */
 export function useWifi(): {
   current: WifiConnection | null | undefined;
   refresh: () => void;
 } {
   const [current, setCurrent] = useState<WifiConnection | null | undefined>(undefined);
-  // In-flight read — multiple concurrent calls (e.g. focus + visibility
-  // firing on the same refocus) share a single in-flight Promise
-  // instead of issuing multiple Rust invocations. Resolves to void; the
-  // value is the same `current` state set inside the single read.
-  const inFlight = useRef<Promise<void> | null>(null);
-  // Last successful read timestamp (ms). Back-to-back events within 2s
-  // collapse to one read — the wlan service doesn't change state that
-  // fast, and the previous read's `current` is still fresh.
-  const lastReadAt = useRef(0);
-
-  const read = useCallback(async () => {
-    if (inFlight.current) return inFlight.current;
-    const now = Date.now();
-    if (now - lastReadAt.current < 2000) return;
-    lastReadAt.current = now;
-    const p = (async () => {
-      try {
-        const c = await invoke<WifiConnection | null>("wifi_current");
-        setCurrent(c);
-      } catch {
-        setCurrent(null);
-      }
-    })();
-    inFlight.current = p;
-    try {
-      await p;
-    } finally {
-      inFlight.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    const safeRead = () => {
-      if (alive) void read();
-    };
-    safeRead();
-    function onFocus() {
-      safeRead();
-    }
-    function onVisibility() {
-      if (document.visibilityState === "visible") safeRead();
-    }
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      alive = false;
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [read]);
-
+  const read = useDebouncedRead<WifiConnection | null>("wifi_current", setCurrent);
   return { current, refresh: read };
 }
 

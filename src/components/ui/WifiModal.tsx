@@ -329,10 +329,27 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  async function handleConnect(ssid: string) {
-    setBusy({ ssid, kind: "connect" });
+  /** Common envelope for every wifi action: spin up the per-row busy
+   *  state, run the action, swallow errors into the modal's error slot,
+   *  clear the busy state when done. */
+  async function runAction(
+    busySsid: string | null,
+    kind: "connect" | "disconnect" | "forget",
+    fn: () => Promise<void>,
+  ) {
+    setBusy(busySsid ? { ssid: busySsid, kind } : null);
     setError(null);
     try {
+      await fn();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleConnect(ssid: string) {
+    await runAction(ssid, "connect", async () => {
       await wifiConnect(ssid);
       // The connect command may take a few seconds to actually take
       // effect; poll the OS a few times to wait for the state to land
@@ -342,17 +359,11 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       await scan();
       const c = await fetchWifiCurrent();
       setLiveSsid(c?.ssid ?? null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(null);
-    }
+    });
   }
 
   async function handleDisconnect() {
-    setBusy(liveSsid ? { ssid: liveSsid, kind: "disconnect" } : null);
-    setError(null);
-    try {
+    await runAction(liveSsid, "disconnect", async () => {
       await wifiDisconnect();
       // The disconnect command may also be async on the wlan service;
       // poll briefly so the modal reflects the real state.
@@ -360,49 +371,36 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       await scan();
       const c = await fetchWifiCurrent();
       setLiveSsid(c?.ssid ?? null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(null);
-    }
+    });
   }
 
   async function handleForget(ssid: string) {
-    setBusy({ ssid, kind: "forget" });
-    setError(null);
-    try {
+    await runAction(ssid, "forget", async () => {
       await wifiForget(ssid);
-      // Profile deletion is synchronous — just re-read the list so
-      // the `known` flag (and connection, if it was current) updates.
+      // Profile deletion is synchronous — skip the state-poll, just
+      // re-read the list so the `known` flag (and the connection, if
+      // it was current) update.
       await scan();
       const c = await fetchWifiCurrent();
       setLiveSsid(c?.ssid ?? null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(null);
-    }
+    });
   }
 
   async function handleConnectWithPassword(
     net: WifiNetwork,
     password: string,
   ) {
-    setBusy({ ssid: net.ssid, kind: "connect" });
-    setError(null);
-    try {
+    await runAction(net.ssid, "connect", async () => {
       await wifiConnectWithPassword(net.ssid, password, net.auth ?? "");
       await waitForState(net.ssid);
+      // Dismiss the password form on success; the list is back.
+      // `runAction` captures failures into the error slot — staying on
+      // the form lets the user correct the password.
       setPasswordTarget(null);
       await scan();
       const c = await fetchWifiCurrent();
       setLiveSsid(c?.ssid ?? null);
-    } catch (e) {
-      // Stay on the form so the user can correct the password.
-      setError(String(e));
-    } finally {
-      setBusy(null);
-    }
+    });
   }
 
   // Right-click menu per row — same actions as left-click, plus

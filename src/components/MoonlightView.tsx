@@ -155,10 +155,6 @@ function formatElapsed(startedAt: number, now: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return <h2 className="mb-3 mt-2 text-sm font-semibold uppercase tracking-wider text-(--color-muted)">{children}</h2>;
-}
-
 /**
  * Single card UI for the unified host list. Replaces the old `MachineCard`
  * and `DiscoveredCard` which were visual duplicates and made it impossible
@@ -879,13 +875,13 @@ export function MoonlightView() {
                 <div className="space-y-6">
                   {pairedGroup.length > 0 && (
                     <div>
-                      <SectionHeading>Paired</SectionHeading>
+                      <h2 className="mb-3 mt-2 text-sm font-semibold uppercase tracking-wider text-(--color-muted)">Paired</h2>
                       <div className="space-y-3">{pairedGroup.map(renderHost)}</div>
                     </div>
                   )}
                   {discoveryGroup.length > 0 && (
                     <div>
-                      <SectionHeading>Other hosts</SectionHeading>
+                      <h2 className="mb-3 mt-2 text-sm font-semibold uppercase tracking-wider text-(--color-muted)">Other hosts</h2>
                       <div className="space-y-3">{discoveryGroup.map(renderHost)}</div>
                     </div>
                   )}

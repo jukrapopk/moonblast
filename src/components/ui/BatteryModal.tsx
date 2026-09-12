@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "./Modal";
+import { SectionLabel } from "./SectionLabel";
+import { formatDuration } from "./formatDuration";
 
 export interface BatteryStatus {
   /** 0–100, or -1 when the OS reports "unknown". */
@@ -19,27 +21,6 @@ export interface BatteryStatus {
 interface BatteryModalProps {
   open: boolean;
   onClose: () => void;
-}
-
-function SectionLabel({ children }: { children: string }) {
-  return (
-    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-(--color-muted)">
-      {children}
-    </div>
-  );
-}
-
-/**
- * "1 h 42 min" / "12 min". `sec` is the raw OS value: `null` = unknown,
- * `n > 0` = estimate. The modal hides the row entirely when the value is
- * `null` / `0`, so this helper is only called with a real estimate.
- */
-function formatDuration(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.round((sec % 3600) / 60);
-  if (h > 0 && m > 0) return `${h} h ${m} min`;
-  if (h > 0) return `${h} h`;
-  return `${m} min`;
 }
 
 /**
@@ -127,7 +108,7 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
               {charging ? "Time to full" : "Time remaining"}
             </span>
             <span className="tabular-nums text-(--color-text)">
-              {formatDuration(timeSec)}
+              {formatDuration(timeSec, "long")}
             </span>
           </div>
         )}

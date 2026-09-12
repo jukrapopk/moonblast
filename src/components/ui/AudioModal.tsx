@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Slider } from "./Slider";
+import { SectionLabel } from "./SectionLabel";
 import {
   ArrowsClockwise,
   Check,
@@ -28,14 +29,6 @@ interface AudioModalProps {
   onClose: () => void;
   /** Parent refreshes the TopBar chip after device/volume changes. */
   onChanged: () => void;
-}
-
-function SectionLabel({ children }: { children: string }) {
-  return (
-    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-(--color-muted)">
-      {children}
-    </div>
-  );
 }
 
 export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
