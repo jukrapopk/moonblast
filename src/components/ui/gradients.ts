@@ -1,20 +1,25 @@
-/** Brand gradient for placeholder icons (used by AppTile and host IconTile). */
-export const BRAND_GRADIENT = "linear-gradient(135deg,#31416b,#2b3a5e)";
-
+/** Theme-aware gradients for placeholder icons (app tiles with no image,
+ *  host cards). Each entry is a CSS gradient that references the
+ *  current theme tokens so the tile blends into the room rather
+ *  than showing a hard blue rectangle. The `gradientFor` helper
+ *  picks deterministically per seed string so the same app
+ *  always gets the same gradient. */
 const PALETTE = [
-  "linear-gradient(135deg,#31416b,#2b3a5e)",
-  "linear-gradient(135deg,#3a3f57,#394b45)",
-  "linear-gradient(135deg,#454a75,#3b3f63)",
-  "linear-gradient(135deg,#563b45,#4a3a3a)",
-  "linear-gradient(135deg,#333c4a,#2f4a42)",
-  "linear-gradient(135deg,#3b3b52,#333c4a)",
-  "linear-gradient(135deg,#4a4460,#3f3a52)",
-  "linear-gradient(135deg,#3a3f66,#323c44)",
+  "linear-gradient(135deg, var(--color-bg), var(--color-surface-2))",
+  "linear-gradient(135deg, var(--color-surface-2), var(--color-bg))",
+  "linear-gradient(135deg, var(--color-bg), var(--color-accent-soft))",
+  "linear-gradient(135deg, var(--color-surface), var(--color-surface-2))",
+  "linear-gradient(135deg, var(--color-bg), var(--color-surface))",
+  "linear-gradient(135deg, var(--color-surface-2), var(--color-surface))",
+  "linear-gradient(135deg, var(--color-bg), var(--color-border))",
+  "linear-gradient(135deg, var(--color-accent-soft), var(--color-surface))",
 ];
 
 /**
- * Stable, deterministic gradient per seed string — same input always returns
- * the same gradient, so an app icon doesn't flicker between colors.
+ * Stable, deterministic gradient per seed string — same input always
+ * returns the same gradient, so an app icon doesn't flicker between
+ * styles. Each gradient is theme-aware (uses CSS vars) so the tile
+ * blends into the chosen room.
  */
 export function gradientFor(seed: string): string {
   let h = 0;

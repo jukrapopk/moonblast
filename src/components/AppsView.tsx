@@ -146,7 +146,7 @@ function AppTile({
         className="block w-full outline-none focus:outline-none"
       >
         <div
-          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold ${icon ? "" : "text-white/80"}`}
+          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold text-(--color-text)`}
           style={icon ? undefined : { background: gradientFor(name) }}
         >
           {icon ? (
