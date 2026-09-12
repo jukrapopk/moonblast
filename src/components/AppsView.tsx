@@ -703,7 +703,7 @@ export function AppsView() {
     <>
       <PageShell
         title="Apps"
-        subtitle="Your shortcuts to installed apps and games."
+        subtitle="Shortcuts to your apps and games."
         actions={
           <div className="flex items-center gap-2">
             <div className="w-56">

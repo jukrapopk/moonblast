@@ -865,7 +865,7 @@ export function SettingsView({
 
       <Section title="Integrations">
         <TailscaleRow />
-        <Row label="Apps" description="Discover and launch installed apps">
+        <Row label="Apps" description="Discover and launch apps">
           <Toggle checked={appsEnabled} onChange={onToggleApps} />
         </Row>
         <Row label="SteamGridDB" description="Use nicer icons for your games">

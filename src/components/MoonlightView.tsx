@@ -820,7 +820,7 @@ export function MoonlightView() {
     <>
       <PageShell
         title="Moonlight"
-        subtitle="Your streaming hosts. Save an address to use Tailscale or other remote networks."
+        subtitle="Start streaming directly from here"
         actions={
           sub === "machines" ? (
             <div className="flex items-center gap-2">
