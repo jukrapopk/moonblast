@@ -10,6 +10,7 @@ import {
   EyeSlash,
 } from "@phosphor-icons/react";
 import { WifiIcon } from "./WifiIcon";
+import { LoadingChip } from "./LoadingChip";
 import {
   fetchWifiCurrent,
   useWifiScan,
@@ -460,7 +461,9 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
 
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {loading && networks.length === 0 ? (
-              <p className="py-4 text-center text-sm text-(--color-muted)">Scanning</p>
+              <div className="flex items-center justify-center py-4">
+                <LoadingChip label="Scanning networks" variant="plain" />
+              </div>
             ) : networks.length === 0 ? (
               <p className="py-4 text-center text-sm text-(--color-muted)">
                 {radioOff ? "Turn Wi-Fi on in Windows settings to see networks" : "No networks found"}
