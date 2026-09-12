@@ -7,13 +7,13 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Prompt } from "./ui/Prompt";
-import { Segmented } from "./ui/Segmented";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { useContextMenu } from "./ui/ContextMenu";
 import { Toast } from "./ui/Toast";
 import { Input } from "./ui/Input";
 import { FilterList } from "./ui/FilterList";
+import { LoadingChip } from "./ui/LoadingChip";
 import { gradientFor } from "./ui/gradients";
 import { useSettings } from "../settings/SettingsContext";
 
@@ -176,13 +176,17 @@ function AddAppModal({
   onAdd: (a: { name: string; path: string; source?: string; kind: string }) => void;
   existingPaths: Set<string>;
 }) {
-  const [tab, setTab] = useState<"installed" | "browse">("installed");
   const [installed, setInstalled] = useState<AppEntry[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setTab("installed");
-    invoke<AppEntry[]>("discover_apps").then(setInstalled).catch(() => setInstalled([]));
+    setInstalled([]);
+    setLoading(true);
+    invoke<AppEntry[]>("discover_apps")
+      .then(setInstalled)
+      .catch(() => setInstalled([]))
+      .finally(() => setLoading(false));
   }, [open]);
 
   function pick(a: { name: string; path: string; source?: string; kind: string }) {
@@ -202,57 +206,46 @@ function AddAppModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one." width="max-w-lg">
-      <div className="mb-3 rounded-xl border border-(--color-border) bg-(--color-surface-2)/40 px-3 py-2 text-xs text-(--color-muted)">
-        Some apps may not launch in Immersive Mode. If that happens, exit Immersive Mode from the Power menu.
-      </div>
-      <div className="mb-3">
-        <Segmented
-          variant="tabs"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { id: "installed", label: "Installed" },
-            { id: "browse", label: "Browse" },
-          ]}
-        />
-      </div>
-
-      {tab === "installed" ? (
-        <FilterList
-          items={installed}
-          options={{
-            getKey: (a) => a.path,
-            getLabel: (a) => a.name,
-            getSource: (a) => a.source ?? "",
-            exclude: (a) => existingPaths.has(a.path),
-          }}
-          searchPlaceholder="Search installed apps"
-          empty={<p className="py-8 text-center text-sm text-(--color-muted)">Nothing to add</p>}
-          render={(a) => (
-            <button
-              onClick={() => pick(a)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
-            >
-              <span className="truncate font-medium">{a.name}</span>
-              {a.source && (
-                <span className="ml-auto shrink-0 text-xs text-(--color-muted)">{a.source}</span>
-              )}
-            </button>
-          )}
-        />
-      ) : (
-        <div className="py-6 text-center">
+    <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one. Some apps won't launch in Immersive Mode." width="max-w-lg">
+      <FilterList
+        items={installed}
+        loading={loading}
+        options={{
+          getKey: (a) => a.path,
+          getLabel: (a) => a.name,
+          getSource: (a) => a.source ?? "",
+          exclude: (a) => existingPaths.has(a.path),
+        }}
+        searchPlaceholder="Search installed apps"
+        empty={<p className="py-8 text-center text-sm text-(--color-muted)">Nothing to add</p>}
+        loadingPlaceholder={
+          <div className="flex items-center justify-center py-6">
+            <LoadingChip label="Loading apps" variant="plain" />
+          </div>
+        }
+        headerAction={
           <Button
+            variant="outline"
+            size="md"
             onClick={browse}
-            icon={<FolderOpen size={16} weight="bold" />}
-            className="gap-2 px-5 py-2.5"
+            icon={<FolderOpen size={14} weight="bold" />}
+            className="h-10 px-4"
           >
-            Choose an .exe or .lnk
+            Browse
           </Button>
-          <p className="mt-3 text-xs text-(--color-muted)">Pick any application on disk.</p>
-        </div>
-      )}
+        }
+        render={(a) => (
+          <button
+            onClick={() => pick(a)}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
+          >
+            <span className="truncate font-medium">{a.name}</span>
+            {a.source && (
+              <span className="ml-auto shrink-0 text-xs text-(--color-muted)">{a.source}</span>
+            )}
+          </button>
+        )}
+      />
     </Modal>
   );
 }

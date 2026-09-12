@@ -20,7 +20,13 @@ interface FilterListProps<T> {
   options: FilterListOptions<T>;
   render: (item: T) => ReactNode;
   empty: ReactNode;
+  /** While true, render `loading` instead of the list/empty state. */
+  loading?: boolean;
+  loadingPlaceholder?: ReactNode;
   searchPlaceholder?: string;
+  /** Right-aligned control in the header row (e.g. a "Browse" button).
+   *  Rendered next to the sort toggle so the header stays in one line. */
+  headerAction?: ReactNode;
 }
 
 /**
@@ -32,7 +38,10 @@ export function FilterList<T>({
   options,
   render,
   empty,
+  loading,
+  loadingPlaceholder,
   searchPlaceholder = "Search",
+  headerAction,
 }: FilterListProps<T>) {
   const { getKey, getLabel, getSource, exclude, sourceLabels = { "": "Desktop" } } = options;
   const [q, setQ] = useState("");
@@ -78,6 +87,7 @@ export function FilterList<T>({
             autoFocus
           />
         </div>
+        {headerAction}
         <button
           onClick={() => setDesc((d) => !d)}
           title={desc ? "Sort A→Z" : "Sort Z→A"}
@@ -107,7 +117,11 @@ export function FilterList<T>({
       )}
 
       <div className="max-h-80 space-y-1 overflow-y-auto">
-        {filtered.length === 0 ? (
+        {loading ? (
+          loadingPlaceholder ?? (
+            <p className="py-4 text-center text-sm text-(--color-muted)">Loading</p>
+          )
+        ) : filtered.length === 0 ? (
           empty
         ) : (
           filtered.map((i) => <Fragment key={getKey(i)}>{render(i)}</Fragment>)
