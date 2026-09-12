@@ -48,19 +48,30 @@ export const ACCENT_PRESETS: AccentPreset[] = [
   // Neutral: legacy Moonblast palette. Picker swatch is lifted
   // (`#262c3a`) so the chip reads as a distinct object in the
   // picker row rather than blending into the picker bg. Applied
-  // bg stays at the legacy `#0d1017` (dark) / `#ffffff` (light).
+  // dark bg is the legacy `#0d1017` (cool near-black). Applied
+  // light bg is a very pale blue tint (`#f0f3f8`) so it pairs
+  // visually with the subtle blue cast of the dark palette —
+  // avoids the clinical pure-white look.
+  //
+  // Swatch is decorative — distinct from the applied bg so the
+  // chip reads clearly in the picker row. Dark swatch is lifted
+  // (`#2a3140`) so it stands out against the dark picker surface;
+  // light swatch is a light blue (`#cfd9ec`) hinting at the
+  // pale-blue room.
   {
     id: "neutral",
     label: "Neutral",
-    pickerSwatch: { dark: "#262c3a", light: "#f5f5f5" },
-    appliedBg: { dark: "#0d1017", light: "#ffffff" },
+    pickerSwatch: { dark: "#2a3140", light: "#cfd9ec" },
+    appliedBg: { dark: "#0d1017", light: "#f0f3f8" },
   },
-  // Gray: pure desaturated, no chroma. Picker swatch = applied
-  // bg in each mode.
+  // Gray: pure desaturated, no chroma. Dark applied bg is a
+  // near-black gray; light applied bg is an off-white gray.
+  // Light swatch is a true mid-gray (`#888c92`) so the chip
+  // reads as clearly gray (not as a white chip in the row).
   {
     id: "gray",
     label: "Gray",
-    pickerSwatch: { dark: "#1c1c1c", light: "#f0f0f0" },
+    pickerSwatch: { dark: "#1c1c1c", light: "#888c92" },
     appliedBg: { dark: "#1c1c1c", light: "#f0f0f0" },
   },
 ];
@@ -261,39 +272,56 @@ function derivePalette(
   //    uses flatter steps (6% / 10%) so cards sit close to the
   //    floor — the room reads as one surface, not stacked layers.
   const surface = isNeutral
-    ? (dark ? { r: 0x16, g: 0x19, b: 0x23 } : { r: 0xf5, g: 0xf6, b: 0xf8 })
+    ? (dark ? { r: 0x16, g: 0x19, b: 0x23 } : { r: 0xe8, g: 0xec, b: 0xf2 })
     : isGray
       ? (dark ? { r: 0x25, g: 0x25, b: 0x25 } : { r: 0xdd, g: 0xdd, b: 0xdd })
       : dark
         ? lighten(bg, 0.06)
-        : darken(bg, 0.02);
+        : darken(bg, 0.05);
   const surface2 = isNeutral
-    ? (dark ? { r: 0x1d, g: 0x22, b: 0x30 } : { r: 0xee, g: 0xf0, b: 0xf3 })
+    ? (dark ? { r: 0x1d, g: 0x22, b: 0x30 } : { r: 0xdb, g: 0xe1, b: 0xea })
     : isGray
       ? (dark ? { r: 0x2e, g: 0x2e, b: 0x2e } : { r: 0xca, g: 0xca, b: 0xca })
       : dark
         ? lighten(bg, 0.1)
-        : darken(bg, 0.05);
+        : darken(bg, 0.1);
 
-  // Text / muted are always neutral so the UI keeps one consistent
-  // text vocabulary regardless of which color preset the user
-  // picked. Dark text is dimmed (`#c8ccd6`, lum 0.60) so it
-  // doesn't shout against the dark bg — calmer room, easier
-  // reading at Big-Picture scale. Borders stay tinted (sit just
-  // above the surface tone) so they read as a quiet outline.
-  const text = dark
-    ? { r: 0xc8, g: 0xcc, b: 0xd6 }
-    : { r: 0x1a, g: 0x1d, b: 0x23 };
-  const muted = dark
-    ? { r: 0x7a, g: 0x82, b: 0x94 }
-    : { r: 0x6c, g: 0x72, b: 0x80 };
+  // Text / muted are darkened neutral grays so the UI keeps one
+  // consistent text vocabulary regardless of which color preset
+  // the user picked. Dark text is dimmed (`#c8ccd6`, lum 0.60)
+  // so it doesn't shout against the dark bg — calmer room,
+  // easier reading at Big-Picture scale.
+  //
+  // Light text is lightened from the original near-black
+  // (`#1a1d23`, lum 0.012) to `#3a4252` (lum ~0.045) — less
+  // stark on the pale bg, easier reading. Light muted is
+  // darkened from `#6c7280` (lum 0.168) to `#52596b` (lum 0.10)
+  // for stronger separation against the bg (~7× contrast).
+  //
+  // Both pick up a 25% mix of the chosen hue so tinted presets
+  // carry a hint of color through the typography — a Blue preset
+  // reads with slightly cooler text, a Red preset slightly warmer.
+  // Neutral / Gray pass through unchanged.
+  const baseTextLight = { r: 0x3a, g: 0x42, b: 0x52 };
+  const baseMutedLight = { r: 0x52, g: 0x59, b: 0x6b };
+  const baseTextDark = { r: 0xc8, g: 0xcc, b: 0xd6 };
+  const baseMutedDark = { r: 0x7a, g: 0x82, b: 0x94 };
+  const tintAmount = 0.25;
+  const baseText = dark ? baseTextDark : baseTextLight;
+  const baseMuted = dark ? baseMutedDark : baseMutedLight;
+  const text = isUntinted
+    ? baseText
+    : mix(baseText, swatch, tintAmount);
+  const muted = isUntinted
+    ? baseMuted
+    : mix(baseMuted, swatch, tintAmount * 0.6);
   const border = isNeutral
-    ? (dark ? { r: 0x26, g: 0x2c, b: 0x3a } : { r: 0xd8, g: 0xdb, b: 0xe2 })
+    ? (dark ? { r: 0x26, g: 0x2c, b: 0x3a } : { r: 0xb8, g: 0xc0, b: 0xce })
     : isGray
-      ? (dark ? { r: 0x38, g: 0x38, b: 0x38 } : { r: 0xc0, g: 0xc0, b: 0xc0 })
+      ? (dark ? { r: 0x38, g: 0x38, b: 0x38 } : { r: 0xb0, g: 0xb0, b: 0xb0 })
       : dark
         ? lighten(surface2, 0.06)
-        : darken(surface2, 0.06);
+        : darken(surface2, 0.1);
 
   // Overlay: scrim used behind modals. Heavier on light bg.
   const bgIsLight = relativeLuminance(bg) >= 0.55;
