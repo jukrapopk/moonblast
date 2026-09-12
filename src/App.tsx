@@ -163,22 +163,12 @@ export default function App() {
       integrations: { ...s.integrations, moonlight_folder: dir },
     }));
   }
-  function setStartWithWindows(v: boolean) {
-    update((s) => ({ ...s, general: { ...s.general, start_with_windows: v } }));
-    void invoke("set_start_with_windows", { enabled: v }).catch(() => {});
-    // Auto Immersive builds on starting with Windows, so turning that off also
-    // disarms it — including unregistering the shell, or the takeover would
-    // survive with no visible setting left switched on.
-    if (!v && settings.fullscreen.auto_immersive) {
-      update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: false } }));
-      void invoke("set_replace_desktop", { enabled: false }).catch(() => {});
-    }
-  }
   // One switch: registers Moonblast as the Windows shell *and* arms Immersive
   // Mode for the next sign-in. Deliberately does not enter Immersive Mode now.
+  // The shell stub is the only boot-launch path; nothing else to coordinate.
   function setAutoImmersive(v: boolean) {
     update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: v } }));
-    void invoke("set_replace_desktop", { enabled: v }).catch(() => {});
+    void invoke("apply_auto_immersive", { autoImmersive: v }).catch(() => {});
   }
   function setShowTime(v: boolean) {
     update((s) => ({ ...s, customization: { ...s.customization, show_time: v } }));
@@ -344,8 +334,6 @@ export default function App() {
                 onToggleApps={setAppsEnabled}
                 steamgridKey={settings.integrations.steamgrid_key}
                 onSetSteamgridKey={setSteamgridKey}
-                startWithWindows={settings.general.start_with_windows}
-                onToggleStartWithWindows={setStartWithWindows}
                 autoImmersive={settings.fullscreen.auto_immersive}
                 onToggleAutoImmersive={setAutoImmersive}
                 showTime={settings.customization.show_time}

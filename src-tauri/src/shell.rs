@@ -131,6 +131,21 @@ pub fn reset_crash_count() {
     }
 }
 
+/// Best-effort cleanup of a stale `HKCU\...\Run\Moonblast` value from a
+/// previous build that still had the Start with Windows toggle. Without this,
+/// users upgrading would briefly see two Moonblast.exe processes at sign-in
+/// (one from the Run key, one from the stub) until the value times out or
+/// someone cleans it up manually. Idempotent — "not found" is success.
+pub fn cleanup_legacy_run_key() {
+    use winreg::enums::KEY_SET_VALUE;
+    let _ = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            KEY_SET_VALUE,
+        )
+        .and_then(|k| k.delete_value("Moonblast"));
+}
+
 fn shift_held() -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
     // High bit set = currently down.
@@ -176,12 +191,32 @@ pub fn run_shell_stub() -> ! {
     // Counted as a failure up front; the launcher clears it once it has survived
     // `CRASH_RESET_SECS`, so only a fast crash loop ever trips the limit.
     bump_crash_count();
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = Command::new(exe)
+    let exit_code = if let Ok(exe) = std::env::current_exe() {
+        Command::new(exe)
             .arg(AUTOSTART_FLAG)
             .creation_flags(CREATE_NO_WINDOW)
-            .status();
+            .status()
+            .ok()
+            .and_then(|s| s.code())
+            .unwrap_or(-1)
+    } else {
+        -1
+    };
+    // Launcher exited cleanly (user closed Moonblast via the Power menu, which
+    // runs `close_app` → `app.exit(0)`). Free the shell slot so Task Manager
+    // doesn't show a stub with no window for the rest of the session — Windows
+    // falls through to the HKLM default shell (`explorer.exe`) on the next
+    // sign-in, or to whatever shell is current. `ensure_desktop` covers the
+    // edge where the launcher was killed while Immersive Mode was suppressing
+    // Explorer — `close_app` already respawns Explorer before exiting, but we
+    // belt-and-brace here in case the launcher died via panic / Task Manager.
+    if exit_code == 0 {
+        ensure_desktop();
+        std::process::exit(0);
     }
+    // Launcher died abnormally or the spawn itself failed — stay parked so
+    // the user has a desktop until next sign-in. The 3-strike counter above
+    // will eventually bail the takeover out entirely on persistent crashes.
     ensure_desktop();
     park();
 }

@@ -15,9 +15,9 @@ Boot into the launcher without the desktop, keep background apps out of the way 
 
 ## What actually shipped
 
-Exposed as a single **"Auto Immersive Mode"** toggle (`fullscreen.auto_immersive`, gated
-on "Start with Windows") that both registers the shell and arms Immersive Mode. Use the
-**per-user** shell value, not the machine-wide one:
+Exposed as a single **"Auto Immersive Mode"** toggle (`fullscreen.auto_immersive`) that
+both registers the shell and arms Immersive Mode. Use the **per-user** shell value, not
+the machine-wide one:
 
 ```
 HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell

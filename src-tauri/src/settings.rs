@@ -90,7 +90,6 @@ fn default_kind() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct General {
-    pub start_with_windows: bool,
     #[serde(default = "default_last_view")]
     pub last_view: String,
 }
@@ -207,7 +206,6 @@ impl Default for Settings {
         Self {
             version: 1,
             general: General {
-                start_with_windows: false,
                 last_view: "apps".to_string(),
             },
             integrations: Integrations {

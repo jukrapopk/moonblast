@@ -2432,20 +2432,15 @@ fn minimize_other_windows() {
     }
 }
 
-/// Register/remove Moonblast in Windows startup (HKCU Run key).
+/// Register or remove Moonblast as the Windows shell (Auto Immersive Mode).
+/// The shell stub is the only boot-launch path — there is no separate
+/// Start with Windows toggle, so no coordination with a Run key is needed.
 #[tauri::command]
-fn set_start_with_windows(enabled: bool) -> Result<(), String> {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
-    use winreg::RegKey;
-    let key = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE)
-        .map_err(|e| e.to_string())?;
-    if enabled {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        key.set_value("Moonblast", &exe.to_string_lossy().to_string())
-            .map_err(|e| e.to_string())?;
-    } else {
-        let _ = key.delete_value("Moonblast");
+fn apply_auto_immersive(auto_immersive: bool) -> Result<(), String> {
+    shell::set_replace_desktop(auto_immersive)?;
+    if auto_immersive {
+        // Arming from the UI is an explicit fresh start, so forgive earlier crashes.
+        shell::reset_crash_count();
     }
     Ok(())
 }
@@ -2460,18 +2455,6 @@ fn is_autostart() -> bool {
 #[tauri::command]
 fn booted_as_shell() -> bool {
     is_autostart()
-}
-
-/// Register/remove Moonblast as the Windows shell, so sign-in boots straight into
-/// the launcher instead of the desktop. Per-user, so no elevation is needed.
-#[tauri::command]
-fn set_replace_desktop(enabled: bool) -> Result<(), String> {
-    shell::set_replace_desktop(enabled)?;
-    if enabled {
-        // Arming from the UI is an explicit fresh start, so forgive earlier crashes.
-        shell::reset_crash_count();
-    }
-    Ok(())
 }
 
 /// Enter Immersive Mode: go fullscreen, suppress the desktop shell, and
@@ -2928,6 +2911,12 @@ pub fn run() {
         .setup(|app| {
             app.manage(settings::SettingsState::load(app.handle()));
             app.manage(StreamState::default());
+            // Drop any stale `HKCU\...\Run\Moonblast` from the previous build
+            // that had a Start with Windows toggle — otherwise upgrading
+            // users would briefly see two Moonblast.exe processes at
+            // sign-in (one from the Run key, one from the stub) until they
+            // manually clear it. Idempotent.
+            shell::cleanup_legacy_run_key();
             // Apply the bundled app icon to the main window (taskbar/alt-tab).
             if let Some(icon) = app.default_window_icon() {
                 if let Some(window) = app.get_webview_window("main") {
@@ -3000,8 +2989,7 @@ pub fn run() {
             is_maximized,
             close_app,
             system_power,
-            set_start_with_windows,
-            set_replace_desktop,
+            apply_auto_immersive,
             booted_as_shell,
             enter_immersive,
             exit_immersive,

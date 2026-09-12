@@ -12,7 +12,7 @@ import { listen } from "@tauri-apps/api/event";
 
 export interface Settings {
   version: number;
-  general: { start_with_windows: boolean; last_view: string };
+  general: { last_view: string };
   integrations: {
     moonlight_folder: string | null;
     moonlight_enabled: boolean;
@@ -64,7 +64,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
-  general: { start_with_windows: false, last_view: "apps" },
+  general: { last_view: "apps" },
   integrations: {
     moonlight_folder: null,
     moonlight_enabled: false,

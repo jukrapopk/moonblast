@@ -769,8 +769,6 @@ export function SettingsView({
   onToggleApps,
   steamgridKey,
   onSetSteamgridKey,
-  startWithWindows,
-  onToggleStartWithWindows,
   autoImmersive,
   onToggleAutoImmersive,
   showTime,
@@ -798,8 +796,6 @@ export function SettingsView({
   onToggleApps: (v: boolean) => void;
   steamgridKey: string | null;
   onSetSteamgridKey: (k: string) => void;
-  startWithWindows: boolean;
-  onToggleStartWithWindows: (v: boolean) => void;
   autoImmersive: boolean;
   onToggleAutoImmersive: (v: boolean) => void;
   showTime: boolean;
@@ -852,18 +848,15 @@ export function SettingsView({
   return (
     <PageShell title="Settings" subtitle="App-level settings.">
       <Section title="General">
-        <Row label="Start with Windows" description="Launch Moonblast when you sign in to Windows.">
-          <Toggle checked={startWithWindows} onChange={onToggleStartWithWindows} />
-        </Row>
         <div className="flex items-start justify-between gap-4 py-4">
           <div className="flex-1">
             <div className="text-base font-medium text-(--color-text)">Auto Immersive Mode</div>
             <div className="mt-0.5 text-sm text-(--color-muted)">
-              {startWithWindows
+              {autoImmersive
                 ? "Sign in straight into Moonblast instead of the Windows desktop. Applies from your next sign-in — turning this on won't change anything right now. It:"
-                : 'Requires "Start with Windows" to be enabled.'}
+                : "When off, Moonblast doesn't start with Windows. Turn it on to replace the desktop at sign-in."}
             </div>
-            {startWithWindows && (
+            {autoImmersive && (
               <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-(--color-muted)">
                 <li>Launches Moonblast fullscreen before anything else</li>
                 <li>Never starts the desktop or taskbar, so nothing flashes on the way in</li>
@@ -874,11 +867,7 @@ export function SettingsView({
               </ul>
             )}
           </div>
-          <Toggle
-            checked={autoImmersive}
-            onChange={onToggleAutoImmersive}
-            disabled={!startWithWindows}
-          />
+          <Toggle checked={autoImmersive} onChange={onToggleAutoImmersive} />
         </div>
       </Section>
 
