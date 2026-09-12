@@ -334,12 +334,17 @@ function derivePalette(
 
   // Accent: tinted presets use the swatch (dark) or its darkened
   // version (light) so primary buttons pop against the derived bg.
-  // Untinted presets use the legacy purple accent.
-  const accentRgb = isUntinted
+  // Neutral keeps the legacy purple accent (it's the default and
+  // users expect color there). Gray uses a true gray accent —
+  // mid-gray for dark bg (lifts above the floor), darker gray
+  // for light bg (sinks into a visible button).
+  const accentRgb = isNeutral
     ? hexToRgb(dark ? "#6f78c8" : "#4a60dc")!
-    : dark
-      ? swatch
-      : darken(swatch, 0.18);
+    : isGray
+      ? hexToRgb(dark ? "#9aa0a8" : "#5a606b")!
+      : dark
+        ? swatch
+        : darken(swatch, 0.18);
   const accentColor = toCss(accentRgb);
 
   return {
