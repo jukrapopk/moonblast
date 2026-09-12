@@ -33,6 +33,12 @@ export interface Settings {
     video_decoder: string;
     vsync: boolean;
     hdr: boolean;
+    /**
+     * When `true`, HDR streaming tracks the OS-level display HDR state
+     * (resolved at stream start from `hdr_status().enabled`) and the
+     * per-stream `hdr` toggle is shown but disabled. Default `true`.
+     */
+    hdr_follow_global: boolean;
     yuv444: boolean;
     frame_pacing: boolean;
     packet_size: number | null;
@@ -79,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
     video_decoder: "auto",
     vsync: true,
     hdr: false,
+    hdr_follow_global: true,
     yuv444: false,
     frame_pacing: true,
     packet_size: null,

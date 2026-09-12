@@ -1,7 +1,8 @@
 import { PencilSimple } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSettings, type Settings } from "../settings/SettingsContext";
 import { Prompt } from "./ui/Prompt";
 import { Row } from "./ui/Row";
@@ -50,6 +51,15 @@ interface ClientDisplay {
   refresh_rate: number | null;
 }
 
+/** Mirror of `hdr::HdrStatus` from the Rust side. Only `enabled` matters
+ *  here — the rest is folded into the toggle's disabled state when the
+ *  display doesn't support HDR or the OS has locked the toggle. */
+interface HdrStatus {
+  supported: boolean;
+  enabled: boolean;
+  locked: boolean;
+}
+
 export function MoonlightSettings() {
   const { settings, update } = useSettings();
   const m = settings.moonlight;
@@ -62,6 +72,54 @@ export function MoonlightSettings() {
   useEffect(() => {
     invoke<ClientDisplay>("client_display").then(setDetected).catch(() => { });
   }, []);
+
+  // Live read of the OS-level display HDR state. Used to mirror the
+  // global HDR state onto the disabled HDR toggle when
+  // `hdr_follow_global` is on. Three refresh paths:
+  //   - mount: initial fetch
+  //   - `hdr-changed` event: pushed by Rust after every successful
+  //     `set_hdr` IPC, so toggling HDR in the Display modal updates
+  //     this view immediately without a remount
+  //   - window `focus` / `visibilitychange → visible`: catches the case
+  //     where HDR was flipped outside Moonblast (Windows Settings app,
+  //     OEM hotkey, OS policy) and the user alt-tabs back
+  //
+  // The actual stream is always correct regardless of this read —
+  // `moonlight_flags()` re-resolves `hdr_status().enabled` at spawn
+  // time. This hook only keeps the visual indicator honest.
+  const [globalHdr, setGlobalHdr] = useState<HdrStatus | null>(null);
+  const refreshGlobalHdr = useCallback(async () => {
+    try {
+      setGlobalHdr(await invoke<HdrStatus>("hdr_status"));
+    } catch {
+      // Leave the previous value alone — same shape as useAudioMaster.
+    }
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    const safe = () => {
+      if (alive) void refreshGlobalHdr();
+    };
+    safe();
+    void listen<HdrStatus>("hdr-changed", () => safe()).then((f) => {
+      unlisten = f;
+    });
+    function onFocus() {
+      safe();
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") safe();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      alive = false;
+      unlisten?.();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refreshGlobalHdr]);
 
   // Custom-input modals.
   const [resOpen, setResOpen] = useState(false);
@@ -192,8 +250,40 @@ export function MoonlightSettings() {
           <Row label="V-Sync" description="Sync frames to the display refresh">
             <Toggle checked={m.vsync} onChange={(v) => set("vsync", v)} />
           </Row>
-          <Row label="HDR" description="High dynamic range streaming">
-            <Toggle checked={m.hdr} onChange={(v) => set("hdr", v)} />
+          <Row
+            label="Follow Global HDR"
+            description={
+              m.hdr_follow_global
+                ? "HDR streaming tracks the display's HDR state (resolved at stream start)."
+                : "Use the HDR toggle below instead."
+            }
+          >
+            <Toggle
+              checked={m.hdr_follow_global}
+              onChange={(v) => set("hdr_follow_global", v)}
+            />
+          </Row>
+          <Row
+            label="HDR"
+            description={
+              m.hdr_follow_global
+                ? globalHdr === null
+                  ? "Reading display HDR state…"
+                  : globalHdr.supported
+                    ? `High dynamic range streaming — following display (currently ${globalHdr.enabled ? "on" : "off"}).`
+                    : "This display doesn't support HDR."
+                : "High dynamic range streaming"
+            }
+          >
+            <Toggle
+              checked={m.hdr}
+              onChange={(v) => set("hdr", v)}
+              disabled={m.hdr_follow_global}
+              // When following, the toggle is read-only but should still
+              // mirror the OS-level HDR state so the user can see what
+              // the stream will do.
+              displayValue={m.hdr_follow_global ? globalHdr?.enabled : undefined}
+            />
           </Row>
           <Row label="YUV 4:4:4" description="Lossless color sampling, if supported">
             <Toggle checked={m.yuv444} onChange={(v) => set("yuv444", v)} />

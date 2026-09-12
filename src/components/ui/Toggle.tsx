@@ -6,13 +6,22 @@ interface ToggleProps {
   checked?: boolean;
   onChange?: (value: boolean) => void;
   disabled?: boolean;
+  /**
+   * Optional override for the rendered thumb position when `disabled`.
+   * The default behavior renders the thumb on the left (off). Pass
+   * `displayValue` when the disabled state needs to mirror an external
+   * value (e.g. "Follow global" showing the OS-level HDR state).
+   * Stored `checked` value is still untouched.
+   */
+  displayValue?: boolean;
 }
 
-export function Toggle({ defaultOn = false, checked, onChange, disabled }: ToggleProps) {
+export function Toggle({ defaultOn = false, checked, onChange, disabled, displayValue }: ToggleProps) {
   const [internal, setInternal] = useState(defaultOn);
   const on = checked ?? internal;
   // Disabled reads as off — visual only, the stored value is untouched.
-  const visualOn = disabled ? false : on;
+  // `displayValue` overrides this for read-only mirrors of an external state.
+  const visualOn = disabled ? (displayValue ?? false) : on;
 
   function toggle() {
     if (disabled) return;

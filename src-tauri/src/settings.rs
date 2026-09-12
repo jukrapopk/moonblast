@@ -126,6 +126,13 @@ pub struct MoonlightStreaming {
     pub video_decoder: String, // "auto" | "software" | "hardware"
     pub vsync: bool,
     pub hdr: bool,
+    /// When `true`, HDR streaming tracks the OS-level display HDR state
+    /// (resolved at stream start from `hdr_status().enabled`) and the
+    /// per-stream `hdr` toggle is shown but disabled. Default `true` so
+    /// the user doesn't accidentally stream HDR on a display where it's
+    /// been turned off (or vice versa).
+    #[serde(default = "default_true")]
+    pub hdr_follow_global: bool,
     pub yuv444: bool,
     pub frame_pacing: bool,
     pub packet_size: Option<u32>, // bytes (>1024)
@@ -164,6 +171,7 @@ impl Default for MoonlightStreaming {
             video_decoder: "auto".to_string(),
             vsync: true,
             hdr: false,
+            hdr_follow_global: true,
             yuv444: false,
             frame_pacing: true,
             packet_size: None,

@@ -1450,7 +1450,16 @@ fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
         }
     };
     push_toggle(&mut v, "vsync", prefs.vsync);
-    push_toggle(&mut v, "hdr", prefs.hdr);
+    // HDR: when `hdr_follow_global` is on, resolve from the OS-level display
+    // HDR state right before the stream spawns so the stream always tracks
+    // whatever the display is doing at that moment. Otherwise honor the
+    // user-stored `hdr` toggle as today.
+    let hdr_enabled = if prefs.hdr_follow_global {
+        hdr::hdr_status().enabled
+    } else {
+        prefs.hdr
+    };
+    push_toggle(&mut v, "hdr", hdr_enabled);
     push_toggle(&mut v, "yuv444", prefs.yuv444);
     push_toggle(&mut v, "frame-pacing", prefs.frame_pacing);
     push_toggle(&mut v, "keep-awake", prefs.keep_awake);
@@ -2723,9 +2732,17 @@ fn hdr_status() -> hdr::HdrStatus {
 
 /// Toggle HDR on the primary display. Returns an error when the OS
 /// rejects the call (e.g. driver said no, or no active path exists).
+///
+/// On success, emits `hdr-changed` carrying the post-write `HdrStatus`
+/// so any listener with a stale view (e.g. the disabled HDR toggle in
+/// MoonlightSettings when "Follow Global HDR" is on) re-reads and stays
+/// in sync without a manual refresh.
 #[tauri::command]
-fn set_hdr(enabled: bool) -> Result<(), String> {
-    hdr::set_hdr(enabled)
+fn set_hdr(app: AppHandle, enabled: bool) -> Result<(), String> {
+    hdr::set_hdr(enabled)?;
+    let status = hdr::hdr_status();
+    let _ = app.emit("hdr-changed", status);
+    Ok(())
 }
 
 /// List every attached GDI monitor. Each entry's `device_name` is the
