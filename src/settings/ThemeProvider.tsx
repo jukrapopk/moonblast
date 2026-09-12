@@ -4,29 +4,78 @@ import { listen } from "@tauri-apps/api/event";
 import { useSettings } from "./SettingsContext";
 import type { Settings } from "./SettingsContext";
 
-/** Color presets — a 9-hue rainbow (red → pink) + a Neutral that
- *  matches the previous Moonblast look (very dark gray in dark mode,
- *  white in light mode). Each tinted swatch sits at luminance ~0.21
- *  so every preset reads as the same calm brightness. `auto` tracks
- *  the Windows accent color (DWM colorization, including the OS's
- *  auto-picked variant on Win11 22H2+); `custom` falls back to
- *  settings.appearance.custom_accent. */
-export const ACCENT_PRESETS: { id: string; label: string; color: string }[] = [
-  { id: "auto", label: "Auto", color: "" },
-  { id: "red", label: "Red", color: "#a86060" },
-  { id: "orange", label: "Orange", color: "#a0744a" },
-  { id: "yellow", label: "Yellow", color: "#8a7e3f" },
-  { id: "green", label: "Green", color: "#5a8a55" },
-  { id: "teal", label: "Teal", color: "#4a8a88" },
-  { id: "blue", label: "Blue", color: "#5a7eb8" },
-  { id: "indigo", label: "Indigo", color: "#6a75a8" },
-  { id: "purple", label: "Purple", color: "#7a60a8" },
-  { id: "pink", label: "Pink", color: "#a8608a" },
-  { id: "neutral", label: "Neutral", color: "#0d1017" },
+/** Color presets — a 9-hue rainbow (red → pink) + Neutral (legacy
+ *  Moonblast dark palette) + Gray (pure desaturated, no chroma at
+ *  all). Tinted swatches sit at luminance ~0.21 so every preset
+ *  reads as the same calm brightness. Neutral / Gray have separate
+ *  `pickerSwatch` colors (cosmetic — visible in the chip row) and
+ *  `appliedBg` colors (what the app actually uses as bg). Tinted
+ *  presets share both — the swatch IS the applied color. `auto`
+ *  tracks the Windows accent color (DWM colorization, including
+ *  the OS's auto-picked variant on Win11 22H2+); `custom` falls
+ *  back to settings.appearance.custom_accent. */
+export type AccentPreset = {
+  id: string;
+  label: string;
+  /** Color shown as the swatch chip in the picker row. Lifted
+   *  slightly for Neutral in dark mode so the chip doesn't blend
+   *  into the picker background. */
+  pickerSwatch: { dark: string; light: string };
+  /** Color used as the actual app background. Different from
+   *  pickerSwatch only for Neutral. */
+  appliedBg: { dark: string; light: string };
+};
+
+export const ACCENT_PRESETS: AccentPreset[] = [
+  // Auto: chip shows the live Windows accent; applied bg falls
+  // back to the OS reading (handled in resolveAccent).
+  {
+    id: "auto",
+    label: "Auto",
+    pickerSwatch: { dark: "#6f78c8", light: "#6f78c8" },
+    appliedBg: { dark: "#6f78c8", light: "#6f78c8" },
+  },
+  // Tinted presets: swatch = applied color (both modes).
+  { id: "red", label: "Red", pickerSwatch: { dark: "#a86060", light: "#a86060" }, appliedBg: { dark: "#a86060", light: "#a86060" } },
+  { id: "orange", label: "Orange", pickerSwatch: { dark: "#a0744a", light: "#a0744a" }, appliedBg: { dark: "#a0744a", light: "#a0744a" } },
+  { id: "yellow", label: "Yellow", pickerSwatch: { dark: "#8a7e3f", light: "#8a7e3f" }, appliedBg: { dark: "#8a7e3f", light: "#8a7e3f" } },
+  { id: "green", label: "Green", pickerSwatch: { dark: "#5a8a55", light: "#5a8a55" }, appliedBg: { dark: "#5a8a55", light: "#5a8a55" } },
+  { id: "teal", label: "Teal", pickerSwatch: { dark: "#4a8a88", light: "#4a8a88" }, appliedBg: { dark: "#4a8a88", light: "#4a8a88" } },
+  { id: "blue", label: "Blue", pickerSwatch: { dark: "#5a7eb8", light: "#5a7eb8" }, appliedBg: { dark: "#5a7eb8", light: "#5a7eb8" } },
+  { id: "indigo", label: "Indigo", pickerSwatch: { dark: "#6a75a8", light: "#6a75a8" }, appliedBg: { dark: "#6a75a8", light: "#6a75a8" } },
+  { id: "purple", label: "Purple", pickerSwatch: { dark: "#7a60a8", light: "#7a60a8" }, appliedBg: { dark: "#7a60a8", light: "#7a60a8" } },
+  { id: "pink", label: "Pink", pickerSwatch: { dark: "#a8608a", light: "#a8608a" }, appliedBg: { dark: "#a8608a", light: "#a8608a" } },
+  // Neutral: legacy Moonblast palette. Picker swatch is lifted
+  // (`#262c3a`) so the chip reads as a distinct object in the
+  // picker row rather than blending into the picker bg. Applied
+  // bg stays at the legacy `#0d1017` (dark) / `#ffffff` (light).
+  {
+    id: "neutral",
+    label: "Neutral",
+    pickerSwatch: { dark: "#262c3a", light: "#f5f5f5" },
+    appliedBg: { dark: "#0d1017", light: "#ffffff" },
+  },
+  // Gray: pure desaturated, no chroma. Picker swatch = applied
+  // bg in each mode.
+  {
+    id: "gray",
+    label: "Gray",
+    pickerSwatch: { dark: "#1c1c1c", light: "#f0f0f0" },
+    appliedBg: { dark: "#1c1c1c", light: "#f0f0f0" },
+  },
 ];
 
-const VALID_ACCENT_IDS = new Set(ACCENT_PRESETS.map((p) => p.id));
 const VALID_THEMES = new Set(["dark", "light", "auto"]);
+
+/** Color shown as the chip in the picker row. */
+export function presetSwatch(p: AccentPreset, mode: "light" | "dark"): string {
+  return mode === "light" ? p.pickerSwatch.light : p.pickerSwatch.dark;
+}
+
+/** Color used as the actual app background. */
+function presetApplied(p: AccentPreset, mode: "light" | "dark"): string {
+  return mode === "light" ? p.appliedBg.light : p.appliedBg.dark;
+}
 
 /** Resolve the accent id + custom hex + cached Windows accent into
  *  one final CSS hex. The `auto` id reads from `osAccent` (set by
@@ -47,14 +96,13 @@ export function resolveAccent(
     // returned a value (rare — only during the very first paint).
     return osAccent ?? FALLBACK_ACCENT;
   }
-  if (accentId === "neutral") {
-    // Neutral resolves to a theme-dependent gray: very dark gray
-    // in dark mode (matches the legacy Moonblast default), white
-    // in light mode. The picker swatch shows the dark version.
-    return mode === "light" ? "#ffffff" : "#0d1017";
-  }
-  if (VALID_ACCENT_IDS.has(accentId)) {
-    return ACCENT_PRESETS.find((p) => p.id === accentId)!.color;
+  const preset = ACCENT_PRESETS.find((p) => p.id === accentId);
+  if (preset) {
+    // Return the ACTUAL bg color that will be applied — for most
+    // presets this equals the picker swatch, but for Neutral the
+    // swatch is lifted so it reads in the picker while the
+    // applied bg stays at the legacy `#0d1017`.
+    return presetApplied(preset, mode);
   }
   return FALLBACK_ACCENT;
 }
@@ -187,75 +235,78 @@ function derivePalette(
 ): Record<string, string> {
   const swatch = hexToRgb(accent) ?? { r: 111, g: 120, b: 200 };
   const dark = mode === "dark";
+  // Untinted presets (Neutral / Gray) skip the hue derivation:
+  // bg passes through directly, surfaces / text / border come
+  // from a hand-picked neutral scale.
+  const isUntinted = accentId === "neutral" || accentId === "gray";
   const isNeutral = accentId === "neutral";
+  const isGray = accentId === "gray";
 
-  // Bg: tinted presets get a derived bg (dark: rich deep room;
-  // light: pale wash). Neutral passes through unchanged so the
-  // app stays untinted — matching the legacy Moonblast default.
-  // Dark mode also desaturates toward mid-gray so the hue doesn't
-  // shout — keeps the room moody.
-  const bg = isNeutral
+  // Bg: tinted presets derive from the swatch (dark: rich deep
+  // room; light: pale wash). Untinted presets pass through.
+  const bg = isUntinted
     ? swatch
     : dark
       ? desaturate(darken(swatch, 0.7), 0.55)
       : mix(swatch, { r: 255, g: 255, b: 255 }, 0.82);
 
-  // Surfaces step on top of the bg. Tinted presets stay close to
-  // the bg (flatter, more uniform) — cards read as "part of the
-  // room" rather than elevated panels. The biggest contrast
-  // between layers was over-emphasizing elevation.
+  // Surfaces step on top of the bg.
+  //  - Neutral: legacy Moonblast palette (slight cool tint)
+  //  - Gray: pure desaturated steps (no chroma)
+  //  - Tinted: derived from the bg's brightness
   const surface = isNeutral
     ? (dark ? { r: 0x16, g: 0x19, b: 0x23 } : { r: 0xf5, g: 0xf6, b: 0xf8 })
-    : dark
-      ? lighten(bg, 0.06)
-      : darken(bg, 0.02);
+    : isGray
+      ? (dark ? { r: 0x25, g: 0x25, b: 0x25 } : { r: 0xdd, g: 0xdd, b: 0xdd })
+      : dark
+        ? lighten(bg, 0.06)
+        : darken(bg, 0.02);
   const surface2 = isNeutral
     ? (dark ? { r: 0x1d, g: 0x22, b: 0x30 } : { r: 0xee, g: 0xf0, b: 0xf3 })
-    : dark
-      ? lighten(bg, 0.12)
-      : darken(bg, 0.05);
+    : isGray
+      ? (dark ? { r: 0x2e, g: 0x2e, b: 0x2e } : { r: 0xca, g: 0xca, b: 0xca })
+      : dark
+        ? lighten(bg, 0.12)
+        : darken(bg, 0.05);
 
-  // Auto-pick text for contrast. On most light-themed presets the
-  // bg is pale enough to need dark text; on every dark-themed
-  // preset we use light text.
-  const lum = relativeLuminance(bg);
-  const textIsLight = lum < 0.55;
-  // Neutral uses the original Moonblast text colors so the legacy
-  // look is fully preserved; tinted presets use a slightly warmer
-  // white / cooler near-black that pairs with the bg hue.
-  const text = isNeutral
-    ? (dark ? { r: 0xd9, g: 0xdd, b: 0xe8 } : { r: 0x1a, g: 0x1d, b: 0x23 })
-    : textIsLight
-      ? { r: 248, g: 249, b: 253 }
-      : { r: 28, g: 30, b: 38 };
-  const muted = isNeutral
-    ? (dark ? { r: 0x90, g: 0x99, b: 0xac } : { r: 0x6c, g: 0x72, b: 0x80 })
-    : textIsLight
-      ? { r: 175, g: 178, b: 190 }
-      : { r: 155, g: 158, b: 172 };
-
-  // Border: very subtle contrast vs surface. Cards are flat;
-  // borders are just a quiet outline, not a strong frame.
+  // Text / muted are always neutral so the UI keeps one consistent
+  // text vocabulary regardless of which color preset the user
+  // picked. Borders stay tinted (sit just above the surface tone)
+  // so they read as a quiet outline against cards/menus even when
+  // the bg is strongly themed — neutral borders on tinted bgs
+  // either disappear or read as noise.
+  const text = dark
+    ? { r: 0xd9, g: 0xdd, b: 0xe8 }
+    : { r: 0x1a, g: 0x1d, b: 0x23 };
+  const muted = dark
+    ? { r: 0x90, g: 0x99, b: 0xac }
+    : { r: 0x6c, g: 0x72, b: 0x80 };
   const border = isNeutral
     ? (dark ? { r: 0x26, g: 0x2c, b: 0x3a } : { r: 0xd8, g: 0xdb, b: 0xe2 })
-    : mix(surface, text, 0.08);
+    : isGray
+      ? (dark ? { r: 0x38, g: 0x38, b: 0x38 } : { r: 0xc0, g: 0xc0, b: 0xc0 })
+      : dark
+        ? lighten(surface2, 0.08)
+        : darken(surface2, 0.06);
 
   // Overlay: scrim used behind modals. Heavier on light bg.
-  const overlay = textIsLight
+  const bgIsLight = relativeLuminance(bg) >= 0.55;
+  const overlay = bgIsLight
     ? "rgb(0 0 0 / 0.6)"
     : "rgb(0 0 0 / 0.7)";
-  const overlaySoft = textIsLight
+  const overlaySoft = bgIsLight
     ? "rgb(0 0 0 / 0.15)"
     : "rgb(0 0 0 / 0.2)";
 
   // Accent: tinted presets use the swatch (dark) or its darkened
   // version (light) so primary buttons pop against the derived bg.
-  // Neutral falls back to the legacy --color-accent token.
-  const accentColor = isNeutral
-    ? (dark ? "#6f78c8" : "#4a60dc")
+  // Untinted presets use the legacy purple accent.
+  const accentRgb = isUntinted
+    ? hexToRgb(dark ? "#6f78c8" : "#4a60dc")!
     : dark
-      ? toCss(swatch)
-      : toCss(darken(swatch, 0.18));
+      ? swatch
+      : darken(swatch, 0.18);
+  const accentColor = toCss(accentRgb);
 
   return {
     "--color-bg": toCss(bg),
@@ -265,7 +316,7 @@ function derivePalette(
     "--color-muted": toCss(muted),
     "--color-text": toCss(text),
     "--color-accent": accentColor,
-    "--color-accent-soft": `rgb(${swatch.r} ${swatch.g} ${swatch.b} / 0.22)`,
+    "--color-accent-soft": `rgb(${accentRgb.r} ${accentRgb.g} ${accentRgb.b} / 0.22)`,
     "--color-surface-ghost": dark
       ? `rgb(${bg.r} ${bg.g} ${bg.b} / 0.6)`
       : `rgb(${bg.r} ${bg.g} ${bg.b} / 0.85)`,

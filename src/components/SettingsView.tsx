@@ -12,7 +12,7 @@ import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
-import { ACCENT_PRESETS } from "../settings/ThemeProvider";
+import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
   | "not-found"
@@ -639,18 +639,12 @@ function AppearanceSection({
           onChange={onSetTheme}
         />
       </Row>
-      <Row
-        label="Color"
-        description={
-          accent === "auto"
-            ? `Following Windows — ${windowsAccent ?? "reading"}`
-            : undefined
-        }
-      >
+      <Row label="Color">
         <ColorPicker
           accent={accent}
           customAccent={customAccent}
           windowsAccent={windowsAccent}
+          theme={theme}
           onSetAccent={onSetAccent}
           onSetCustomAccent={onSetCustomAccent}
         />
@@ -668,41 +662,52 @@ function ColorPicker({
   accent,
   customAccent,
   windowsAccent,
+  theme,
   onSetAccent,
   onSetCustomAccent,
 }: {
   accent: string;
   customAccent: string | null;
   windowsAccent: string | null;
+  theme: string;
   onSetAccent: (id: string) => void;
   onSetCustomAccent: (hex: string | null) => void;
 }) {
+  // For untinted presets (Neutral / Gray), the swatch matches the
+  // applied bg in each theme — dark gray / white for Neutral,
+  // slightly different shades for Gray. For tinted presets the
+  // swatch is the static color. "Auto" is special: it shows the
+  // live Windows accent color.
+  const swatchMode: "light" | "dark" = theme === "light" ? "light" : "dark";
   return (
     <div className="flex items-center gap-2">
       {ACCENT_PRESETS.map((p) => {
         const active = accent === p.id;
-        // Auto shows the live Windows accent; presets show their
-        // own color. The Auto swatch uses a slightly different
-        // gradient cue so it reads as "the OS one" rather than
-        // another preset.
         const swatchColor =
           p.id === "auto"
             ? (windowsAccent ?? "#6f78c8")
-            : p.color;
+            : presetSwatch(p, swatchMode);
+        const isAuto = p.id === "auto";
         return (
           <button
             key={p.id}
             onClick={() => onSetAccent(p.id)}
-            title={p.id === "auto" ? `Auto — ${windowsAccent ?? "reading"}` : p.label}
+            title={isAuto ? `Auto — ${windowsAccent ?? "reading"}` : p.label}
             aria-label={p.label}
             aria-pressed={active}
-            className={`h-7 w-7 rounded-full border-2 transition ${
+            className={`relative h-7 w-7 rounded-full border-2 transition ${
               active
                 ? "scale-110 border-(--color-text)"
                 : "border-(--color-border) hover:border-(--color-muted)"
             }`}
             style={{ background: swatchColor }}
-          />
+          >
+            {isAuto && (
+              <span className="pointer-events-none absolute inset-0 grid place-items-center text-[11px] font-bold leading-none text-white drop-shadow-[0_1px_2px_rgb(0_0_0_/_0.6)]">
+                A
+              </span>
+            )}
+          </button>
         );
       })}
       <button
