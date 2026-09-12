@@ -83,11 +83,7 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
             {known ? `${percent}%` : "—"}
           </span>
           <span className="text-sm text-(--color-muted)">
-            {charging
-              ? "Charging"
-              : pluggedIn
-                ? "Plugged in"
-                : "On battery"}
+            {charging ? "Charging" : pluggedIn ? "Plugged in" : "On battery"}
           </span>
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-(--color-surface)">
@@ -116,7 +112,7 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
 
       <SectionLabel>Power source</SectionLabel>
       <div className="mb-1 flex items-center justify-between rounded-xl px-1 py-2">
-        <span className="text-sm text-(--color-muted)">Status</span>
+        <span className="text-sm text-(--color-muted)">Source</span>
         <span className="text-sm text-(--color-text)">
           {pluggedIn ? "Wall power" : "Battery"}
         </span>

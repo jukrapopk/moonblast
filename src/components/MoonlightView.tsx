@@ -309,8 +309,8 @@ function HostCard({
               {entry.saved && (
                 <button
                   onClick={onRemoveSaved}
-                  title="Remove saved address"
-                  aria-label="Remove saved address"
+                  title="Forget saved address"
+                  aria-label="Forget saved address"
                   className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
                 >
                   <Trash size={16} weight="bold" />
@@ -400,13 +400,13 @@ function AddMachineModal({
       open={open}
       onClose={onClose}
       title="Add machine"
-      subtitle="Enter the address of your Sunshine host. Useful for Tailscale or other remote addresses."
+      subtitle="Save a custom address — useful for Tailscale or other remote networks."
     >
       <div className="space-y-3">
         <Input
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Name (optional — defaults to address)"
+          placeholder="Name (optional)"
         />
         <Input
           autoFocus
@@ -466,17 +466,17 @@ function AppsModal({
   }, [open, host?.address, host?.name]);
 
   return (
-    <Modal open={open} onClose={onClose} title={host ? `${host.name}` : ""} subtitle="Choose an app to stream.">
+    <Modal open={open} onClose={onClose} title={host ? `${host.name}` : ""} subtitle="Choose an app to stream">
       {error ? (
         <p className="py-4 text-sm text-(--color-danger)">
           {error}
           <span className="mt-1 block text-(--color-muted)">
-            It may need pairing first — press Pair on the machine.
+            Pair the host first if you haven't yet.
           </span>
         </p>
       ) : apps.length === 0 ? (
         <p className="py-6 text-center text-sm text-(--color-muted)">
-          {error ? "Couldn't load apps." : "Loading apps…"}
+          {error ? "Couldn't load apps" : "Loading apps"}
         </p>
       ) : (
         <div className="max-h-80 space-y-1 overflow-y-auto">
@@ -644,7 +644,7 @@ export function MoonlightView() {
         pairingRef.current = null;
         setBusyAddress(null);
         scan({ force: true });
-        showToast(success ? `Paired with ${host}` : `Pairing ${host} failed`);
+        showToast(success ? `Paired with ${host}` : `Couldn't pair with ${host}`);
       }
     }).then((fn) => {
       unlisten = fn;
@@ -691,7 +691,7 @@ export function MoonlightView() {
       );
       setPairedHosts(paired);
     } catch (e) {
-      showToast(`Forget failed: ${e}`);
+      showToast(`Couldn't forget ${name}: ${e}`);
     } finally {
       setBusyAddress((cur) => (cur === name ? null : cur));
     }
@@ -700,7 +700,7 @@ export function MoonlightView() {
   async function pair(entry: HostEntry) {
     pairingRef.current = entry.address;
     setBusyAddress(entry.name);
-    showToast(`Pairing ${entry.name}…`);
+    showToast(`Pairing with ${entry.name}…`);
     try {
       await invoke("moonlight_pair", { host: entry.address });
     } catch (err) {
@@ -790,7 +790,7 @@ export function MoonlightView() {
       ...(entry.saved
         ? [
             {
-              label: "Remove saved address",
+              label: "Forget saved address",
               danger: true,
               onClick: () => removeSaved(entry.name),
             },
@@ -820,7 +820,7 @@ export function MoonlightView() {
     <>
       <PageShell
         title="Moonlight"
-        subtitle="Your streaming hosts. Add a saved address to use Tailscale or other remote networks."
+        subtitle="Your streaming hosts. Save an address to use Tailscale or other remote networks."
         actions={
           sub === "machines" ? (
             <div className="flex items-center gap-2">
@@ -869,7 +869,7 @@ export function MoonlightView() {
                 <Card dashed className="p-10 text-center text-sm text-(--color-muted)">
                   {scanning
                     ? "Scanning your network…"
-                    : "No hosts found. Scan again or add a machine manually."}
+                    : "No hosts found. Scan again or add a machine."}
                 </Card>
               ) : (
                 <div className="space-y-6">

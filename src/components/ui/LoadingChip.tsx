@@ -18,7 +18,7 @@ interface LoadingChipProps {
  * as a blank control. Matches the spinner style already used in
  * `WifiModal` and `AudioModal`.
  */
-export function LoadingChip({ label = "Loading…", className = "" }: LoadingChipProps) {
+export function LoadingChip({ label = "Loading", className = "" }: LoadingChipProps) {
   return (
     <span
       className={

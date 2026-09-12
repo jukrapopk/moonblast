@@ -148,7 +148,7 @@ function PasswordForm({
             onClick={() => canSubmit && onSubmit(network, password)}
             disabled={!canSubmit}
           >
-            {busy ? "Connecting…" : "Connect"}
+            {busy ? "Connecting" : "Connect"}
           </Button>
         </div>
       </div>
@@ -189,10 +189,10 @@ function NetworkRow({
   // otherwise the standard "Connected" / "Saved" status.
   const subtitle = busy
     ? busy.kind === "connect"
-      ? "Connecting…"
+      ? "Connecting"
       : busy.kind === "forget"
-        ? "Forgetting…"
-        : "Disconnecting…"
+        ? "Forgetting"
+        : "Disconnecting"
     : isCurrent
       ? "Connected"
       : net.known
@@ -438,7 +438,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="WiFi" width="max-w-sm">
+    <Modal open={open} onClose={onClose} title="Wi-Fi" width="max-w-sm">
       {passwordTarget ? (
         <PasswordForm
           network={passwordTarget}
@@ -460,10 +460,10 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
 
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {loading && networks.length === 0 ? (
-              <p className="py-4 text-center text-sm text-(--color-muted)">Scanning…</p>
+              <p className="py-4 text-center text-sm text-(--color-muted)">Scanning</p>
             ) : networks.length === 0 ? (
               <p className="py-4 text-center text-sm text-(--color-muted)">
-                {radioOff ? "Wi-Fi is off — turn it on in WiFi Settings." : "No networks found"}
+                {radioOff ? "Turn Wi-Fi on in Windows settings to see networks" : "No networks found"}
               </p>
             ) : (
               networks.map((net) => {

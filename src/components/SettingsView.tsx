@@ -62,7 +62,7 @@ type TailscaleStatus =
     if (status === "not-found") {
       return (
         <Row label="Tailscale">
-          <span className="text-sm text-(--color-muted)/60">Tailscale not found.</span>
+          <span className="text-sm text-(--color-muted)/60">Tailscale not installed</span>
         </Row>
       );
     }
@@ -70,23 +70,23 @@ type TailscaleStatus =
     if (status === "not-running") {
       return (
         <Row label="Tailscale" description="Tailscale isn't running">
-          <span className="text-sm text-(--color-muted)/60">Start the Tailscale app to use it.</span>
+          <span className="text-sm text-(--color-muted)/60">Open Tailscale to connect</span>
         </Row>
       );
     }
 
     if (status === "starting") {
       return (
-        <Row label="Tailscale" description="Tailscale is starting…">
-          <span className="text-sm text-(--color-muted)/60">Please wait.</span>
+        <Row label="Tailscale" description="Tailscale is starting">
+          <span className="text-sm text-(--color-muted)/60">Please wait</span>
         </Row>
       );
     }
 
     if (status === "logged-out") {
       return (
-        <Row label="Tailscale" description="Logged out">
-          <span className="text-sm text-(--color-muted)/60">Sign in to Tailscale to connect.</span>
+        <Row label="Tailscale" description="Signed out">
+          <span className="text-sm text-(--color-muted)/60">Sign in to Tailscale to connect</span>
         </Row>
       );
     }
@@ -133,7 +133,7 @@ function MoonlightRow({
     <Row
       label="Moonlight"
       description={
-        invalid ? "Selected folder isn't a Moonlight install." : dir ?? "Select your Moonlight folder"
+        invalid ? "That folder isn't a Moonlight install" : dir ?? "Select your Moonlight folder"
       }
     >
       <div className="flex items-center gap-3">
@@ -272,15 +272,15 @@ function ResolutionPicker({
             : modes === undefined
               ? "Checking"
               : modes === null
-                ? "Couldn't read display modes."
+                ? "Couldn't read display modes"
                 : current
-                  ? `Currently ${current.width} × ${current.height} @ ${current.refreshRate} Hz.`
+                  ? `Currently ${current.width} × ${current.height} @ ${current.refreshRate} Hz`
                   : ""
         }
       >
         <div className="flex items-center gap-2">
           {loading ? (
-            <LoadingChip label="Reading modes…" />
+            <LoadingChip label="Reading modes" />
           ) : (
             <Select
               options={supportedList.map((m) => ({
@@ -314,14 +314,14 @@ function ResolutionPicker({
           loading
             ? "Reading display modes…"
             : current
-              ? `Currently ${current.refreshRate} Hz.`
+              ? `Currently ${current.refreshRate} Hz`
               : refreshOptions.length > 0
-                ? `${refreshOptions.length} options.`
+                ? `${refreshOptions.length} options`
                 : ""
         }
       >
         {loading ? (
-          <LoadingChip label="Reading modes…" />
+          <LoadingChip label="Reading modes" />
         ) : (
           <Select
             options={refreshOptions.map((r) => ({
@@ -346,12 +346,12 @@ function ResolutionPicker({
         title="Display changed"
         subtitle={
           pending
-            ? `Switching to ${pending.width} × ${pending.height} @ ${pending.refresh} Hz.`
+            ? `Switching to ${pending.width} × ${pending.height} @ ${pending.refresh} Hz`
             : undefined
         }
       >
         <p className="text-sm text-(--color-muted)">
-          {countdown > 0 ? `Auto-reverting in ${countdown}s…` : "Reverting…"}
+          {countdown > 0 ? `Reverting in ${countdown}s…` : "Reverting…"}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="lg" onClick={revert} className="px-4 font-normal">
@@ -523,16 +523,16 @@ export function DisplaySettingsModal({
           monitors === undefined
             ? "Detecting monitors…"
             : monitors === null
-              ? "Couldn't enumerate monitors."
+              ? "Couldn't enumerate monitors"
               : selectedMonitor
                 ? selectedMonitor.disabled
-                  ? `${selectedMonitor.friendlyName} (disabled — not in the desktop)`
-                  : `Resolution target: ${selectedMonitor.friendlyName}${selectedMonitor.primary ? " (primary)" : ""}.`
-                : "No monitors detected."
+                  ? `${selectedMonitor.friendlyName} — not in the desktop`
+                  : `${selectedMonitor.friendlyName}${selectedMonitor.primary ? " · primary" : ""}`
+                : "No monitors detected"
         }
       >
         {monitors === undefined ? (
-          <LoadingChip label="Detecting…" />
+          <LoadingChip label="Detecting" />
         ) : (
           <Select
             options={(monitors ?? []).map((m) => ({
@@ -551,14 +551,14 @@ export function DisplaySettingsModal({
           hdrStatus === undefined
             ? "Checking HDR support…"
             : hdrStatus === null
-              ? "Couldn't detect display capabilities."
+              ? "Couldn't detect display capabilities"
               : !hdrStatus.supported
-                ? "This display doesn't support HDR."
+                ? "This display doesn't support HDR"
                 : hdrStatus.locked
-                  ? "Locked by Windows color settings — change HDR / wide-color in Display Settings."
+                  ? "Locked by Windows color settings — open HDR settings to change"
                   : hdrStatus.enabled
-                    ? "HDR is on (primary display)."
-                    : "HDR is off (primary display)."
+                    ? "HDR is on"
+                    : "HDR is off"
         }
       >
         {hdrStatus === undefined ? (
@@ -650,16 +650,10 @@ function PreferencesSection({
         title="Date & Time"
         icon={<Clock size={20} weight="bold" />}
       >
-        <Row
-          label="Show Time in Top Bar"
-          description="Show the clock in the TopBar."
-        >
+        <Row label="Show time in Top Bar">
           <Toggle checked={showTime} onChange={onToggleShowTime} />
         </Row>
-        <Row
-          label="Show Date in Top Bar"
-          description="Show the date beside the clock in the TopBar."
-        >
+        <Row label="Show date in Top Bar">
           <Toggle checked={showDate} onChange={onToggleShowDate} />
         </Row>
       </PreferenceGroup>
@@ -669,10 +663,7 @@ function PreferencesSection({
         icon={<Monitor size={20} weight="bold" />}
         onIconClick={onOpenDisplay}
       >
-        <Row
-          label="Show Display in Top Bar"
-          description="Show the display indicator in the TopBar."
-        >
+        <Row label="Show Display in Top Bar">
           <Toggle checked={showDisplay} onChange={onToggleShowDisplay} />
         </Row>
       </PreferenceGroup>
@@ -682,10 +673,7 @@ function PreferencesSection({
         icon={<WifiHigh size={20} weight="bold" />}
         onIconClick={onOpenWifi}
       >
-        <Row
-          label="Show Wi-Fi in Top Bar"
-          description="Show the WiFi status icon in the TopBar."
-        >
+        <Row label="Show Wi-Fi in Top Bar">
           <Toggle checked={showWifi} onChange={onToggleShowWifi} />
         </Row>
       </PreferenceGroup>
@@ -696,10 +684,7 @@ function PreferencesSection({
           icon={<BatteryFull size={20} weight="bold" />}
           onIconClick={onOpenBattery}
         >
-          <Row
-            label="Show Battery in Top Bar"
-            description="Show the battery status icon in the TopBar."
-          >
+          <Row label="Show Battery in Top Bar">
             <Toggle checked={showBattery} onChange={onToggleShowBattery} />
           </Row>
         </PreferenceGroup>
@@ -710,10 +695,7 @@ function PreferencesSection({
         icon={<SpeakerHigh size={20} weight="bold" />}
         onIconClick={onOpenAudio}
       >
-        <Row
-          label="Show Audio in Top Bar"
-          description="Show the volume control in the TopBar."
-        >
+        <Row label="Show Audio in Top Bar">
           <Toggle checked={showAudio} onChange={onToggleShowAudio} />
         </Row>
       </PreferenceGroup>
@@ -846,26 +828,16 @@ export function SettingsView({
     }
   }
   return (
-    <PageShell title="Settings" subtitle="App-level settings.">
+    <PageShell title="Settings" subtitle="Customize Moonblast">
       <Section title="General">
         <div className="flex items-start justify-between gap-4 py-4">
           <div className="flex-1">
             <div className="text-base font-medium text-(--color-text)">Auto Immersive Mode</div>
             <div className="mt-0.5 text-sm text-(--color-muted)">
               {autoImmersive
-                ? "Sign in straight into Moonblast instead of the Windows desktop. Applies from your next sign-in — turning this on won't change anything right now. It:"
-                : "When off, Moonblast doesn't start with Windows. Turn it on to replace the desktop at sign-in."}
+                ? "Sign in goes straight to Moonblast instead of the desktop. Hold Shift at sign-in to boot to the desktop once."
+                : "Replace the desktop at sign-in with Moonblast."}
             </div>
-            {autoImmersive && (
-              <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-(--color-muted)">
-                <li>Launches Moonblast fullscreen before anything else</li>
-                <li>Never starts the desktop or taskbar, so nothing flashes on the way in</li>
-                <li>Skips your Windows startup apps — the desktop is what launches them</li>
-                <li>Minimizes other open windows so they don't show behind</li>
-                <li>Hands the desktop back when you exit Immersive Mode or close Moonblast</li>
-                <li>Hold Shift while signing in to boot to the normal desktop</li>
-              </ul>
-            )}
           </div>
           <Toggle checked={autoImmersive} onChange={onToggleAutoImmersive} />
         </div>
@@ -893,10 +865,10 @@ export function SettingsView({
 
       <Section title="Integrations">
         <TailscaleRow />
-        <Row label="Apps" description="Discover and launch installed Windows apps.">
+        <Row label="Apps" description="Discover and launch installed apps">
           <Toggle checked={appsEnabled} onChange={onToggleApps} />
         </Row>
-        <Row label="SteamGridDB" description="Optional API key for nicer game icons (falls back to the extracted icon).">
+        <Row label="SteamGridDB" description="Use nicer icons for your games">
           <div className="flex items-center gap-2">
             <div className="w-56">
               <Input
@@ -931,10 +903,10 @@ export function SettingsView({
             {sgStatus === "checking"
               ? "Checking"
               : sgStatus === "valid"
-                ? "✓ Key is valid."
+                ? "Key is valid"
                 : sgStatus === "invalid"
-                  ? "✕ Key was rejected."
-                  : "Couldn't reach SteamGridDB."}
+                  ? "Key was rejected"
+                  : "Couldn't reach SteamGridDB"}
           </div>
         )}
         <MoonlightRow
@@ -947,7 +919,7 @@ export function SettingsView({
 
       <Section title="About">
         <div className="py-4 text-base text-(--color-muted)">
-          Moonblast is a lightweight Fullscreen Mode alternative built on Tauri + Rust.
+          Moonblast is a lightweight Fullscreen Mode launcher built on Tauri and Rust.
           Moonlight streaming settings live on the Moonlight page.
         </div>
       </Section>

@@ -32,7 +32,7 @@ export function FilterList<T>({
   options,
   render,
   empty,
-  searchPlaceholder = "Search…",
+  searchPlaceholder = "Search",
 }: FilterListProps<T>) {
   const { getKey, getLabel, getSource, exclude, sourceLabels = { "": "Desktop" } } = options;
   const [q, setQ] = useState("");

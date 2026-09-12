@@ -204,7 +204,7 @@ function AddAppModal({
   return (
     <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one." width="max-w-lg">
       <div className="mb-3 rounded-xl border border-(--color-border) bg-(--color-surface-2)/40 px-3 py-2 text-xs text-(--color-muted)">
-        Some apps may not launch — or may freeze Moonblast — in Auto Immersive Mode. Use at your own risk.
+        Some apps may not launch in Immersive Mode. If that happens, exit Immersive Mode from the Power menu.
       </div>
       <div className="mb-3">
         <Segmented
@@ -227,8 +227,8 @@ function AddAppModal({
             getSource: (a) => a.source ?? "",
             exclude: (a) => existingPaths.has(a.path),
           }}
-          searchPlaceholder="Search installed apps…"
-          empty={<p className="py-8 text-center text-sm text-(--color-muted)">Nothing to add.</p>}
+          searchPlaceholder="Search installed apps"
+          empty={<p className="py-8 text-center text-sm text-(--color-muted)">Nothing to add</p>}
           render={(a) => (
             <button
               onClick={() => pick(a)}
@@ -248,9 +248,9 @@ function AddAppModal({
             icon={<FolderOpen size={16} weight="bold" />}
             className="gap-2 px-5 py-2.5"
           >
-            Choose an .exe or .lnk…
+            Choose an .exe or .lnk
           </Button>
-          <p className="mt-3 text-xs text-(--color-muted)">Pick any application on disk to add it.</p>
+          <p className="mt-3 text-xs text-(--color-muted)">Pick any application on disk.</p>
         </div>
       )}
     </Modal>
@@ -359,7 +359,7 @@ function SteamGridModal({
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && search()}
-            placeholder="Search by name, or enter a game id…"
+            placeholder="Search by name or game id"
           />
         </div>
         <Button
@@ -389,7 +389,7 @@ function SteamGridModal({
           <div className="mt-2 grid max-h-64 grid-cols-4 gap-2 overflow-y-auto">
             {icons.length === 0 && !busy ? (
               <p className="col-span-full py-6 text-center text-sm text-(--color-muted)">
-                No icons for “{selected.name}”.
+                No icons for "{selected.name}"
               </p>
             ) : (
               icons.map((ic) => (
@@ -585,7 +585,7 @@ export function AppsView() {
     ctx.open(e, [
       {
         icon: <PencilSimple size={14} weight="bold" />,
-        label: "Rename…",
+        label: "Rename",
         onClick: () => setRenameApp(a),
       },
       {
@@ -596,12 +596,12 @@ export function AppsView() {
       { icon: <Image size={14} weight="bold" />, label: "Use Custom Icon", onClick: () => pickCustomIcon(a) },
       {
         icon: <ClipboardText size={14} weight="bold" />,
-        label: "Copy From Clipboard",
+        label: "Paste From Clipboard",
         disabled: hint === "none",
         onClick: () => applyClipboardIcon(a),
       },
       ...(a.custom_icon
-        ? [{ label: "Clear custom icon", onClick: () => setCustomIcon(a.path, null) }]
+        ? [{ label: "Clear Custom Icon", onClick: () => setCustomIcon(a.path, null) }]
         : []),
       {
         icon: <ArrowClockwise size={14} weight="bold" />,
@@ -621,7 +621,7 @@ export function AppsView() {
               // off because the toggle is a no-op then (the shell stub
               // never fires).
               icon: a.auto_launch ? <CheckFat size={16} weight="fill" /> : null,
-              label: "Autolaunch with Auto Immersive Mode",
+              label: "Launch with Immersive Mode",
               onClick: () => setAutoLaunch(a.path, !a.auto_launch),
             },
           ]
@@ -710,7 +710,7 @@ export function AppsView() {
     <>
       <PageShell
         title="Apps"
-        subtitle="Your curated apps. Click to launch."
+        subtitle="Your shortcuts to installed apps and games."
         actions={
           <div className="flex items-center gap-2">
             <div className="w-56">
@@ -718,7 +718,7 @@ export function AppsView() {
                 icon={<MagnifyingGlass size={16} weight="bold" />}
                 value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
-                placeholder="Search apps…"
+                placeholder="Search apps"
               />
             </div>
             <Button
@@ -733,13 +733,13 @@ export function AppsView() {
       >
         {shortcuts.length === 0 ? (
           <Card dashed className="p-12 text-center">
-            <p className="text-(--color-muted)">No apps yet.</p>
+            <p className="text-(--color-muted)">No apps yet</p>
             <p className="mt-1 text-sm text-(--color-muted)/70">
-              Use the Add button to pick something from the installed list or browse to an .exe.
+              Use Add to pick an installed app or browse to one.
             </p>
           </Card>
         ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-sm text-(--color-muted)">No apps match “{query}”.</div>
+          <div className="py-12 text-center text-sm text-(--color-muted)">No apps match "{query}"</div>
         ) : (
           <div
           ref={gridRef}

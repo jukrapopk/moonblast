@@ -4,7 +4,7 @@
  * - `style: "long"` → "1 h 42 min" / "12 min" (used in BatteryModal)
  * - `style: "short"` → "1h 42m" / "12m" (used in the TopBar chip tooltip)
  *
- * `null` / `0` both map to a placeholder ("calculating…") — the chip needs
+ * `null` / `0` both map to a placeholder ("Calculating…") — the chip needs
  * the "we don't know yet" string inline, while the modal hides the row
  * entirely when the value isn't usable and only calls this with a real
  * estimate.
@@ -13,7 +13,7 @@ export function formatDuration(
   sec: number | null,
   style: "short" | "long" = "long",
 ): string {
-  if (sec === null || sec === 0) return "calculating…";
+  if (sec === null || sec === 0) return "Calculating…";
   const h = Math.floor(sec / 3600);
   const m = Math.round((sec % 3600) / 60);
   if (style === "short") {

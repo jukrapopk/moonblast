@@ -241,7 +241,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       <SectionLabel>Output</SectionLabel>
       <div className="mb-5 max-h-44 space-y-1 overflow-y-auto">
         {loading && devices.length === 0 ? (
-          <p className="py-4 text-center text-sm text-(--color-muted)">Loading…</p>
+          <p className="py-4 text-center text-sm text-(--color-muted)">Loading</p>
         ) : devices.length === 0 ? (
           <p className="py-4 text-center text-sm text-(--color-muted)">
             No output devices found
@@ -292,7 +292,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
           <Slider
             value={master.muted || master.volume === 0 ? 0 : master.volume}
             onChange={handleMasterVolume}
-            label="Main volume"
+            label="Volume"
           />
         </div>
         <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
@@ -311,7 +311,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       <div className="max-h-56 space-y-1 overflow-y-auto">
         {sessions.length === 0 ? (
           <p className="py-4 text-center text-sm text-(--color-muted)">
-            {loading ? "Loading…" : "No apps playing audio"}
+            {loading ? "Loading" : "No apps playing audio"}
           </p>
         ) : (
           sessions.map((s) => (

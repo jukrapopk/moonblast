@@ -176,12 +176,12 @@ export function MoonlightSettings() {
         className="space-y-6"
       >
         <Section title="Video">
-          <Row label="Aspect ratio" description="Filters the available resolution presets">
+          <Row label="Aspect ratio">
             <Select options={RATIOS} value={m.aspect_ratio} onChange={(v) => set("aspect_ratio", v)} />
           </Row>
           <Row
             label="Resolution"
-            description={effectiveRes ? `Using ${effectiveRes}` + (resAuto ? " · native" : "") : "Detecting display…"}
+            description={effectiveRes ? (resAuto ? `${effectiveRes} · native` : effectiveRes) : "Detecting display…"}
           >
             <div className="flex shrink-0 items-center gap-2">
               <Select
@@ -247,16 +247,12 @@ export function MoonlightSettings() {
               onChange={(v) => set("display_mode", v)}
             />
           </Row>
-          <Row label="V-Sync" description="Sync frames to the display refresh">
+          <Row label="V-Sync">
             <Toggle checked={m.vsync} onChange={(v) => set("vsync", v)} />
           </Row>
           <Row
-            label="Follow Global HDR"
-            description={
-              m.hdr_follow_global
-                ? "HDR streaming tracks the display's HDR state (resolved at stream start)."
-                : "Use the HDR toggle below instead."
-            }
+            label="Follow global HDR"
+            description={m.hdr_follow_global ? "Stream HDR when your display does" : "Set HDR per stream below"}
           >
             <Toggle
               checked={m.hdr_follow_global}
@@ -270,9 +266,9 @@ export function MoonlightSettings() {
                 ? globalHdr === null
                   ? "Reading display HDR state…"
                   : globalHdr.supported
-                    ? `High dynamic range streaming — following display (currently ${globalHdr.enabled ? "on" : "off"}).`
-                    : "This display doesn't support HDR."
-                : "High dynamic range streaming"
+                    ? `Following display — currently ${globalHdr.enabled ? "on" : "off"}`
+                    : "This display doesn't support HDR"
+                : "Stream in HDR"
             }
           >
             <Toggle
@@ -285,16 +281,16 @@ export function MoonlightSettings() {
               displayValue={m.hdr_follow_global ? globalHdr?.enabled : undefined}
             />
           </Row>
-          <Row label="YUV 4:4:4" description="Lossless color sampling, if supported">
+          <Row label="YUV 4:4:4">
             <Toggle checked={m.yuv444} onChange={(v) => set("yuv444", v)} />
           </Row>
-          <Row label="Frame pacing" description="Smoothed frame delivery">
+          <Row label="Frame pacing">
             <Toggle checked={m.frame_pacing} onChange={(v) => set("frame_pacing", v)} />
           </Row>
-          <Row label="Show FPS overlay" description="On-screen performance stats">
+          <Row label="FPS overlay">
             <Toggle checked={m.fps_overlay} onChange={(v) => set("fps_overlay", v)} />
           </Row>
-          <Row label="Packet size" description="Video packet size (bytes)">
+          <Row label="Packet size">
             <Select
               options={["Default", "1024", "1200", "1400", "1500"]}
               value={m.packet_size == null ? "Default" : String(m.packet_size)}
@@ -311,10 +307,10 @@ export function MoonlightSettings() {
               onChange={(v) => set("audio_config", v)}
             />
           </Row>
-          <Row label="Audio on host" description="Play audio on the host PC too">
+          <Row label="Audio on host" description="Play through the host speakers too">
             <Toggle checked={m.audio_on_host} onChange={(v) => set("audio_on_host", v)} />
           </Row>
-          <Row label="Mute on focus loss" description="Silence audio when the window is unfocused">
+          <Row label="Mute on focus loss">
             <Toggle checked={m.mute_on_focus_loss} onChange={(v) => set("mute_on_focus_loss", v)} />
           </Row>
         </Section>
@@ -323,16 +319,16 @@ export function MoonlightSettings() {
           <Row label="Multiple controllers">
             <Toggle checked={m.multi_controller} onChange={(v) => set("multi_controller", v)} />
           </Row>
-          <Row label="Background gamepad" description="Use the gamepad when the window is unfocused">
+          <Row label="Background gamepad">
             <Toggle checked={m.background_gamepad} onChange={(v) => set("background_gamepad", v)} />
           </Row>
-          <Row label="Swap gamepad buttons" description="Nintendo-style A/B and X/Y">
+          <Row label="Swap gamepad buttons">
             <Toggle checked={m.swap_gamepad_buttons} onChange={(v) => set("swap_gamepad_buttons", v)} />
           </Row>
-          <Row label="Absolute mouse" description="Remote-desktop optimized mouse control">
+          <Row label="Absolute mouse">
             <Toggle checked={m.absolute_mouse} onChange={(v) => set("absolute_mouse", v)} />
           </Row>
-          <Row label="Swap mouse buttons" description="Swap left and right">
+          <Row label="Swap mouse buttons">
             <Toggle checked={m.mouse_buttons_swap} onChange={(v) => set("mouse_buttons_swap", v)} />
           </Row>
           <Row label="Reverse scroll direction">
@@ -341,7 +337,7 @@ export function MoonlightSettings() {
               onChange={(v) => set("reverse_scroll_direction", v)}
             />
           </Row>
-          <Row label="Capture system keys" description="Pass Alt+Tab &amp; friends to the host">
+          <Row label="Capture system keys">
             <Segmented
               variant="value"
               options={[
@@ -356,7 +352,7 @@ export function MoonlightSettings() {
         </Section>
 
         <Section title="Session">
-          <Row label="Keep display awake" description="Prevent the display from sleeping while streaming">
+          <Row label="Keep display awake">
             <Toggle checked={m.keep_awake} onChange={(v) => set("keep_awake", v)} />
           </Row>
           <Row label="Quit app after session">
@@ -368,19 +364,17 @@ export function MoonlightSettings() {
         </Section>
 
         <p className="px-1 text-xs text-(--color-muted)">
-          Resolution and refresh rate default to your display. These controls are saved and applied when you start a
-          stream.
+          These settings apply when you start a stream.
         </p>
       </motion.div>
       <Prompt
         open={resOpen}
         onClose={() => setResOpen(false)}
         title="Custom resolution"
-        subtitle="Enter width × height"
+        subtitle="Width × height"
         initial={effectiveRes || detectedRes || ""}
         placeholder="e.g. 1920x1080"
-        validate={(v) => (normRes(v) ? null : "Use the form 1920x1080.")}
-        hint="Custom resolutions are used for the stream."
+        validate={(v) => (normRes(v) ? null : "Use the form 1920x1080")}
         onSubmit={(v) => {
           const r = normRes(v);
           if (r) set("resolution", r);
@@ -395,11 +389,10 @@ export function MoonlightSettings() {
         placeholder="e.g. 90"
         validate={(v) => {
           const n = fpsOf(v);
-          if (n === null) return "Enter a number.";
-          if (n < 10 || n > 480) return "Must be between 10 and 480.";
+          if (n === null) return "Enter a number";
+          if (n < 10 || n > 480) return "Must be between 10 and 480";
           return null;
         }}
-        hint="Custom FPS is applied to the stream."
         onSubmit={(v) => {
           const n = fpsOf(v);
           if (n !== null) set("refresh_rate", String(n));
@@ -414,8 +407,8 @@ export function MoonlightSettings() {
         placeholder="e.g. 100"
         validate={(v) => {
           const n = parseFloat(v);
-          if (!Number.isFinite(n)) return "Enter a number.";
-          if (n < 0.5 || n > 500) return "Must be between 0.5 and 500.";
+          if (!Number.isFinite(n)) return "Enter a number";
+          if (n < 0.5 || n > 500) return "Must be between 0.5 and 500";
           return null;
         }}
         onSubmit={(v) => {

@@ -80,7 +80,7 @@ function Status({
       )}
       {showWifi && wifi && (
         <TopBarButton
-          label={wifi.radioOn ? "WiFi" : "WiFi off"}
+          label={wifi.radioOn ? "Wi-Fi" : "Wi-Fi off"}
           icon={<WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />}
           onClick={onWifiClick}
         />
