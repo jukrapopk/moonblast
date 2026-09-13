@@ -64,6 +64,21 @@ function Status({
   const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
   return (
     <div className="flex items-center gap-1">
+      {showDisplay && (
+        <TopBarButton
+          label="Display"
+          icon={<Monitor size={24} weight="bold" />}
+          onClick={onDisplayClick}
+          active={displayOpen}
+        />
+      )}
+      {showWifi && wifi && (
+        <TopBarButton
+          label={wifi.radioOn ? "Wi-Fi" : "Wi-Fi off"}
+          icon={<WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />}
+          onClick={onWifiClick}
+        />
+      )}
       {showBattery && battery && (
         <motion.div
           animate={critical ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
@@ -78,13 +93,6 @@ function Status({
           />
         </motion.div>
       )}
-      {showWifi && wifi && (
-        <TopBarButton
-          label={wifi.radioOn ? "Wi-Fi" : "Wi-Fi off"}
-          icon={<WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />}
-          onClick={onWifiClick}
-        />
-      )}
       {showAudio && (
         <TopBarButton
           label={audio ? (audio.muted || audio.volume === 0 ? "Muted" : `Volume · ${audio.volume}%`) : "Audio"}
@@ -96,14 +104,6 @@ function Status({
             />
           }
           onClick={onAudioClick}
-        />
-      )}
-      {showDisplay && (
-        <TopBarButton
-          label="Display"
-          icon={<Monitor size={24} weight="bold" />}
-          onClick={onDisplayClick}
-          active={displayOpen}
         />
       )}
     </div>
