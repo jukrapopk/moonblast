@@ -612,6 +612,23 @@ struct ApplicationActivationManagerVtbl {
     _activate_for_protocol: usize,
 }
 
+/// HRESULT helpers — same shape as the ones in `audio.rs`, repeated here
+/// because lib.rs is a separate translation unit.
+fn check_hr_ptr<T>(hr: i32, ptr: *mut T, what: &str) -> Result<(), String> {
+    if hr < 0 || ptr.is_null() {
+        Err(format!("{what} (0x{hr:08X})"))
+    } else {
+        Ok(())
+    }
+}
+fn check_hr(hr: i32, what: &str) -> Result<(), String> {
+    if hr < 0 {
+        Err(format!("{what} (0x{hr:08X})"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Launch a Microsoft Store app by AUMID.
 ///
 /// Deliberately *not* `explorer.exe shell:AppsFolder\<AUMID>`: when Moonblast has
@@ -640,9 +657,7 @@ fn activate_store_app(aumid: &str) -> Result<(), String> {
             &IID_IAAM,
             &mut mgr,
         );
-        if hr < 0 || mgr.is_null() {
-            return Err(format!("ApplicationActivationManager unavailable (0x{hr:08X})"));
-        }
+        check_hr_ptr(hr, mgr, "ApplicationActivationManager unavailable")?;
         let vtbl = *(mgr as *mut *const ApplicationActivationManagerVtbl);
         let mut pid: u32 = 0;
         let hr = ((*vtbl).activate_application)(
@@ -653,9 +668,7 @@ fn activate_store_app(aumid: &str) -> Result<(), String> {
             &mut pid,
         );
         ((*vtbl).release)(mgr);
-        if hr < 0 {
-            return Err(format!("Failed to activate Store app (0x{hr:08X})"));
-        }
+        check_hr(hr, "Failed to activate Store app")?;
     }
     Ok(())
 }

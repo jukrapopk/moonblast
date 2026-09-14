@@ -561,10 +561,7 @@ fn register_all(app: &AppHandle, default_id: &str) -> Result<WatchState, String>
             &VOLUME_CALLBACK as *const _ as *mut c_void,
         )
     };
-    if hr < 0 {
-        return Err(format!("could not watch master volume (0x{hr:08X})"));
-    }
-    // Device plug/unplug + default switches (device-agnostic).
+    check_hr(hr, "could not watch master volume")?;
     // Device plug/unplug + default switches (device-agnostic).
     let hr = unsafe {
         ((*en.vtbl::<EnumeratorVtbl>()).register_endpoint_notification)(
@@ -572,15 +569,34 @@ fn register_all(app: &AppHandle, default_id: &str) -> Result<WatchState, String>
             &DEVICE_CALLBACK as *const _ as *mut c_void,
         )
     };
-    if hr < 0 {
-        return Err(format!("could not watch audio devices (0x{hr:08X})"));
-    }
+    check_hr(hr, "could not watch audio devices")?;
     Ok(WatchState {
         app: app.clone(),
         enumerator: en,
         endpoint,
         default_id: default_id.to_string(),
     })
+}
+
+/// Wrap the recurring HRESULT check after every COM vtable call. The
+/// pattern `if hr < 0 || ptr.is_null() { return Err(format!(... 0x{hr:08X})) }`
+/// appears 14 times — this folds it into one call site per failure mode.
+fn check_hr_ptr<T>(hr: i32, ptr: *mut T, what: &str) -> Result<(), String> {
+    if hr < 0 || ptr.is_null() {
+        Err(format!("{what} (0x{hr:08X})"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Same as `check_hr_ptr` but without the null check — used when a vtable
+/// slot returns no out-param (e.g. setters).
+fn check_hr(hr: i32, what: &str) -> Result<(), String> {
+    if hr < 0 {
+        Err(format!("{what} (0x{hr:08X})"))
+    } else {
+        Ok(())
+    }
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
@@ -621,9 +637,7 @@ fn create_enumerator() -> Result<ComPtr, String> {
             &mut out,
         )
     };
-    if hr < 0 || out.is_null() {
-        return Err(format!("audio device enumerator unavailable (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, out, "audio device enumerator unavailable")?;
     Ok(ComPtr(out))
 }
 
@@ -637,18 +651,14 @@ fn default_device(en: &ComPtr) -> Result<ComPtr, String> {
             &mut out,
         )
     };
-    if hr < 0 || out.is_null() {
-        return Err(format!("no default audio device (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, out, "no default audio device")?;
     Ok(ComPtr(out))
 }
 
 fn device_id(dev: &ComPtr) -> Result<String, String> {
     let mut id: *mut u16 = null_mut();
     let hr = unsafe { ((*dev.vtbl::<DeviceVtbl>()).get_id)(dev.0, &mut id) };
-    if hr < 0 {
-        return Err(format!("could not read device id (0x{hr:08X})"));
-    }
+    check_hr(hr, "could not read device id")?;
     Ok(unsafe { take_wide(id) })
 }
 
@@ -694,9 +704,7 @@ fn activate_endpoint_volume(dev: &ComPtr) -> Result<ComPtr, String> {
             &mut out,
         )
     };
-    if hr < 0 || out.is_null() {
-        return Err(format!("could not open master volume (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, out, "could not open master volume")?;
     Ok(ComPtr(out))
 }
 
@@ -720,9 +728,7 @@ fn activate_session_manager(dev: &ComPtr) -> Result<ComPtr, String> {
             &mut out,
         )
     };
-    if hr < 0 || out.is_null() {
-        return Err(format!("could not open session manager (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, out, "could not open session manager")?;
     Ok(ComPtr(out))
 }
 
@@ -739,9 +745,7 @@ fn session_volume(ctl: &ComPtr) -> Result<ComPtr, String> {
         let vtbl = *(ctl.0 as *mut *const IUnknownVtbl);
         let mut out: *mut c_void = null_mut();
         let hr = ((*vtbl).query_interface)(ctl.0, &IID_ISIMPLE_AUDIO_VOLUME, &mut out);
-        if hr < 0 || out.is_null() {
-            return Err(format!("session has no volume control (0x{hr:08X})"));
-        }
+        check_hr_ptr(hr, out, "session has no volume control")?;
         Ok(ComPtr(out))
     }
 }
@@ -826,9 +830,7 @@ pub fn devices() -> Result<AudioDeviceList, String> {
             &mut coll,
         )
     };
-    if hr < 0 || coll.is_null() {
-        return Err(format!("could not list audio devices (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, coll, "could not list audio devices")?;
     let coll = ComPtr(coll);
     let mut count = 0u32;
     unsafe {
@@ -876,9 +878,7 @@ pub fn set_default_device(id: &str) -> Result<(), String> {
             &mut raw,
         )
     };
-    if hr < 0 || raw.is_null() {
-        return Err(format!("audio policy config unavailable (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, raw, "audio policy config unavailable")?;
     let cfg = ComPtr(raw);
     let wide = to_wide(id);
     // Set every role (console / multimedia / communications), like the Sound
@@ -887,9 +887,7 @@ pub fn set_default_device(id: &str) -> Result<(), String> {
         let vtbl = cfg.vtbl::<PolicyConfigVtbl>();
         for role in [0, 1, 2] {
             let hr = ((*vtbl).set_default_endpoint)(cfg.0, wide.as_ptr(), role);
-            if hr < 0 {
-                return Err(format!("could not set default device (0x{hr:08X})"));
-            }
+            check_hr(hr, "could not set default device")?;
         }
     }
     Ok(())
@@ -923,9 +921,7 @@ pub fn set_master_volume(volume: u8) -> Result<(), String> {
             null_mut(),
         )
     };
-    if hr < 0 {
-        return Err(format!("could not set master volume (0x{hr:08X})"));
-    }
+    check_hr(hr, "could not set master volume")?;
     Ok(())
 }
 
@@ -938,9 +934,7 @@ pub fn set_master_mute(muted: bool) -> Result<(), String> {
             null_mut(),
         )
     };
-    if hr < 0 {
-        return Err(format!("could not set master mute (0x{hr:08X})"));
-    }
+    check_hr(hr, "could not set master mute")?;
     Ok(())
 }
 
@@ -957,9 +951,7 @@ fn raw_sessions() -> Result<Vec<RawSession>, String> {
     let hr = unsafe {
         ((*mgr.vtbl::<SessionManagerVtbl>()).get_session_enumerator)(mgr.0, &mut raw)
     };
-    if hr < 0 || raw.is_null() {
-        return Err(format!("could not list audio sessions (0x{hr:08X})"));
-    }
+    check_hr_ptr(hr, raw, "could not list audio sessions")?;
     let en = ComPtr(raw);
     let mut count = 0i32;
     unsafe {
