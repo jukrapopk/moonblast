@@ -539,12 +539,29 @@ export function AppsView() {
   function removeShortcut(path: string) {
     update((s) => ({ ...s, app_shortcuts: s.app_shortcuts.filter((x) => x.path !== path) }));
   }
-  function setCustomIcon(path: string, value: string | null) {
+
+  // Patch a single field on the shortcut whose `path` matches. Centralizes
+  // the `app_shortcuts.map(...)` walk so every per-field setter below stays
+  // a one-liner.
+  function updateShortcut(path: string, patch: Partial<Shortcut>) {
     update((s) => ({
       ...s,
-      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, custom_icon: value } : x)),
+      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, ...patch } : x)),
     }));
   }
+  const setCustomIcon = (path: string, value: string | null) => updateShortcut(path, { custom_icon: value });
+  const setUseDesktopIcon = (path: string, v: boolean) => updateShortcut(path, { use_desktop_icon: v });
+  const setAutoLaunch = (path: string, v: boolean) => updateShortcut(path, { auto_launch: v });
+  // Picking a SteamGridDB icon implicitly reverts to the SGDB-served
+  // artwork, so the "use desktop icon" override must drop.
+  const setSteamgridIcon = (path: string, url: string | null) =>
+    updateShortcut(path, { steamgrid_icon: url, use_desktop_icon: false });
+  // An empty rename clears the override and falls back to the original
+  // `name`.
+  const setDisplayName = (path: string, value: string) => {
+    const d = value.trim();
+    updateShortcut(path, { display_name: d ? d : null });
+  };
   async function pickCustomIcon(a: Shortcut) {
     const picked = await openDialog({
       multiple: false,
@@ -626,35 +643,6 @@ export function AppsView() {
     iconCache.delete(a.path);
     void invoke("clear_cached_icon", { path: a.path });
     setBust((b) => b + 1);
-  }
-  function setUseDesktopIcon(path: string, v: boolean) {
-    update((s) => ({
-      ...s,
-      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, use_desktop_icon: v } : x)),
-    }));
-  }
-  function setAutoLaunch(path: string, v: boolean) {
-    update((s) => ({
-      ...s,
-      app_shortcuts: s.app_shortcuts.map((x) => (x.path === path ? { ...x, auto_launch: v } : x)),
-    }));
-  }
-  function setSteamgridIcon(path: string, url: string | null) {
-    update((s) => ({
-      ...s,
-      app_shortcuts: s.app_shortcuts.map((x) =>
-        x.path === path ? { ...x, steamgrid_icon: url, use_desktop_icon: false } : x,
-      ),
-    }));
-  }
-  function setDisplayName(path: string, value: string) {
-    const d = value.trim();
-    update((s) => ({
-      ...s,
-      app_shortcuts: s.app_shortcuts.map((x) =>
-        x.path === path ? { ...x, display_name: d ? d : null } : x,
-      ),
-    }));
   }
   async function launch(a: Shortcut) {
     try {
