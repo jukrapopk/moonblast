@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
-import { useSettings, type Settings } from "../settings/SettingsContext";
+import { useSettings } from "../settings/SettingsContext";
 import { Prompt } from "./ui/Prompt";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
@@ -64,7 +64,10 @@ export function MoonlightSettings() {
   const { settings, update } = useSettings();
   const m = settings.moonlight;
 
-  function set<K extends keyof Settings["moonlight"]>(key: K, value: Settings["moonlight"][K]) {
+  // Per-field setter — the same `{ ...s, moonlight: { ...s.moonlight, [k]: v } }`
+  // dance that `useSettingsField` does, kept here as a single local helper
+  // so call sites stay short (`set("aspect_ratio", v)`).
+  function set<K extends keyof typeof m>(key: K, value: (typeof m)[K]) {
     update((s) => ({ ...s, moonlight: { ...s.moonlight, [key]: value } }));
   }
 

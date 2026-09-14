@@ -8,7 +8,7 @@ import { TitleBar } from "./components/TitleBar";
 import { AppsView } from "./components/AppsView";
 import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView, DisplaySettingsModal } from "./components/SettingsView";
-import { useSettings } from "./settings/SettingsContext";
+import { useSettings, useSettingsField } from "./settings/SettingsContext";
 import { useGamepad } from "./hooks/useGamepad";
 import { openPowerMenu } from "./hooks/usePowerMenuTrigger";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
@@ -160,25 +160,15 @@ export default function App() {
   const [batteryOpen, setBatteryOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
 
-  function setAppsEnabled(v: boolean) {
-    update((s) => ({ ...s, integrations: { ...s.integrations, apps_enabled: v } }));
-  }
+  const setAppsEnabled = useSettingsField("integrations", "apps_enabled");
+  const setMoonlightEnabled = useSettingsField("integrations", "moonlight_enabled");
+  const setMoonlightDir = useSettingsField("integrations", "moonlight_folder");
+  // Empty-string → null keeps an accidentally-cleared key from being
+  // persisted as the string "".
   function setSteamgridKey(k: string) {
     update((s) => ({ ...s, integrations: { ...s.integrations, steamgrid_key: k || null } }));
   }
 
-  function setMoonlightEnabled(v: boolean) {
-    update((s) => ({
-      ...s,
-      integrations: { ...s.integrations, moonlight_enabled: v },
-    }));
-  }
-  function setMoonlightDir(dir: string) {
-    update((s) => ({
-      ...s,
-      integrations: { ...s.integrations, moonlight_folder: dir },
-    }));
-  }
   // One switch: registers Moonblast as the Windows shell *and* arms Immersive
   // Mode for the next sign-in. Deliberately does not enter Immersive Mode now.
   // The shell stub is the only boot-launch path; nothing else to coordinate.
@@ -186,37 +176,21 @@ export default function App() {
     update((s) => ({ ...s, fullscreen: { ...s.fullscreen, auto_immersive: v } }));
     void invoke("apply_auto_immersive", { autoImmersive: v }).catch(() => {});
   }
-  function setShowTime(v: boolean) {
-    update((s) => ({ ...s, customization: { ...s.customization, show_time: v } }));
-  }
-  function setShowDate(v: boolean) {
-    update((s) => ({ ...s, customization: { ...s.customization, show_date: v } }));
-  }
-  function setShowDisplay(v: boolean) {
-    update((s) => ({ ...s, customization: { ...s.customization, show_display: v } }));
-  }
-  function setShowWifi(v: boolean) {
-    update((s) => ({ ...s, customization: { ...s.customization, show_wifi: v } }));
-  }
-  function setShowBattery(v: boolean) {
-    update((s) => ({ ...s, customization: { ...s.customization, show_battery: v } }));
-  }
-  function setShowAudio(v: boolean) {
-    update((s) => ({ ...s, customization: { ...s.customization, show_audio: v } }));
-  }
+
+  const setShowTime = useSettingsField("customization", "show_time");
+  const setShowDate = useSettingsField("customization", "show_date");
+  const setShowDisplay = useSettingsField("customization", "show_display");
+  const setShowWifi = useSettingsField("customization", "show_wifi");
+  const setShowBattery = useSettingsField("customization", "show_battery");
+  const setShowAudio = useSettingsField("customization", "show_audio");
+
   // Appearance — ThemeProvider observes settings.appearance via the
   // SettingsContext, so writing here triggers a re-apply on the next
   // render. The inline bootstrap script in index.html reads
   // localStorage to avoid a flash on subsequent loads.
-  function setTheme(v: string) {
-    update((s) => ({ ...s, appearance: { ...s.appearance, theme: v } }));
-  }
-  function setAccent(id: string) {
-    update((s) => ({ ...s, appearance: { ...s.appearance, accent: id } }));
-  }
-  function setCustomAccent(hex: string | null) {
-    update((s) => ({ ...s, appearance: { ...s.appearance, custom_accent: hex } }));
-  }
+  const setTheme = useSettingsField("appearance", "theme");
+  const setAccent = useSettingsField("appearance", "accent");
+  const setCustomAccent = useSettingsField("appearance", "custom_accent");
 
   // Sync the initial fullscreen state.
   useEffect(() => {

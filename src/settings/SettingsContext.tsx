@@ -160,3 +160,27 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 export function useSettings(): SettingsContextValue {
   return useContext(SettingsContext);
 }
+
+/**
+ * Mutate one field inside one group of settings. Returns a curried
+ * setter that mirrors the existing `update()` API but spares callers
+ * from the `{ ...s, group: { ...s.group, field: v } }` dance.
+ *
+ *   const setAutoImmersive = useSettingsField("fullscreen", "auto_immersive");
+ *   setAutoImmersive(true);
+ */
+export function useSettingsField<G extends keyof Settings, K extends keyof Settings[G]>(
+  group: G,
+  field: K,
+): (value: Settings[G][K]) => void {
+  const { update } = useSettings();
+  return useCallback(
+    (value: Settings[G][K]) =>
+      update((s) => {
+        const groupCopy: Record<string, unknown> = { ...(s[group] as Record<string, unknown>) };
+        groupCopy[field as string] = value;
+        return { ...s, [group]: groupCopy } as Settings;
+      }),
+    [update, group, field],
+  );
+}
