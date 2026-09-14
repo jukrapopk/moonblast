@@ -231,25 +231,8 @@ async fn moonlight_pair(
     // real pairing session.
     tauri::async_runtime::spawn_blocking(move || {
         let mut child = child;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
-        let success = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status.success(),
-                Ok(None) => {
-                    if std::time::Instant::now() >= deadline {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break false;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-                Err(_) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break false;
-                }
-            }
-        };
+        let status = bounded_wait(&mut child, std::time::Duration::from_secs(600));
+        let success = matches!(status, Some(s) if s.success());
         let _ = app.emit(
             "pair-complete",
             serde_json::json!({ "host": host, "success": success }),
@@ -1597,35 +1580,12 @@ fn moonlight_quit(
                     return;
                 }
             };
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-            loop {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        moonblast_log!("moonlight quit: CLI exited ({status:?})");
-                        return;
-                    }
-                    Ok(None) => {
-                        if std::time::Instant::now() >= deadline {
-                            moonblast_log!("moonlight quit: CLI timed out, killing");
-                            let _ = child.kill();
-                            let final_until = std::time::Instant::now()
-                                + std::time::Duration::from_secs(2);
-                            while std::time::Instant::now() < final_until {
-                                if let Ok(Some(_)) = child.try_wait() {
-                                    return;
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(50));
-                            }
-                            return;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                    }
-                    Err(e) => {
-                        moonblast_log!("moonlight quit: wait error: {e}");
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return;
-                    }
+            match bounded_wait(&mut child, std::time::Duration::from_secs(8)) {
+                Some(status) => {
+                    moonblast_log!("moonlight quit: CLI exited ({status:?})");
+                }
+                None => {
+                    moonblast_log!("moonlight quit: CLI timed out, killed");
                 }
             }
         });
@@ -1639,14 +1599,9 @@ fn moonlight_quit(
         let pid = active.child.id();
         moonblast_log!("moonlight_quit: killing child pid={pid}");
         let _ = active.child.kill();
-        bounded_wait(&mut active.child, std::time::Duration::from_secs(5));
-        match active.child.try_wait() {
-            Ok(Some(status)) => moonblast_log!(
-                "moonlight_quit: child reaped (status={:?})",
-                status
-            ),
-            Ok(None) => moonblast_log!("moonlight_quit: child still unreaped after bounded_wait"),
-            Err(e) => moonblast_log!("moonlight_quit: try_wait error: {e}"),
+        match bounded_wait(&mut active.child, std::time::Duration::from_secs(5)) {
+            Some(status) => moonblast_log!("moonlight_quit: child reaped (status={status:?})"),
+            None => moonblast_log!("moonlight_quit: child still unreaped after bounded_wait"),
         }
     }
     moonblast_log!("moonlight_quit: done");
@@ -1662,11 +1617,24 @@ fn moonlight_quit(
 /// After this returns the `Child` may still hold an unreaped zombie if
 /// the OS is uncooperative, but Rust's `Drop` for `Child` will issue a
 /// non-blocking final `wait()` so it won't leak past command return.
-fn bounded_wait(child: &mut std::process::Child, deadline: std::time::Duration) {
+/// Poll `try_wait` until the child exits or the deadline elapses. On
+/// timeout, sends a second `kill()` (in case anything survived the first
+/// one) and waits briefly for the OS to reap. Mirrors the polling pattern
+/// in `cmd::run_output_bounded` but without the captured-output plumbing
+/// (we don't need stdout/stderr here).
+///
+/// Returns the exit status if the child exited naturally (with or without
+/// success), or `None` if the wait timed out or errored. On `None` the
+/// child has already been killed and reaped.
+///
+/// After this returns the `Child` may still hold an unreaped zombie if
+/// the OS is uncooperative, but Rust's `Drop` for `Child` will issue a
+/// non-blocking final `wait()` so it won't leak past command return.
+fn bounded_wait(child: &mut std::process::Child, deadline: std::time::Duration) -> Option<std::process::ExitStatus> {
     let until = std::time::Instant::now() + deadline;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return,
+            Ok(Some(status)) => return Some(status),
             Ok(None) => {
                 if std::time::Instant::now() >= until {
                     let _ = child.kill();
@@ -1675,16 +1643,16 @@ fn bounded_wait(child: &mut std::process::Child, deadline: std::time::Duration) 
                     let final_until = std::time::Instant::now()
                         + std::time::Duration::from_secs(2);
                     while std::time::Instant::now() < final_until {
-                        if let Ok(Some(_)) = child.try_wait() {
-                            return;
+                        if let Ok(Some(status)) = child.try_wait() {
+                            return Some(status);
                         }
                         std::thread::sleep(std::time::Duration::from_millis(50));
                     }
-                    return;
+                    return None;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Err(_) => return,
+            Err(_) => return None,
         }
     }
 }
@@ -2178,26 +2146,7 @@ fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
     };
     // `Child::wait_timeout` is Unix-only; on Windows we poll `try_wait`
     // until either the child exits or our deadline passes.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    // Hang: kill and reap so we don't leave a zombie.
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return false;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-        }
-    }
+    matches!(bounded_wait(&mut child, std::time::Duration::from_secs(8)), Some(s) if s.success())
 }
 
 #[derive(serde::Serialize)]
