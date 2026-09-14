@@ -1634,15 +1634,6 @@ fn moonlight_quit(
 /// in `cmd::run_output_bounded` but without the captured-output plumbing
 /// (we don't need stdout/stderr here).
 ///
-/// After this returns the `Child` may still hold an unreaped zombie if
-/// the OS is uncooperative, but Rust's `Drop` for `Child` will issue a
-/// non-blocking final `wait()` so it won't leak past command return.
-/// Poll `try_wait` until the child exits or the deadline elapses. On
-/// timeout, sends a second `kill()` (in case anything survived the first
-/// one) and waits briefly for the OS to reap. Mirrors the polling pattern
-/// in `cmd::run_output_bounded` but without the captured-output plumbing
-/// (we don't need stdout/stderr here).
-///
 /// Returns the exit status if the child exited naturally (with or without
 /// success), or `None` if the wait timed out or errored. On `None` the
 /// child has already been killed and reaped.
