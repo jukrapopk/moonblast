@@ -600,7 +600,7 @@ fn check_hr(hr: i32, what: &str) -> Result<(), String> {
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+    crate::cmd::to_wide(s)
 }
 
 unsafe fn from_wide(ptr: *const u16) -> String {

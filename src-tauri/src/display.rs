@@ -277,8 +277,7 @@ pub fn list_monitors() -> Vec<Monitor> {
             }
             let adapter_name = wstr_trim(&adapter_dev.DeviceName);
             let adapter_friendly = wstr_trim(&adapter_dev.DeviceString);
-            let adapter_name_wide: Vec<u16> =
-                adapter_name.encode_utf16().chain(std::iter::once(0)).collect();
+            let adapter_name_wide = crate::cmd::to_wide(&adapter_name);
 
             // Enumerate ALL monitor slots on this adapter. A multi-head
             // GPU exposes multiple physical displays under the same
@@ -447,5 +446,5 @@ fn edid_vendor_code_from_device_id(device_id: &str) -> Option<String> {
 /// Avoids the temporary-into-pointer anti-pattern that the compiler
 /// warns about when using `.map(|s| wide(s).as_ptr())` inline.
 fn device_name_to_wide(device_name: &str) -> Vec<u16> {
-    device_name.encode_utf16().chain(std::iter::once(0)).collect()
+    crate::cmd::to_wide(device_name)
 }

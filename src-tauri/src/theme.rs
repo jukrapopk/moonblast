@@ -58,14 +58,8 @@ pub(crate) fn read_mode() -> Option<bool> {
         RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
     };
 
-    let key_w: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    let name_w: Vec<u16> = "AppsUseLightTheme"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let key_w = crate::cmd::to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let name_w = crate::cmd::to_wide("AppsUseLightTheme");
 
     let mut hkey: HKEY = std::ptr::null_mut();
     // SAFETY: `key_w` is a valid null-terminated UTF-16 string;

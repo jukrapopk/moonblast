@@ -549,10 +549,8 @@ async fn discover_apps() -> Vec<AppEntry> {
 fn shell_open(target: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let mut op: Vec<u16> = "open".encode_utf16().collect();
-    op.push(0);
-    let mut pw: Vec<u16> = target.encode_utf16().collect();
-    pw.push(0);
+    let op = cmd::to_wide("open");
+    let pw = cmd::to_wide(target);
     let res = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
@@ -626,8 +624,7 @@ fn activate_store_app(aumid: &str) -> Result<(), String> {
     const IID_IAAM: windows_sys::core::GUID =
         windows_sys::core::GUID::from_u128(0x2e94_1141_7f97_4756_ba1d_9dec_de89_4a3d);
 
-    let mut id: Vec<u16> = aumid.encode_utf16().collect();
-    id.push(0);
+    let id = cmd::to_wide(aumid);
     unsafe {
         // May report "already initialized" / "different mode" on a thread Tauri has
         // set up; either is fine — we just need COM live on this thread.
@@ -754,8 +751,7 @@ fn extract_icon_png(path: &str) -> Option<Vec<u8>> {
         const SIZE: i32 = 32;
         const SHGFI_ICON: u32 = 0x0000_0100;
 
-        let mut wide: Vec<u16> = icon_path.encode_utf16().collect();
-        wide.push(0);
+        let wide = cmd::to_wide(&icon_path);
         let mut info: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let got = unsafe {
             SHGetFileInfoW(

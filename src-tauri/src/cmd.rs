@@ -87,3 +87,12 @@ pub fn spawn_detached<P: AsRef<OsStr>>(program: P, args: &[&str]) -> std::io::Re
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
 }
+
+/// Encode a Rust `&str` as a null-terminated UTF-16 `Vec<u16>` for
+/// Win32 APIs that take `LPCWSTR`. Equivalent to the inline
+/// `.encode_utf16().chain(std::iter::once(0)).collect()` pattern
+/// (or `encode_utf16().collect() + push(0)`) that previously lived
+/// in audio.rs / display.rs / lib.rs / theme.rs.
+pub fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
