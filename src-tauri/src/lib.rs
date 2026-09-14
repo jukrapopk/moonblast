@@ -1431,28 +1431,52 @@ fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
 /// Either way, "no visible window" is a stronger signal that the stream is
 /// gone than `try_wait` alone, and lets us re-spawn a fresh stream instead of
 /// refusing the user.
-fn pid_has_visible_window(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{BOOL, HWND};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible};
-    let found = false;
-    unsafe extern "system" fn cb(hwnd: HWND, lparam: isize) -> BOOL {
-        let blob = &mut *(lparam as *mut (u32, bool));
+/// Walk every visible top-level window. `f(hwnd, pid) -> bool` decides
+/// whether to continue (true) or abort the enumeration (false),
+/// matching the Win32 `EnumWindows` callback convention.
+///
+/// Centralizes the `EnumWindows` + `IsWindowVisible` +
+/// `GetWindowThreadProcessId` boilerplate that both
+/// `pid_has_visible_window` and `minimize_other_windows` used to
+/// hand-roll. `hwnd` is passed as `isize` (the raw Win32 handle form)
+/// so callers don't have to drag `HWND` into scope.
+fn for_each_visible_window<F: FnMut(isize, u32) -> bool>(mut visit: F) {
+    use windows_sys::Win32::Foundation::BOOL;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
+    };
+    unsafe extern "system" fn cb<F2: FnMut(isize, u32) -> bool>(
+        hwnd: windows_sys::Win32::Foundation::HWND,
+        lparam: isize,
+    ) -> BOOL {
+        let visit = &mut *(lparam as *mut F2);
         if IsWindowVisible(hwnd) == 0 {
             return 1;
         }
-        let mut owner_pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, &mut owner_pid);
-        if owner_pid == blob.0 {
-            blob.1 = true;
-            return 0; // abort the enum — we have our answer
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if visit(hwnd as isize, pid) {
+            1
+        } else {
+            0
         }
-        1
     }
-    let mut blob = (pid, found);
     unsafe {
-        EnumWindows(Some(cb), (&mut blob as *mut (u32, bool)) as isize);
+        EnumWindows(Some(cb::<F>), (&mut visit as *mut F) as isize);
     }
-    blob.1
+}
+
+fn pid_has_visible_window(pid: u32) -> bool {
+    let mut found = false;
+    for_each_visible_window(|_hwnd, owner_pid| {
+        if owner_pid == pid {
+            found = true;
+            false // abort — we have our answer
+        } else {
+            true // keep walking
+        }
+    });
+    found
 }
 
 /// Launch a stream for a host + app via `moonlight stream <host> <app>`.
@@ -2296,26 +2320,18 @@ fn suppress_shell(hidden: bool) {
 /// Minimize every visible top-level window except our own, so nothing shows
 /// behind the immersive launcher (approximates Xbox mode's one-app-at-a-time).
 fn minimize_other_windows() {
-    use windows_sys::Win32::Foundation::{BOOL, HWND};
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
-    };
-    unsafe extern "system" fn cb(hwnd: HWND, _lparam: isize) -> BOOL {
-        if IsWindowVisible(hwnd) == 0 {
-            return 1;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
+    let self_pid = unsafe { GetCurrentProcessId() };
+    for_each_visible_window(|hwnd, pid| {
+        if pid == self_pid {
+            return true; // leave our own windows alone
         }
-        let mut pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid == GetCurrentProcessId() {
-            return 1; // leave our own windows alone
+        unsafe {
+            ShowWindow(hwnd as _, SW_MINIMIZE);
         }
-        ShowWindow(hwnd, SW_MINIMIZE);
-        1
-    }
-    unsafe {
-        EnumWindows(Some(cb), 0);
-    }
+        true
+    });
 }
 
 /// Register or remove Moonblast as the Windows shell (Auto Immersive Mode).
