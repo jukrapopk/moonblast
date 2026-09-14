@@ -4,10 +4,10 @@ import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Slider } from "./Slider";
 import { SectionLabel } from "./SectionLabel";
-import {
-  ArrowsClockwise,
-  Check,
-} from "@phosphor-icons/react";
+import { Check } from "@phosphor-icons/react";
+import { Spinner } from "./Spinner";
+import { ErrorBanner } from "./ErrorBanner";
+import { EmptyMessage } from "./EmptyMessage";
 import { SpeakerIcon } from "./SpeakerIcon";
 import {
   fetchAudioDevices,
@@ -232,20 +232,14 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
 
   return (
     <Modal open={open} onClose={onClose} title="Audio" width="max-w-md">
-      {error && (
-        <p className="mb-3 rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
-          {error}
-        </p>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <SectionLabel>Output</SectionLabel>
       <div className="mb-5 max-h-44 space-y-1 overflow-y-auto">
         {loading && devices.length === 0 ? (
-          <p className="py-4 text-center text-sm text-(--color-muted)">Loading</p>
+          <EmptyMessage>Loading</EmptyMessage>
         ) : devices.length === 0 ? (
-          <p className="py-4 text-center text-sm text-(--color-muted)">
-            No output devices found
-          </p>
+          <EmptyMessage>No output devices found</EmptyMessage>
         ) : (
           devices.map((d) => {
             const busy = switching === d.id;
@@ -266,7 +260,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
                   {d.name}
                 </span>
                 {busy ? (
-                  <ArrowsClockwise size={14} weight="bold" className="shrink-0 animate-spin text-(--color-muted)" />
+                  <Spinner className="shrink-0 text-(--color-muted)" />
                 ) : (
                   d.is_default && (
                     <Check size={14} weight="bold" className="shrink-0 text-(--color-accent)" />
@@ -310,9 +304,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       </div>
       <div className="max-h-56 space-y-1 overflow-y-auto">
         {sessions.length === 0 ? (
-          <p className="py-4 text-center text-sm text-(--color-muted)">
-            {loading ? "Loading" : "No apps playing audio"}
-          </p>
+          <EmptyMessage>{loading ? "Loading" : "No apps playing audio"}</EmptyMessage>
         ) : (
           sessions.map((s) => (
             <div key={s.id} className="flex items-center gap-3 rounded-xl px-1 py-1.5">

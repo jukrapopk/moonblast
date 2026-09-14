@@ -2,14 +2,16 @@ import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Input } from "./Input";
+import { ErrorBanner } from "./ErrorBanner";
+import { EmptyMessage } from "./EmptyMessage";
 import {
   Lock,
-  ArrowsClockwise,
   CaretRight,
   ArrowLeft,
   Eye,
   EyeSlash,
 } from "@phosphor-icons/react";
+import { Spinner } from "./Spinner";
 import { WifiIcon } from "./WifiIcon";
 import { LoadingChip } from "./LoadingChip";
 import {
@@ -135,11 +137,7 @@ function PasswordForm({
             </button>
           }
         />
-        {error && (
-          <p className="rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
-            {error}
-          </p>
-        )}
+        {error && <ErrorBanner className="mb-0">{error}</ErrorBanner>}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" size="md" onClick={onBack} disabled={busy}>
             Cancel
@@ -216,9 +214,7 @@ function NetworkRow({
         </div>
         {subtitle && (
           <div className="mt-0.5 flex items-center gap-1.5 text-xs text-(--color-muted)">
-            {busy && (
-              <ArrowsClockwise size={11} weight="bold" className="animate-spin" />
-            )}
+            {busy && <Spinner size={11} />}
             <span>{subtitle}</span>
           </div>
         )}
@@ -453,11 +449,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
         />
       ) : (
         <>
-          {error && (
-            <p className="mb-3 rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
-              {error}
-            </p>
-          )}
+          {error && <ErrorBanner>{error}</ErrorBanner>}
 
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {loading && networks.length === 0 ? (
@@ -465,9 +457,9 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
                 <LoadingChip label="Scanning networks" variant="plain" />
               </div>
             ) : networks.length === 0 ? (
-              <p className="py-4 text-center text-sm text-(--color-muted)">
+              <EmptyMessage>
                 {radioOff ? "Turn Wi-Fi on in Windows settings to see networks" : "No networks found"}
-              </p>
+              </EmptyMessage>
             ) : (
               networks.map((net) => {
                 // Per-row busy state: this row shows the spinner only
@@ -497,7 +489,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
               size="md"
               onClick={scan}
               disabled={loading || busy !== null || radioOff}
-              icon={<ArrowsClockwise size={14} weight="bold" className={loading ? "animate-spin" : ""} />}
+              icon={<Spinner size={14} spinning={loading} />}
             >
               Rescan
             </Button>

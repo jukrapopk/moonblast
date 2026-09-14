@@ -14,6 +14,7 @@ import { Toast, useToast } from "./ui/Toast";
 import { Input } from "./ui/Input";
 import { FilterList } from "./ui/FilterList";
 import { LoadingChip } from "./ui/LoadingChip";
+import { EmptyMessage } from "./ui/EmptyMessage";
 import { gradientFor } from "./ui/gradients";
 import { useSettings } from "../settings/SettingsContext";
 
@@ -400,9 +401,7 @@ function SteamGridModal({
       ) : (
         <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
           {titles.length === 0 && !busy ? (
-            <p className="py-4 text-center text-sm text-(--color-muted)">
-              Type a query to find a title.
-            </p>
+            <EmptyMessage>Type a query to find a title.</EmptyMessage>
           ) : (
             titles.map((t) => (
               <button

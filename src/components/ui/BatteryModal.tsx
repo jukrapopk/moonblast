@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "./Modal";
 import { SectionLabel } from "./SectionLabel";
+import { ErrorBanner } from "./ErrorBanner";
 import { formatDuration } from "./formatDuration";
 
 export interface BatteryStatus {
@@ -70,11 +71,7 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
 
   return (
     <Modal open={open} onClose={onClose} title="Battery" width="max-w-md">
-      {error && (
-        <p className="mb-3 rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
-          {error}
-        </p>
-      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <SectionLabel>Status</SectionLabel>
       <div className="mb-5 rounded-xl px-1 py-2">

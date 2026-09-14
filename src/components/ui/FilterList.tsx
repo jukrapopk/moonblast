@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { MagnifyingGlass, SortAscending, SortDescending } from "@phosphor-icons/react";
 import { Input } from "./Input";
+import { EmptyMessage } from "./EmptyMessage";
 
 export interface FilterListOptions<T> {
   /** Stable identity key (e.g. path). */
@@ -118,9 +119,7 @@ export function FilterList<T>({
 
       <div className="max-h-80 space-y-1 overflow-y-auto">
         {loading ? (
-          loadingPlaceholder ?? (
-            <p className="py-4 text-center text-sm text-(--color-muted)">Loading</p>
-          )
+          loadingPlaceholder ?? <EmptyMessage>Loading</EmptyMessage>
         ) : filtered.length === 0 ? (
           empty
         ) : (

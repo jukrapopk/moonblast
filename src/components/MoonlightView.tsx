@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Plus, Play, LockKey, Monitor, Trash, GameController, ArrowsClockwise, ArrowClockwise, Broadcast, X } from "@phosphor-icons/react";
+import { Plus, Play, LockKey, Monitor, Trash, GameController, ArrowClockwise, Broadcast, X } from "@phosphor-icons/react";
 import { MoonlightSettings } from "./MoonlightSettings";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
@@ -16,6 +16,7 @@ import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import { Spinner } from "./ui/Spinner";
 
 interface Host {
   name: string;
@@ -810,7 +811,7 @@ export function MoonlightView() {
                 size="md"
                 onClick={() => scan({ force: true })}
                 disabled={scanning}
-                icon={<ArrowsClockwise size={16} weight="bold" className={scanning ? "animate-spin" : ""} />}
+                icon={<Spinner size={16} spinning={scanning} />}
                 className="h-9 bg-(--color-surface) px-4 disabled:opacity-50"
               >
                 Scan
