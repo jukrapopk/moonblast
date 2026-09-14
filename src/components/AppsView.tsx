@@ -10,7 +10,7 @@ import { Prompt } from "./ui/Prompt";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { useContextMenu } from "./ui/ContextMenu";
-import { Toast } from "./ui/Toast";
+import { Toast, useToast } from "./ui/Toast";
 import { Input } from "./ui/Input";
 import { FilterList } from "./ui/FilterList";
 import { LoadingChip } from "./ui/LoadingChip";
@@ -471,13 +471,7 @@ export function AppsView() {
   const ctx = useContextMenu();
   const [sgApp, setSgApp] = useState<Shortcut | null>(null);
   const [renameApp, setRenameApp] = useState<Shortcut | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!toast) return;
-    const id = setTimeout(() => setToast(null), 2600);
-    return () => clearTimeout(id);
-  }, [toast]);
+  const { message: toast, show: setToast } = useToast(2600);
 
   // Keyboard / gamepad grid navigation.
   const gridRef = useRef<HTMLDivElement>(null);

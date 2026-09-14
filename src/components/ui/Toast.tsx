@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 interface ToastProps {
@@ -20,4 +21,24 @@ export function Toast({ message }: ToastProps) {
       )}
     </AnimatePresence>
   );
+}
+
+/**
+ * Owns the toast message state and the auto-dismiss timer in one place,
+ * so callers don't repeat the same `useState + setTimeout(..., 2500)`
+ * effect. Returns `{ message, show, Toast }` — render `<Toast />` once
+ * and call `show("…")` to flash it.
+ */
+export function useToast(dismissMs = 2500) {
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!message) return;
+    const id = setTimeout(() => setMessage(null), dismissMs);
+    return () => clearTimeout(id);
+  }, [message, dismissMs]);
+  return {
+    message,
+    show: setMessage,
+    Toast,
+  };
 }

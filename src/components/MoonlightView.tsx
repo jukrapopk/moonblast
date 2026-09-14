@@ -7,7 +7,7 @@ import { MoonlightSettings } from "./MoonlightSettings";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Segmented } from "./ui/Segmented";
-import { Toast } from "./ui/Toast";
+import { Toast, useToast } from "./ui/Toast";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { StatusPill } from "./ui/StatusPill";
@@ -506,7 +506,7 @@ export function MoonlightView() {
   const [addOpen, setAddOpen] = useState(false);
   const [appsHost, setAppsHost] = useState<Host | null>(null);
   const [busyAddress, setBusyAddress] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const { message: toast, show: showToast } = useToast();
   const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
   const [pairedHosts, setPairedHosts] = useState<PairedHost[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -644,16 +644,6 @@ export function MoonlightView() {
       unlisten?.();
     };
   }, [scan]);
-
-  function showToast(message: string) {
-    setToast(message);
-  }
-
-  useEffect(() => {
-    if (!toast) return;
-    const id = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(id);
-  }, [toast]);
 
   function addHost(host: Host) {
     update((s) => ({ ...s, machines: [...s.machines, host] }));
