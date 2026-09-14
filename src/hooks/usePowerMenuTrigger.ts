@@ -9,7 +9,7 @@
 // don't need a generic open/close API. `openPowerMenu()` is pure
 // fire-and-forget — it never depends on the consumer's lifecycle.
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 const listeners = new Set<() => void>();
 
@@ -44,9 +44,5 @@ export function usePowerMenuTrigger(): { subscribe: (cb: () => void) => void } {
     },
     [],
   );
-  useEffect(() => {
-    // No-op: subscribe is a stable ref. We rely on the consumer to
-    // register/unregister its callback via the returned `subscribe`.
-  }, []);
   return { subscribe };
 }
