@@ -1,7 +1,6 @@
 import { useState } from "react";
 
 interface ToggleProps {
-  defaultOn?: boolean;
   /** Controlled value; when provided, the toggle is controlled. */
   checked?: boolean;
   onChange?: (value: boolean) => void;
@@ -16,8 +15,8 @@ interface ToggleProps {
   displayValue?: boolean;
 }
 
-export function Toggle({ defaultOn = false, checked, onChange, disabled, displayValue }: ToggleProps) {
-  const [internal, setInternal] = useState(defaultOn);
+export function Toggle({ checked, onChange, disabled, displayValue }: ToggleProps) {
+  const [internal, setInternal] = useState(false);
   const on = checked ?? internal;
   // Disabled reads as off — visual only, the stored value is untouched.
   // `displayValue` overrides this for read-only mirrors of an external state.

@@ -20,7 +20,24 @@ type TailscaleStatus =
   | "starting"
   | "logged-out"
   | "connected"
-  | "disconnected"; function TailscaleRow() {
+  | "disconnected";
+
+/** Mirror of `hdr::HdrStatus` from the Rust side. Used by both
+ *  DisplaySettingsModal and MoonlightSettings' "Follow global HDR" row. */
+export interface HdrStatus {
+  supported: boolean;
+  enabled: boolean;
+  locked: boolean;
+}
+
+interface Monitor {
+  deviceName: string;
+  friendlyName: string;
+  primary: boolean;
+  disabled: boolean;
+}
+
+function TailscaleRow() {
     const [status, setStatus] = useState<TailscaleStatus | null>(null);
     const [busy, setBusy] = useState(false);
 
@@ -379,19 +396,8 @@ export function DisplaySettingsModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const [hdrStatus, setHdrStatus] = useState<
-    { supported: boolean; enabled: boolean; locked: boolean } | null | undefined
-  >(undefined);
-  const [monitors, setMonitors] = useState<
-    | {
-        deviceName: string;
-        friendlyName: string;
-        primary: boolean;
-        disabled: boolean;
-      }[]
-    | null
-    | undefined
-  >(undefined);
+  const [hdrStatus, setHdrStatus] = useState<HdrStatus | null | undefined>(undefined);
+  const [monitors, setMonitors] = useState<Monitor[] | null | undefined>(undefined);
   const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
   // `monitors ?? []` while monitors is `undefined` (loading) — the
   // `.find` will simply miss and `selectedMonitor` stays null, which
@@ -408,14 +414,7 @@ export function DisplaySettingsModal({
 
   async function refreshMonitors() {
     try {
-      const list = await invoke<
-        {
-          deviceName: string;
-          friendlyName: string;
-          primary: boolean;
-          disabled: boolean;
-        }[]
-      >("list_monitors");
+      const list = await invoke<Monitor[]>("list_monitors");
       setMonitors(list);
       if (selectedDeviceName === null) {
         const primary = list.find((m) => m.primary && !m.disabled) ?? list.find((m) => !m.disabled);
@@ -432,9 +431,7 @@ export function DisplaySettingsModal({
 
   async function refreshHdr() {
     try {
-      const s = await invoke<{ supported: boolean; enabled: boolean; locked: boolean }>(
-        "hdr_status",
-      );
+      const s = await invoke<HdrStatus>("hdr_status");
       setHdrStatus(s);
     } catch {
       setHdrStatus(null);

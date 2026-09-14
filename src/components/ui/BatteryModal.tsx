@@ -4,20 +4,7 @@ import { Modal } from "./Modal";
 import { SectionLabel } from "./SectionLabel";
 import { ErrorBanner } from "./ErrorBanner";
 import { formatDuration } from "./formatDuration";
-
-export interface BatteryStatus {
-  /** 0–100, or -1 when the OS reports "unknown". */
-  percent: number;
-  /** True when the battery is actively accepting current. */
-  charging: boolean;
-  /** True when on wall power (regardless of charge state). */
-  pluggedIn: boolean;
-  /**
-   * Estimated seconds until empty (on battery) or until full (charging).
-   * `null` when the OS reports "unknown" / no estimate.
-   */
-  timeRemainingSec: number | null;
-}
+import type { BatteryStatus } from "../../hooks/useBattery";
 
 interface BatteryModalProps {
   open: boolean;

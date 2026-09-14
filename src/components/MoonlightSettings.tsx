@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import type { HdrStatus } from "./SettingsView";
 import { Prompt } from "./ui/Prompt";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
@@ -50,15 +51,6 @@ interface ClientDisplay {
   width: number;
   height: number;
   refresh_rate: number | null;
-}
-
-/** Mirror of `hdr::HdrStatus` from the Rust side. Only `enabled` matters
- *  here — the rest is folded into the toggle's disabled state when the
- *  display doesn't support HDR or the OS has locked the toggle. */
-interface HdrStatus {
-  supported: boolean;
-  enabled: boolean;
-  locked: boolean;
 }
 
 export function MoonlightSettings() {
