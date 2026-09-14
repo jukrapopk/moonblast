@@ -118,9 +118,9 @@ fn crash_count() -> u32 {
 }
 
 fn bump_crash_count() {
-    if let Ok(k) = backup() {
-        let _ = k.set_value("ShellCrashCount", &(crash_count() + 1));
-    }
+    let Ok(k) = backup() else { return };
+    let prev = k.get_value::<u32, _>("ShellCrashCount").unwrap_or(0);
+    let _ = k.set_value("ShellCrashCount", &(prev + 1));
 }
 
 /// Mark the current shell session as healthy. Called once the launcher has stayed

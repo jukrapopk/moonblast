@@ -340,9 +340,6 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
             .then_with(|| b.known.cmp(&a.known))
             .then_with(|| b.signal.cmp(&a.signal))
     });
-    // Suppress the unused warning for the borrowed `current` until
-    // the next refactor adds UI-side usage.
-    let _ = current;
     Some(networks)
 }
 

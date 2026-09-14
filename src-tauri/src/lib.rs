@@ -2002,18 +2002,6 @@ fn read_registry_paired_hosts() -> Vec<PairedHost> {
     out
 }
 
-/// Look up the UUID of a paired host by its IP / hostname. Currently
-/// unused — left in place in case a future feature needs to correlate
-/// streams with their paired record. Suppress the dead-code warning.
-#[allow(dead_code)]
-fn paired_host_uuid(address: &str) -> Option<String> {
-    let host_lower = address.to_lowercase();
-    read_registry_paired_hosts()
-        .into_iter()
-        .find(|h| h.address.to_lowercase() == host_lower)
-        .map(|h| h.uuid)
-}
-
 /// Portable `Moonlight.conf` (QSettings INI): `[hosts\0]`… sections.
 fn push_ini_paired(
     out: &mut Vec<PairedHost>,
