@@ -4,17 +4,33 @@
 //! `DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE` to read + write the
 //! `advancedColorEnabled` state on the first active display path.
 //!
-//! GET packet's u32 bitfield (verified empirically against the SudoMaker
-//! Virtual Display Adapter / NVIDIA RTX 3080 Ti driver on Windows 11
-//! 24H2):
+//! GET packet's u32 bitfield (verified against the SudoMaker Virtual
+//! Display Adapter / NVIDIA RTX 3080 Ti driver on Windows 11 24H2):
 //!   bit 0: advancedColorSupported       — panel + driver advertise HDR
-//!   bit 1: advancedColorEnabled         — HDR is currently on
+//!   bit 1: advancedColorEnabled         — driver-reported HDR state
 //!   bit 2: wideColorEnforced            — reserved 0 on this driver
 //!   bit 3: advancedColorForceDisabled   — system policy disables HDR
 //!
 //! SET packet's `value` bit 0 is `enableAdvancedColor` per the SDK docs
 //! (and per the probe): value=1 enables HDR, value=0 disables it.
+//!
+//! ## `enabled` field: process-lifetime cache of last-set state
+//!
+//! On multi-monitor setups (e.g. RTX 3080 Ti + secondary display),
+//! the NVIDIA driver returns `advancedColorEnabled = 1` regardless of
+//! whether HDR is actually on. The driver's `advancedColorEnabled` bit
+//! is therefore unreliable as a read source.
+//!
+//! To compensate, `set_hdr` records the requested state into a
+//! process-lifetime `AtomicBool`. After the first `set_hdr` call in
+//! this session, `hdr_status` returns the cached state instead of the
+//! driver's bit 1. The cache is invalidated when the process restarts
+//! (initial read returns the driver bit, which is correct for "HDR is
+//! off" at boot), and the frontend re-reads `hdr_status` on window
+//! focus so a Windows-Settings toggle in another window is picked up
+//! the next time the user alt-tabs back.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Win32::Devices::Display::{
     DisplayConfigGetDeviceInfo, DisplayConfigSetDeviceInfo, GetDisplayConfigBufferSizes,
     QueryDisplayConfig, DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO,
@@ -47,6 +63,12 @@ impl Default for HdrStatus {
 const fn hr_ok(hr: i32) -> bool {
     hr == 0
 }
+
+/// Last HDR state written by `set_hdr` in this process. `None` until the
+/// first successful `set_hdr` call — initial reads fall back to the
+/// driver's `advancedColorEnabled` bit.
+static LAST_SET_ENABLED: AtomicBool = AtomicBool::new(false);
+static LAST_SET_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Look up the first active display path. Returns `(adapter_id, target_id)`
 /// or `None` if there are no active paths / the API call fails.
@@ -97,11 +119,21 @@ pub fn hdr_status_for(adapter_low: u32, adapter_high: i32, target_id: u32) -> Hd
         }
         let bits = info.Anonymous.value;
         let supported = (bits & 0x1) != 0;
-        let enabled = (bits & 0x2) != 0;
+        let driver_enabled = (bits & 0x2) != 0;
         let force_disabled = (bits & 0x8) != 0;
         let locked = force_disabled;
+        // Prefer the cached last-set state if `set_hdr` has been called
+        // at least once in this process — the driver's `advancedColorEnabled`
+        // bit is unreliable on multi-monitor NVIDIA setups (returns 1 even
+        // when HDR is visually off). Fall back to the driver bit on the
+        // first read of a fresh process.
+        let enabled = if LAST_SET_INITIALIZED.load(Ordering::Acquire) {
+            LAST_SET_ENABLED.load(Ordering::Acquire)
+        } else {
+            driver_enabled
+        };
         moonblast_log!(
-            "hdr_status: bits=0x{:x} supported={supported} enabled={enabled} forceDisabled={force_disabled} locked={locked}",
+            "hdr_status: bits=0x{:x} supported={supported} driver_enabled={driver_enabled} cached_enabled={enabled} forceDisabled={force_disabled} locked={locked}",
             bits
         );
         HdrStatus { supported, enabled, locked }
@@ -147,6 +179,10 @@ pub fn set_hdr_for(
         if !hr_ok(hr) {
             return Err(format!("DisplayConfigSetDeviceInfo failed (hr={hr})"));
         }
+        // Record the requested state so subsequent reads return what
+        // we actually set, not the (unreliable) driver's bit 1.
+        LAST_SET_ENABLED.store(enabled, Ordering::Release);
+        LAST_SET_INITIALIZED.store(true, Ordering::Release);
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Monitor, WifiHigh, BatteryFull, SpeakerHigh, Clock } from "@phosphor-icons/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -12,6 +12,7 @@ import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
+import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
@@ -429,14 +430,21 @@ export function DisplaySettingsModal({
     }
   }
 
-  async function refreshHdr() {
+  const refreshHdr = useCallback(async () => {
     try {
       const s = await invoke<HdrStatus>("hdr_status");
       setHdrStatus(s);
     } catch {
       setHdrStatus(null);
     }
-  }
+  }, []);
+  // Refresh HDR when the window comes back into focus — catches the
+  // case where the user toggled HDR in Windows Settings (which doesn't
+  // push a Tauri event). Only runs while the modal is open.
+  useFocusRefresh(() => {
+    if (!open) return;
+    void refreshHdr();
+  }, [open, refreshHdr]);
 
   const [displayModes, setDisplayModes] = useState<
     { width: number; height: number; refreshRates: number[] }[] | null | undefined
