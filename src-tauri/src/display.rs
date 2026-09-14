@@ -20,14 +20,12 @@
 //! target a specific monitor instead of the always-primary default.
 
 use std::collections::HashMap;
-use std::os::windows::process::CommandExt;
 use std::sync::Mutex;
 
 use windows_sys::Win32::Graphics::Gdi::{
     ChangeDisplaySettingsExW, EnumDisplayDevicesW, EnumDisplaySettingsExW, DEVMODEW,
     DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS,
 };
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::moonblast_log;
 
@@ -364,8 +362,6 @@ fn wstr_trim(buf: &[u16]) -> String {
 /// errors out, or no monitors are connected. Failures here are
 /// non-fatal: callers fall back to the GDI adapter name.
 fn wmi_monitor_names() -> HashMap<String, String> {
-    use std::process::Command;
-
     // Inline PowerShell script: enumerate WmiMonitorID instances, extract
     // the EDID vendor code from `InstanceName` (e.g. `DISPLAY\BNQ7F76\...`),
     // and emit `[{"c":"BNQ7F76","n":"BenQ EX2780Q"}, ...]` as compact JSON.
@@ -376,15 +372,17 @@ fn wmi_monitor_names() -> HashMap<String, String> {
     // argument parses on newlines — a multiline script aborts after
     // the first line and we get no output.
     let script = "$m = Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID | ForEach-Object { $n = [System.Text.Encoding]::ASCII.GetString($_.UserFriendlyName).Trim([char]0); if ($_.InstanceName -match '^DISPLAY\\\\([^&]+)\\\\') { [PSCustomObject]@{c=$Matches[1];n=$n} } }; if ($m) { $m | ConvertTo-Json -Compress } else { '[]' }";
-    let output = Command::new("powershell")
-        .args([
+    let output = crate::cmd::run_output(
+        "powershell",
+        &[
             "-NoProfile",
             "-NonInteractive",
-            "-ExecutionPolicy", "Bypass",
-            "-Command", script,
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+    );
     let Ok(out) = output else { return HashMap::new() };
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();

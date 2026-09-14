@@ -24,6 +24,7 @@
 
 use std::ffi::c_void;
 use std::os::windows::process::CommandExt;
+use std::process::{Command, Output};
 use std::ptr;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::HANDLE;
@@ -213,15 +214,7 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
     // read-side wlanapi opcodes).
     trigger_scan();
     std::thread::sleep(std::time::Duration::from_millis(2500));
-    let output = std::process::Command::new("netsh")
-        .args(["wlan", "show", "networks", "mode=bssid"])
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = decode_netsh(&output.stdout);
+    let text = netsh_text(&["wlan", "show", "networks", "mode=bssid"])?;
     let mut networks: Vec<WifiNetwork> = Vec::new();
     let mut current_ssid: Option<String> = None;
     if let Some(c) = netsh_current_connection() {
@@ -357,17 +350,9 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
 /// time you connect to a network, so this is the "known" set).
 fn netsh_known_ssids() -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
-    let Ok(output) = std::process::Command::new("netsh")
-        .args(["wlan", "show", "profiles"])
-        .creation_flags(0x0800_0000)
-        .output()
-    else {
+    let Some(text) = netsh_text(&["wlan", "show", "profiles"]) else {
         return out;
     };
-    if !output.status.success() {
-        return out;
-    }
-    let text = decode_netsh(&output.stdout);
     for line in text.lines() {
         let trimmed = line.trim();
         // "All User Profile     : Foo Bar" or "Profiles on interface Wi-Fi:"
@@ -439,6 +424,24 @@ fn primary_interface_block(text: &str) -> &str {
     &text[..cut_byte]
 }
 
+/// Run `netsh <args>` with `CREATE_NO_WINDOW` and return the raw output,
+/// or `None` on spawn failure / non-zero exit. Every netsh read in this
+/// module collapses to one of these two helpers.
+fn netsh(args: &[&str]) -> Option<Output> {
+    Command::new("netsh")
+        .args(args)
+        .creation_flags(0x0800_0000)
+        .output()
+        .ok()
+}
+fn netsh_text(args: &[&str]) -> Option<String> {
+    let out = netsh(args)?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(decode_netsh(&out.stdout))
+}
+
 /// `netsh` doesn't emit a BOM but is still UTF-16LE (which it does on
 /// some Windows builds).
 fn decode_netsh(bytes: &[u8]) -> String {
@@ -468,11 +471,7 @@ fn decode_netsh(bytes: &[u8]) -> String {
 }
 
 fn netsh_current_connection() -> Option<WifiConnection> {
-    let output = std::process::Command::new("netsh")
-        .args(["wlan", "show", "interfaces"])
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .output()
-        .ok()?;
+    let output = netsh(&["wlan", "show", "interfaces"])?;
     if !output.status.success() {
         return None;
     }
@@ -577,11 +576,8 @@ pub fn connect(ssid: &str) -> Result<(), String> {
     if ssid.is_empty() {
         return Err("empty SSID".into());
     }
-    let output = std::process::Command::new("netsh")
-        .args(["wlan", "connect", &format!("name={ssid}")])
-        .creation_flags(0x0800_0000)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = netsh(&["wlan", "connect", &format!("name={ssid}")])
+        .ok_or_else(|| "could not launch netsh".to_string())?;
     if output.status.success() {
         return Ok(());
     }
@@ -606,11 +602,7 @@ pub fn connect(ssid: &str) -> Result<(), String> {
 
 /// Disconnect from the current WiFi network.
 pub fn disconnect() -> Result<(), String> {
-    let output = std::process::Command::new("netsh")
-        .args(["wlan", "disconnect"])
-        .creation_flags(0x0800_0000)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = netsh(&["wlan", "disconnect"]).ok_or_else(|| "could not launch netsh".to_string())?;
     if output.status.success() {
         return Ok(());
     }
@@ -629,11 +621,8 @@ pub fn forget(ssid: &str) -> Result<(), String> {
     if ssid.is_empty() {
         return Err("empty SSID".into());
     }
-    let output = std::process::Command::new("netsh")
-        .args(["wlan", "delete", "profile", &format!("name={ssid}")])
-        .creation_flags(0x0800_0000)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = netsh(&["wlan", "delete", "profile", &format!("name={ssid}")])
+        .ok_or_else(|| "could not launch netsh".to_string())?;
     if output.status.success() {
         return Ok(());
     }
@@ -751,16 +740,13 @@ pub fn connect_with_password(
 
     // Register the profile. netsh expects `filename=`; quoting the
     // path handles spaces.
-    let add = std::process::Command::new("netsh")
-        .args([
-            "wlan",
-            "add",
-            "profile",
-            &format!("filename=\"{}\"", path.display()),
-        ])
-        .creation_flags(0x0800_0000)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let add = netsh(&[
+        "wlan",
+        "add",
+        "profile",
+        &format!("filename=\"{}\"", path.display()),
+    ])
+    .ok_or_else(|| "could not launch netsh".to_string())?;
     if !add.status.success() {
         let _ = std::fs::remove_file(&path);
         return Err(format!(
@@ -770,11 +756,9 @@ pub fn connect_with_password(
     }
 
     // Now actually connect. The profile is now discoverable by name.
-    let connect = std::process::Command::new("netsh")
-        .args(["wlan", "connect", &format!("name={ssid}")])
-        .creation_flags(0x0800_0000)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let connect =
+        netsh(&["wlan", "connect", &format!("name={ssid}")])
+            .ok_or_else(|| "could not launch netsh".to_string())?;
     let _ = std::fs::remove_file(&path);
     if connect.status.success() {
         return Ok(());

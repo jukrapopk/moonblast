@@ -6,55 +6,14 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
+mod cmd;
 mod display;
 mod hdr;
 mod logging;
-
-/// Run a `Command` to completion with a hard deadline. Returns the captured
-/// stdout on success. On timeout the child is killed and reaped; stdout is
-/// lost. This is the cross-platform equivalent of `Command::output()` with
-/// a timeout — `output()` itself doesn't take one, and a wedged child on a
-/// blocking-pool task would otherwise sit forever, starving the pool.
-///
-/// Takes a closure that builds the Command so callers don't have to break
-/// the `creation_flags(...).args(...)` chain. The closure must return the
-/// Command by value (some builder methods return `&mut Command`).
-fn run_with_timeout<F>(
-    build: F,
-    deadline: std::time::Duration,
-) -> std::io::Result<std::process::Output>
-where
-    F: FnOnce() -> Command,
-{
-    let mut cmd = build();
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::null());
-    let mut child = cmd.spawn()?;
-    let until = std::time::Instant::now() + deadline;
-    loop {
-        match child.try_wait()? {
-            Some(_) => return child.wait_with_output(),
-            None => {
-                if std::time::Instant::now() >= until {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "subprocess timed out",
-                    ));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
-    }
-}
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
 /// window for the same host+app while one is already running. The host-side
@@ -134,12 +93,9 @@ async fn tailscale_status() -> TailscaleInfo {
     // Bound the wait so a wedged tailscaled can't hold a blocking-pool slot
     // forever (Settings polls this every 3s).
     tauri::async_runtime::spawn_blocking(|| {
-        let status = match run_with_timeout(
-            || {
-                let mut c = Command::new("tailscale");
-                c.arg("status").creation_flags(0x0800_0000);
-                c
-            },
+        let status = match cmd::run_output_bounded(
+            "tailscale",
+            &["status"],
             std::time::Duration::from_secs(5),
         ) {
             Err(_) => "not-found".to_string(),
@@ -183,15 +139,8 @@ async fn tailscale_status() -> TailscaleInfo {
 async fn tailscale_set(up: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let arg = if up { "up" } else { "down" };
-        let out = run_with_timeout(
-            || {
-                let mut c = Command::new("tailscale");
-                c.arg(arg).creation_flags(0x0800_0000);
-                c
-            },
-            std::time::Duration::from_secs(15),
-        )
-        .map_err(|e| e.to_string())?;
+        let out = cmd::run_output_bounded("tailscale", &[arg], std::time::Duration::from_secs(15))
+            .map_err(|e| e.to_string())?;
         if !out.status.success() {
             let msg = format!(
                 "{}{}",
@@ -242,12 +191,9 @@ async fn moonlight_list_apps(
 ) -> Result<Vec<String>, String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let out = run_with_timeout(
-            || {
-                let mut c = Command::new(&exe);
-                c.args(["list", &host]);
-                c
-            },
+        let out = cmd::run_output_bounded(
+            &exe,
+            &["list", &host],
             std::time::Duration::from_secs(10),
         )
         .map_err(|e| e.to_string())?;
@@ -274,14 +220,7 @@ async fn moonlight_pair(
     state: State<'_, settings::SettingsState>,
 ) -> Result<(), String> {
     let exe = moonlight_exe(&state).ok_or("Moonlight executable not found")?;
-    let child = Command::new(&exe)
-        .args(["pair", &host])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(0x0800_0000)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let child = cmd::spawn_detached(&exe, &["pair", &host]).map_err(|e| e.to_string())?;
     // Wait on a blocking task so the Tauri command thread isn't held for
     // the (potentially long) pairing session. The previous detached-thread
     // version called `wait_with_output()` with no timeout — a hung
@@ -489,16 +428,15 @@ fn parse_vdf_pairs(content: &str) -> Vec<(String, String)> {
 /// (desktop items have plain paths/empty AppIDs).
 fn discover_store_apps() -> Vec<AppEntry> {
     let mut out = Vec::new();
-    let Ok(ps) = run_with_timeout(
-        || {
-            let mut c = Command::new("powershell.exe");
-            c.args(["-NoProfile", "-Command", "Get-StartApps | ConvertTo-Json -Compress"])
-                .creation_flags(0x0800_0000); // CREATE_NO_WINDOW — don't flash a console
-            c
-        },
+    let Ok(ps) = cmd::run_output_bounded(
+        "powershell.exe",
+        &[
+            "-NoProfile",
+            "-Command",
+            "Get-StartApps | ConvertTo-Json -Compress",
+        ],
         std::time::Duration::from_secs(15),
-    )
-    else {
+    ) else {
         return out;
     };
     if !ps.status.success() {
@@ -732,10 +670,8 @@ fn launch_app(path: String, kind: String) -> Result<(), String> {
             if shell::desktop_replaced() {
                 return Err(e);
             }
-            Command::new("explorer.exe")
-                .arg(format!("shell:AppsFolder\\{path}"))
-                .creation_flags(0x0800_0000)
-                .spawn()
+            let appsfolder = format!("shell:AppsFolder\\{path}");
+            cmd::spawn_detached("explorer.exe", &[&appsfolder])
                 .map(|_| ())
                 .map_err(|e| e.to_string())
         }),
@@ -1593,19 +1529,14 @@ fn moonlight_stream(
         return Ok(false);
     }
 
-    let mut args = vec!["stream".to_string(), host.clone(), app.clone()];
-    args.extend(moonlight_flags(&prefs));
+    let flag_strings = moonlight_flags(&prefs);
+    let mut args: Vec<&str> = vec!["stream", &host, &app];
+    args.extend(flag_strings.iter().map(String::as_str));
 
-    let child = Command::new(&exe)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| {
-            moonblast_log!("moonlight_stream: spawn error: {e}");
-            e.to_string()
-        })?;
+    let child = cmd::spawn_detached(&exe, &args).map_err(|e| {
+        moonblast_log!("moonlight_stream: spawn error: {e}");
+        e.to_string()
+    })?;
     let pid = child.id();
     map.insert(key, ActiveStream { child });
     moonblast_log!("moonlight_stream: spawned child pid={pid}");
@@ -1646,14 +1577,7 @@ fn moonlight_quit(
         let host_for_thread = host.clone();
         std::thread::spawn(move || {
             moonblast_log!("moonlight quit: spawning CLI");
-            let mut child = match Command::new(&exe)
-                .args(["quit", &host_for_thread])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .creation_flags(0x0800_0000)
-                .spawn()
-            {
+            let mut child = match cmd::spawn_detached(&exe, &["quit", &host_for_thread]) {
                 Ok(c) => c,
                 Err(e) => {
                     moonblast_log!("moonlight quit: spawn error: {e}");
@@ -1719,8 +1643,8 @@ fn moonlight_quit(
 /// Poll `try_wait` until the child exits or the deadline elapses. On
 /// timeout, sends a second `kill()` (in case anything survived the first
 /// one) and waits briefly for the OS to reap. Mirrors the polling pattern
-/// in `run_with_timeout` but without the captured-output plumbing (we
-/// don't need stdout/stderr here).
+/// in `cmd::run_output_bounded` but without the captured-output plumbing
+/// (we don't need stdout/stderr here).
 ///
 /// After this returns the `Child` may still hold an unreaped zombie if
 /// the OS is uncooperative, but Rust's `Drop` for `Child` will issue a
@@ -2235,14 +2159,7 @@ fn probe_listapps(exe: &std::path::Path, host: &str) -> bool {
     // `std::thread::spawn`, then `recv_timeout` on the main thread. If
     // moonlight.exe hung, `output()` never returned, the inner thread
     // leaked, and the child process kept running until the OS reaped it.
-    let mut child = match Command::new(exe)
-        .args(["list", host])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(0x0800_0000)
-        .spawn()
-    {
+    let mut child = match cmd::spawn_detached(exe, &["list", host]) {
         Ok(c) => c,
         Err(_) => return false,
     };
@@ -2407,7 +2324,7 @@ static EXPLORER_KILLED: AtomicBool = AtomicBool::new(false);
 /// desktop. `suppress_shell(true)` hides; `suppress_shell(false)` restores.
 fn suppress_shell(hidden: bool) {
     if hidden {
-        let _ = Command::new("taskkill.exe").args(["/f", "/im", "explorer.exe"]).creation_flags(0x0800_0000).spawn();
+        let _ = cmd::spawn_detached("taskkill.exe", &["/f", "/im", "explorer.exe"]);
         EXPLORER_KILLED.store(true, Ordering::SeqCst);
     } else if EXPLORER_KILLED.swap(false, Ordering::SeqCst) {
         let _ = Command::new("explorer.exe").spawn();
@@ -2851,10 +2768,7 @@ async fn system_power(action: String) -> Result<(), String> {
 /// us if `shutdown.exe` itself failed (e.g. privileged operation blocked);
 /// we need its exit code to surface a real error to the user.
 fn run_shutdown(args: &[&str]) -> Result<(), String> {
-    let out = Command::new("shutdown.exe")
-        .args(args)
-        .creation_flags(0x0800_0000)
-        .output()
+    let out = cmd::run_output("shutdown.exe", args)
         .map_err(|e| format!("could not launch shutdown.exe: {e}"))?;
     if out.status.success() {
         Ok(())
