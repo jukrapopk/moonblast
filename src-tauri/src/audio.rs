@@ -945,7 +945,20 @@ struct RawSession {
     muted: bool,
 }
 
-fn raw_sessions() -> Result<Vec<RawSession>, String> {
+/// Walk every active audio session on the default device and yield a
+/// fully-initialized `SessionView` to `action`. Returns the number of
+/// sessions visited (not the number `action` acted on).
+///
+/// Centralizes the 30-line enumerate → gate → get_state → is_system_sounds
+/// → get_process_id → process_file_name → session_volume walk that
+/// `raw_sessions`, `for_each_app_session`, and `reset_sessions` each
+/// open-coded.
+struct SessionView<'a> {
+    vol: &'a ComPtr,
+    exe: &'a str,
+}
+
+fn for_each_session<F: FnMut(&SessionView)>(action: F) -> Result<usize, String> {
     let mgr = default_session_manager()?;
     let mut raw: *mut c_void = null_mut();
     let hr = unsafe {
@@ -957,7 +970,8 @@ fn raw_sessions() -> Result<Vec<RawSession>, String> {
     unsafe {
         ((*en.vtbl::<SessionEnumeratorVtbl>()).get_count)(en.0, &mut count);
     }
-    let mut out = Vec::new();
+    let mut n = 0usize;
+    let mut action = action;
     for i in 0..count {
         let mut ctl: *mut c_void = null_mut();
         if unsafe { ((*en.vtbl::<SessionEnumeratorVtbl>()).get_session)(en.0, i, &mut ctl) }
@@ -967,8 +981,6 @@ fn raw_sessions() -> Result<Vec<RawSession>, String> {
             continue;
         }
         let ctl = ComPtr(ctl);
-        // IAudioSessionControl methods live on the same object; the
-        // Control2 vtable starts with the identical prefix.
         let vtbl = ctl.vtbl::<SessionControl2Vtbl>();
         let mut state = 0i32;
         if unsafe { ((*vtbl).get_state)(ctl.0, &mut state) } < 0
@@ -991,20 +1003,32 @@ fn raw_sessions() -> Result<Vec<RawSession>, String> {
         let Ok(vol) = session_volume(&ctl) else {
             continue;
         };
-        let vvtbl = vol.vtbl::<SimpleVolumeVtbl>();
+        n += 1;
+        action(&SessionView {
+            vol: &vol,
+            exe: &exe,
+        });
+    }
+    Ok(n)
+}
+
+fn raw_sessions() -> Result<Vec<RawSession>, String> {
+    let mut out = Vec::new();
+    for_each_session(|view| {
+        let vvtbl = view.vol.vtbl::<SimpleVolumeVtbl>();
         let (mut level, mut mute) = (0.0f32, 0i32);
         unsafe {
-            if ((*vvtbl).get_master_volume)(vol.0, &mut level) < 0 {
-                continue;
+            if ((*vvtbl).get_master_volume)(view.vol.0, &mut level) < 0 {
+                return;
             }
-            let _ = ((*vvtbl).get_mute)(vol.0, &mut mute);
+            let _ = ((*vvtbl).get_mute)(view.vol.0, &mut mute);
         }
         out.push(RawSession {
-            exe,
+            exe: view.exe.to_string(),
             volume: scalar_to_pct(level),
             muted: mute != 0,
         });
-    }
+    })?;
     Ok(out)
 }
 
@@ -1031,48 +1055,14 @@ pub fn sessions() -> Result<Vec<AudioSession>, String> {
 
 /// Apply `f` to every live session of one app (matched by exe key).
 fn for_each_app_session(id: &str, f: impl Fn(&ComPtr) -> ()) -> Result<usize, String> {
-    let mgr = default_session_manager()?;
-    let mut raw: *mut c_void = null_mut();
-    unsafe {
-        ((*mgr.vtbl::<SessionManagerVtbl>()).get_session_enumerator)(mgr.0, &mut raw);
-    }
-    if raw.is_null() {
-        return Err("could not list audio sessions".to_string());
-    }
-    let en = ComPtr(raw);
-    let mut count = 0i32;
-    unsafe {
-        ((*en.vtbl::<SessionEnumeratorVtbl>()).get_count)(en.0, &mut count);
-    }
-    let mut n = 0;
-    for i in 0..count {
-        let mut ctl: *mut c_void = null_mut();
-        if unsafe { ((*en.vtbl::<SessionEnumeratorVtbl>()).get_session)(en.0, i, &mut ctl) }
-            < 0
-            || ctl.is_null()
-        {
-            continue;
+    let mut n = 0usize;
+    for_each_session(|view| {
+        if view.exe.to_lowercase() != id {
+            return;
         }
-        let ctl = ComPtr(ctl);
-        let vtbl = ctl.vtbl::<SessionControl2Vtbl>();
-        let mut state = 0i32;
-        if unsafe { ((*vtbl).get_state)(ctl.0, &mut state) } < 0
-            || state == SESSION_STATE_EXPIRED
-        {
-            continue;
-        }
-        let mut pid = 0u32;
-        if unsafe { ((*vtbl).get_process_id)(ctl.0, &mut pid) } < 0 || pid == 0 {
-            continue;
-        }
-        if process_file_name(pid).to_lowercase() != id {
-            continue;
-        }
-        if let Ok(vol) = session_volume(&ctl) {
-            f(&vol);
-            n += 1;
-        }
-    }
+        f(view.vol);
+        n += 1;
+    })?;
     Ok(n)
 }
 
@@ -1101,48 +1091,14 @@ pub fn set_session_mute(id: &str, muted: bool) -> Result<(), String> {
 
 /// Reset every app mixer channel to max + unmuted. Returns sessions touched.
 pub fn reset_sessions() -> Result<usize, String> {
-    let mgr = default_session_manager()?;
-    let mut raw: *mut c_void = null_mut();
-    unsafe {
-        ((*mgr.vtbl::<SessionManagerVtbl>()).get_session_enumerator)(mgr.0, &mut raw);
-    }
-    if raw.is_null() {
-        return Err("could not list audio sessions".to_string());
-    }
-    let en = ComPtr(raw);
-    let mut count = 0i32;
-    unsafe {
-        ((*en.vtbl::<SessionEnumeratorVtbl>()).get_count)(en.0, &mut count);
-    }
-    let mut n = 0;
-    for i in 0..count {
-        let mut ctl: *mut c_void = null_mut();
-        if unsafe { ((*en.vtbl::<SessionEnumeratorVtbl>()).get_session)(en.0, i, &mut ctl) }
-            < 0
-            || ctl.is_null()
-        {
-            continue;
+    let mut n = 0usize;
+    for_each_session(|view| {
+        unsafe {
+            let vvtbl = view.vol.vtbl::<SimpleVolumeVtbl>();
+            let _ = ((*vvtbl).set_master_volume)(view.vol.0, 1.0, null_mut());
+            let _ = ((*vvtbl).set_mute)(view.vol.0, 0, null_mut());
         }
-        let ctl = ComPtr(ctl);
-        let vtbl = ctl.vtbl::<SessionControl2Vtbl>();
-        let mut state = 0i32;
-        if unsafe { ((*vtbl).get_state)(ctl.0, &mut state) } < 0
-            || state == SESSION_STATE_EXPIRED
-        {
-            continue;
-        }
-        let mut system = 0i32;
-        if unsafe { ((*vtbl).is_system_sounds)(ctl.0, &mut system) } < 0 || system != 0 {
-            continue;
-        }
-        if let Ok(vol) = session_volume(&ctl) {
-            unsafe {
-                let vvtbl = vol.vtbl::<SimpleVolumeVtbl>();
-                let _ = ((*vvtbl).set_master_volume)(vol.0, 1.0, null_mut());
-                let _ = ((*vvtbl).set_mute)(vol.0, 0, null_mut());
-            }
-            n += 1;
-        }
-    }
+        n += 1;
+    })?;
     Ok(n)
 }
