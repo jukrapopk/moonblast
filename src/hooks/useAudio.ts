@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useFocusRefresh } from "./useFocusRefresh";
 
 export interface AudioDevice {
   id: string;
@@ -51,32 +52,19 @@ export function useAudioMaster(): {
     }
   }, []);
 
+  // Push channel — volume keys, other mixers, device switches.
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | undefined;
-    const safe = () => {
+    const unlisten = listen("audio-changed", () => {
       if (alive) void refresh();
-    };
-    safe();
-    // Push channel — volume keys, other mixers, device switches.
-    void listen("audio-changed", safe).then((f) => {
-      unlisten = f;
     });
-    function onFocus() {
-      safe();
-    }
-    function onVisibility() {
-      if (document.visibilityState === "visible") safe();
-    }
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
-      unlisten?.();
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      void unlisten.then((f) => f());
     };
   }, [refresh]);
+
+  useFocusRefresh(refresh, [refresh]);
 
   return { master, refresh };
 }

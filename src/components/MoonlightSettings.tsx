@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { useSettings } from "../settings/SettingsContext";
+import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { Prompt } from "./ui/Prompt";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
@@ -100,29 +101,16 @@ export function MoonlightSettings() {
   }, []);
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | undefined;
-    const safe = () => {
+    const unlisten = listen<HdrStatus>("hdr-changed", () => {
       if (alive) void refreshGlobalHdr();
-    };
-    safe();
-    void listen<HdrStatus>("hdr-changed", () => safe()).then((f) => {
-      unlisten = f;
     });
-    function onFocus() {
-      safe();
-    }
-    function onVisibility() {
-      if (document.visibilityState === "visible") safe();
-    }
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
-      unlisten?.();
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      void unlisten.then((f) => f());
     };
   }, [refreshGlobalHdr]);
+
+  useFocusRefresh(refreshGlobalHdr, [refreshGlobalHdr]);
 
   // Custom-input modals.
   const [resOpen, setResOpen] = useState(false);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useFocusRefresh } from "./useFocusRefresh";
 
 /**
  * Shared "event-driven + collapse" read pattern used by the polling-free
@@ -48,31 +49,12 @@ export function useDebouncedRead<T>(
   }, [command, collapseMs, setValue]);
 
   useEffect(() => {
-    let alive = true;
-    const safeRead = () => {
-      if (alive) void read();
-    };
-    safeRead();
-    const listeners: Array<() => void> = [];
-    if (pollIntervalMs !== undefined) {
-      const id = setInterval(safeRead, pollIntervalMs);
-      listeners.push(() => clearInterval(id));
-    }
-    function onFocus() {
-      safeRead();
-    }
-    function onVisibility() {
-      if (document.visibilityState === "visible") safeRead();
-    }
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-    listeners.push(() => window.removeEventListener("focus", onFocus));
-    listeners.push(() => document.removeEventListener("visibilitychange", onVisibility));
-    return () => {
-      alive = false;
-      for (const off of listeners) off();
-    };
+    if (pollIntervalMs === undefined) return;
+    const id = setInterval(() => void read(), pollIntervalMs);
+    return () => clearInterval(id);
   }, [read, pollIntervalMs]);
+
+  useFocusRefresh(() => void read(), [read]);
 
   return read;
 }

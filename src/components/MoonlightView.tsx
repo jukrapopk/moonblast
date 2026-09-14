@@ -15,6 +15,7 @@ import { IconTile } from "./ui/IconTile";
 import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
+import { useFocusRefresh } from "../hooks/useFocusRefresh";
 
 interface Host {
   name: string;
@@ -617,23 +618,13 @@ export function MoonlightView() {
     }
   }, []);
 
-  useEffect(() => {
+  // `useFocusRefresh` already runs once on mount and re-runs on
+  // window.focus / visibilitychange→visible. Guarded here so only the
+  // Machines sub-tab triggers a scan; the Settings sub-tab stays put.
+  useFocusRefresh(() => {
     if (sub !== "machines") return;
     if (document.visibilityState !== "visible") return;
     scan();
-  }, [sub, scan]);
-
-  useEffect(() => {
-    if (sub !== "machines") return;
-    const refresh = () => {
-      if (document.visibilityState === "visible") scan();
-    };
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", refresh);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", refresh);
-    };
   }, [sub, scan]);
 
   useEffect(() => {
