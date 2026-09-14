@@ -4,6 +4,8 @@ import { useContextMenu } from "./ContextMenu";
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   /** Optional icon rendered on the left inside the field. */
   icon?: ReactNode;
+  /** Optional element rendered on the right edge (e.g. show/hide toggle). */
+  trailing?: ReactNode;
 }
 
 const base =
@@ -14,7 +16,7 @@ const base =
  * Cut/Copy/Paste/Select All) so every field gets it consistently.
  */
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { icon, className, onContextMenu, ...props },
+  { icon, trailing, className, onContextMenu, ...props },
   ref,
 ) {
   const ctx = useContextMenu();
@@ -48,26 +50,31 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
     ]);
   }
 
-  const cls = icon ? `${base} pl-10` : base;
+  let cls = base;
+  if (icon) cls += " pl-10";
+  if (trailing) cls += " pr-12";
 
   return (
-    <>
-      <div className="relative w-full">
-        {icon && (
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)">
-            {icon}
-          </span>
-        )}
-        <input
-          ref={ref}
-          {...props}
-          onContextMenu={(e) => {
-            handleContextMenu(e);
-            onContextMenu?.(e);
-          }}
-          className={[cls, className].filter(Boolean).join(" ")}
-        />
-      </div>
-    </>
+    <div className="relative w-full">
+      {icon && (
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--color-muted)">
+          {icon}
+        </span>
+      )}
+      <input
+        ref={ref}
+        {...props}
+        onContextMenu={(e) => {
+          handleContextMenu(e);
+          onContextMenu?.(e);
+        }}
+        className={[cls, className].filter(Boolean).join(" ")}
+      />
+      {trailing && (
+        <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center">
+          {trailing}
+        </span>
+      )}
+    </div>
   );
 });

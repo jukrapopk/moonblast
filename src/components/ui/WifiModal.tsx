@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
+import { Input } from "./Input";
 import {
   Lock,
   ArrowsClockwise,
@@ -110,31 +111,30 @@ function PasswordForm({
         <Lock size={14} weight="bold" className="shrink-0 text-(--color-muted)" />
       </div>
       <div className="space-y-2">
-        <div className="relative">
-          <input
-            type={show ? "text" : "password"}
-            value={password}
-            onChange={(e) => setPassword(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && canSubmit) {
-                onSubmit(network, password);
-              }
-            }}
-            autoFocus
-            disabled={busy}
-            placeholder="Network security key"
-            className="h-10 w-full rounded-full border border-(--color-border) bg-(--color-surface-2) px-4 pr-12 text-sm text-(--color-text) placeholder:text-(--color-muted) outline-none transition focus:border-(--color-accent) disabled:opacity-40"
-          />
-          <button
-            type="button"
-            onClick={() => setShow((s) => !s)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) hover:text-(--color-text)"
-            aria-label={show ? "Hide password" : "Show password"}
-            tabIndex={-1}
-          >
-            {show ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
-          </button>
-        </div>
+        <Input
+          type={show ? "text" : "password"}
+          value={password}
+          onChange={(e) => setPassword(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && canSubmit) {
+              onSubmit(network, password);
+            }
+          }}
+          autoFocus
+          disabled={busy}
+          placeholder="Network security key"
+          trailing={
+            <button
+              type="button"
+              onClick={() => setShow((s) => !s)}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) hover:text-(--color-text)"
+              aria-label={show ? "Hide password" : "Show password"}
+              tabIndex={-1}
+            >
+              {show ? <EyeSlash size={14} weight="bold" /> : <Eye size={14} weight="bold" />}
+            </button>
+          }
+        />
         {error && (
           <p className="rounded-lg border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2 text-xs text-(--color-danger)">
             {error}
