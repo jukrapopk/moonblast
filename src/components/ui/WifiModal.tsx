@@ -124,6 +124,13 @@ function PasswordForm({
           }}
           autoFocus
           disabled={busy}
+          // Mouse-only, matching the Apps search field — Left/Right inside
+          // a text field would otherwise be caret movement (universal input
+          // convention), which conflicts with the surrounding spatial-nav
+          // row. The eye-toggle and Submit buttons stay focusable via
+          // keyboard; the user can click into the input with the mouse
+          // and type, then press Enter to submit (handled above).
+          tabIndex={-1}
           placeholder="Network security key"
           trailing={
             <button
