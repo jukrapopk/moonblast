@@ -67,6 +67,16 @@ export default function App() {
     restoredView.current = true;
     const sessionView = readSessionView();
     setViewState(sessionView ?? (settings.general.last_view as View));
+    // Focus the active TopBar nav button on launch so the user has a
+    // starting point for keyboard nav without an initial Tab. The
+    // `requestAnimationFrame` defers past the loader's exit-animation
+    // and any focus restores coming from mount-time effects in the
+    // views themselves. Single-shot via the `restoredView` guard.
+    const id = requestAnimationFrame(() => {
+      const active = document.querySelector<HTMLElement>("[data-active-view]");
+      active?.focus();
+    });
+    return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
   const [fullscreen, setFullscreen] = useState(false);
