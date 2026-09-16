@@ -136,7 +136,19 @@ function PasswordForm({
         />
         {error && <ErrorBanner className="mb-0">{error}</ErrorBanner>}
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" size="md" onClick={onBack} disabled={busy}>
+          <Button
+            variant="ghost"
+            size="md"
+            onClick={onBack}
+            disabled={busy}
+            // Modal `initialFocus` selector — when this form is the only
+            // content of the Wi-Fi modal, the focus trap's autoFocus
+            // lands on the Back button instead of the X Close or the
+            // password input. The selector only matches when Back is
+            // rendered (i.e. the password form is showing), so the
+            // network-list view still focuses its first row.
+            data-modal-back=""
+          >
             Back
           </Button>
           <Button
@@ -434,7 +446,16 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Wi-Fi" width="max-w-sm">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Wi-Fi"
+      width="max-w-sm"
+      // Focus the Back button when the password form is the modal's
+      // content; otherwise fall back to the first focusable (a network
+      // row in the list view).
+      initialFocus={passwordTarget ? "[data-modal-back]" : undefined}
+    >
       {passwordTarget ? (
         <PasswordForm
           network={passwordTarget}
