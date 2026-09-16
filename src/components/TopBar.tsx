@@ -1,25 +1,25 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Gear, Monitor, Power, ScreencastIcon, SquaresFour } from "@phosphor-icons/react";
 import { motion } from "framer-motion";
-import { SquaresFour, Monitor, Gear, Power } from "@phosphor-icons/react";
-import { SpeakerIcon } from "./ui/SpeakerIcon";
-import { BatteryIcon } from "./ui/BatteryIcon";
-import { WifiIcon } from "./ui/WifiIcon";
+import { useEffect, useState, type ReactNode } from "react";
+import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
+import { useBattery, type BatteryStatus } from "../hooks/useBattery";
+import { usePowerMenuTrigger } from "../hooks/usePowerMenuTrigger";
+import { formatClock, formatDate, useTime } from "../hooks/useTime";
+import { useWifi, type WifiConnection } from "../hooks/useWifi";
 import { PowerMenu } from "./PowerMenu";
-import { WifiModal } from "./ui/WifiModal";
 import { AudioModal } from "./ui/AudioModal";
+import { BatteryIcon } from "./ui/BatteryIcon";
 import { BatteryModal } from "./ui/BatteryModal";
 import { formatDuration } from "./ui/formatDuration";
-import { useTime, formatClock, formatDate } from "../hooks/useTime";
-import { useWifi, type WifiConnection } from "../hooks/useWifi";
-import { useBattery, type BatteryStatus } from "../hooks/useBattery";
-import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
-import { usePowerMenuTrigger } from "../hooks/usePowerMenuTrigger";
+import { SpeakerIcon } from "./ui/SpeakerIcon";
+import { WifiIcon } from "./ui/WifiIcon";
+import { WifiModal } from "./ui/WifiModal";
 
 export type View = "apps" | "moonlight" | "settings";
 
 const items: { id: View; label: string; nav: "left" | "right"; icon: ReactNode }[] = [
   { id: "apps", label: "Apps", nav: "left", icon: <SquaresFour size={24} weight="bold" /> },
-  { id: "moonlight", label: "Moonlight", nav: "left", icon: <Monitor size={24} weight="bold" /> },
+  { id: "moonlight", label: "Moonlight", nav: "left", icon: <ScreencastIcon size={24} weight="bold" /> },
   { id: "settings", label: "Settings", nav: "right", icon: <Gear size={24} weight="bold" /> },
 ];
 
@@ -323,13 +323,12 @@ function TopBarButton({
       title={label}
       aria-label={label}
       data-active-view={active && viewId ? viewId : undefined}
-      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
-        active
+      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${active
           ? "bg-(--color-accent-soft) text-(--color-accent)"
           : danger
             ? "text-(--color-danger)"
             : "text-(--color-muted) hover:text-(--color-text)"
-      }`}
+        }`}
     >
       {icon}
     </button>

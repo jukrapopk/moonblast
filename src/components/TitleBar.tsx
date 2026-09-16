@@ -102,11 +102,15 @@ export function TitleBar({
         <span className="truncate text-[13px]">Moonblast</span>
       </div>
 
-      {/* Window controls — `lrud-container` keeps arrow movement
-       *  between minimize/maximize/close instead of bleeding into the
-       *  drag region to the left. */}
-      <div className="lrud-container flex items-stretch">
+      {/* Window controls — mouse-only by design. tabIndex={-1} keeps
+       *  the buttons clickable (and reachable via OS shortcuts) but
+       *  drops them out of the spatial-nav focusable list and out of
+       *  the Tab order. Keyboard / gamepad users close / minimize /
+       *  maximize through the Power menu, which is a regular focusable
+       *  TopBar chip. */}
+      <div className="flex items-stretch">
         <button
+          tabIndex={-1}
           onClick={minimize}
           title="Minimize"
           aria-label="Minimize"
@@ -115,6 +119,7 @@ export function TitleBar({
           <Minus size={15} weight="bold" />
         </button>
         <button
+          tabIndex={-1}
           onClick={toggleMaximize}
           title={maximized ? "Restore" : "Maximize"}
           aria-label={maximized ? "Restore" : "Maximize"}
@@ -123,6 +128,7 @@ export function TitleBar({
           {maximized ? <Copy size={14} weight="bold" /> : <Square size={14} weight="bold" />}
         </button>
         <button
+          tabIndex={-1}
           onClick={close}
           title="Close"
           aria-label="Close"
