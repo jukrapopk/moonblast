@@ -13,7 +13,6 @@ import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
-import { useAutoFocus } from "../input/useSpatialController";
 import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
@@ -1006,14 +1005,9 @@ export function SettingsView({
       setSgStatus("error");
     }
   }
-  // Claim initial focus on the first interactive control in the General
-  // section so Up/Down/Left/Right work as soon as the user lands on the
-  // Settings page. The LRUD library takes over from here.
-  const pageRef = useRef<HTMLDivElement>(null);
-  useAutoFocus(pageRef.current);
   return (
     <PageShell title="Settings" subtitle="Customize Moonblast">
-      <div ref={pageRef} tabIndex={-1} className="lrud-container space-y-6 outline-none focus:outline-none">
+      <div className="lrud-container space-y-6">
         <Section title="General">
         <div className="flex items-start justify-between gap-4 py-4">
           <div className="flex-1">

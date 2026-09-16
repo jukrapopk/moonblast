@@ -16,7 +16,6 @@ import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
-import { useAutoFocus } from "../input/useSpatialController";
 import { Spinner } from "./ui/Spinner";
 
 interface Host {
@@ -568,11 +567,6 @@ export function MoonlightView() {
     [hostsWithProbe, streamingAddress],
   );
 
-  // Claim initial focus on the first card's first action button so the
-  // user can immediately Up/Down through the list with arrow keys.
-  const listRef = useRef<HTMLDivElement>(null);
-  useAutoFocus(listRef.current, () => sub === "machines" && (pairedGroup.length > 0 || discoveryGroup.length > 0));
-
   // Tracks when the last scan finished so focus/visibility bursts don't
   // spam the network. User-initiated scans bypass the debounce.
   const lastScanAt = useRef(0);
@@ -867,7 +861,7 @@ export function MoonlightView() {
                 // `lrud-container` keeps arrow movement inside the host
                 // list — Up/Down moves between cards, Left/Right stays
                 // within a card's action buttons (Desktop → Apps → Forget).
-                <div ref={listRef} tabIndex={-1} className="lrud-container space-y-6 outline-none focus:outline-none">
+                <div className="lrud-container space-y-6">
                   {pairedGroup.length > 0 && (
                     <div>
                       <h2 className="mb-3 mt-2 text-sm font-semibold uppercase tracking-wider text-(--color-muted)">Paired</h2>

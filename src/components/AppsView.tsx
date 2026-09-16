@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
@@ -17,7 +17,6 @@ import { LoadingChip } from "./ui/LoadingChip";
 import { EmptyMessage } from "./ui/EmptyMessage";
 import { gradientFor } from "./ui/gradients";
 import { useSettings } from "../settings/SettingsContext";
-import { useAutoFocus } from "../input/useSpatialController";
 
 interface AppEntry {
   id: string;
@@ -466,14 +465,6 @@ export function AppsView() {
   const [renameApp, setRenameApp] = useState<Shortcut | null>(null);
   const { message: toast, show: setToast } = useToast(2600);
 
-  // Claim initial focus on the first app tile the moment the grid
-  // mounts. The LRUD library handles all subsequent arrow navigation
-  // — no `focusIdx` state needed. Native Tab traverses focusables in
-  // document order (form controls, modal buttons, etc.); view cycling
-  // is the gamepad shoulders' job.
-  const gridRef = useRef<HTMLDivElement>(null);
-  useAutoFocus(gridRef.current, () => shortcuts.length > 0);
-
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; source?: string; kind: string }) {
@@ -679,7 +670,6 @@ export function AppsView() {
           // remembered via `data-focus` so coming back to the view
           // restores focus to that tile.
           <div
-            ref={gridRef}
             tabIndex={-1}
             className="lrud-container grid grid-cols-4 gap-4 outline-none focus:outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
           >
