@@ -68,14 +68,20 @@ export default function App() {
     const sessionView = readSessionView();
     setViewState(sessionView ?? (settings.general.last_view as View));
     // Focus the active TopBar nav button on launch so the user has a
-    // starting point for keyboard nav without an initial Tab. The
+    // starting point for keyboard nav without an initial Tab. Double
     // `requestAnimationFrame` defers past the loader's exit-animation
-    // and any focus restores coming from mount-time effects in the
-    // views themselves. Single-shot via the `restoredView` guard.
-    const id = requestAnimationFrame(() => {
-      const active = document.querySelector<HTMLElement>("[data-active-view]");
-      active?.focus();
-    });
+    // AND past the React commit for the view-state update above —
+    // guarantees the `[data-active-view]` attribute is on the right
+    // button before we look it up. Single-shot via the `restoredView`
+    // guard.
+    const id = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const active = document.querySelector<HTMLElement>(
+          '[data-active-view]:not([data-active-view=""]):not([data-active-view="false"])',
+        );
+        active?.focus();
+      }),
+    );
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
