@@ -551,7 +551,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
         <>
           {error && <ErrorBanner>{error}</ErrorBanner>}
 
-          <div className="max-h-72 space-y-1 overflow-y-auto p-1">
+          <div className="max-h-72 space-y-1 overflow-y-auto p-1.5">
             {loading && networks.length === 0 ? (
               <div className="flex items-center justify-center py-4">
                 <LoadingChip label="Scanning networks" variant="plain" />
