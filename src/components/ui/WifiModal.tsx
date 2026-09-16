@@ -587,8 +587,19 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
             <Button
               variant="ghost"
               size="md"
-              onClick={scan}
-              disabled={loading || busy !== null || radioOff}
+              // `aria-disabled` instead of `disabled` — keeps the button
+              // in the spatial-nav focusable list while still being
+              // non-clickable. The library's `getFocusables` filters by
+              // the HTML `[disabled]` attribute, which would drop focus
+              // to <body> when scanning starts; `aria-disabled` is a
+              // CSS-attribute-only signal the library ignores. The
+              // onClick guard below is the actual gate.
+              aria-disabled={loading || busy !== null || radioOff}
+              onClick={() => {
+                if (loading || busy !== null || radioOff) return;
+                scan();
+              }}
+              className={`${loading || busy !== null || radioOff ? "cursor-not-allowed opacity-40" : ""}`}
               icon={<Spinner size={14} spinning={loading} />}
             >
               Rescan
