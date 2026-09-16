@@ -669,10 +669,7 @@ export function AppsView() {
           // stay scoped to the tiles, and the last-focused tile is
           // remembered via `data-focus` so coming back to the view
           // restores focus to that tile.
-          <div
-            tabIndex={-1}
-            className="lrud-container grid grid-cols-4 gap-4 outline-none focus:outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
-          >
+          <div className="lrud-container grid grid-cols-4 gap-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
             <AnimatePresence>
               {filtered.map((a) => (
                 <AppTile
