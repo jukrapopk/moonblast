@@ -468,8 +468,9 @@ export function AppsView() {
 
   // Claim initial focus on the first app tile the moment the grid
   // mounts. The LRUD library handles all subsequent arrow navigation
-  // — no `focusIdx` state needed. Tab/Shift+Tab still cycles views
-  // (that handler lives in App.tsx).
+  // — no `focusIdx` state needed. Native Tab traverses focusables in
+  // document order (form controls, modal buttons, etc.); view cycling
+  // is the gamepad shoulders' job.
   const gridRef = useRef<HTMLDivElement>(null);
   useAutoFocus(gridRef.current, () => shortcuts.length > 0);
 

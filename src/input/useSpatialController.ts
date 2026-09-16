@@ -4,9 +4,6 @@
  *
  *   - routes Arrow keys through `@bbc/tv-lrud-spatial` (the current focus
  *     moves to the nearest candidate in the chosen direction)
- *   - routes Tab / Shift+Tab between top-level views (left in App.tsx,
- *     which still owns the view state — Tab is the one shortcut that
- *     cuts *across* the view tree)
  *   - routes Escape to a stack of registered handlers (LIFO; most
  *     recently registered handler runs first). This is what lets modals
  *     and context menus intercept Escape without the previous view also
@@ -15,6 +12,11 @@
  *     handlers — same LIFO model. The current focus's host can register
  *     itself and intercept Enter (e.g. a focused AppTile launching the
  *     app, a focused ContextMenuItem firing its `onClick`).
+ *
+ * Tab is intentionally NOT intercepted. Native browser Tab moves focus
+ * through the document in tabindex order, which is the right behaviour
+ * for keyboard users reaching form controls in Settings / modal inputs.
+ * View cycling is handled by the gamepad shoulders (LB/RB) in `useGamepad`.
  *
  * Design notes
  * ------------
@@ -125,51 +127,37 @@ const readScope = () => spatialScope.current;
  * at the app root. Returns nothing — the controller installs/teardown
  * happens in `useEffect`.
  *
- * The `viewShortcut` callback is invoked on Tab / Shift+Tab to cycle the
- * top-level views. Pass it from App where the view state lives.
+ * Tab is intentionally not intercepted here — the browser's native
+ * focus traversal handles form controls / native buttons / links in
+ * document order. View cycling is the gamepad shoulders' job (see
+ * `useGamepad`).
  */
-export function useSpatialController(viewShortcut: (dir: 1 | -1) => void) {
-  // Stash the latest `viewShortcut` in a ref so we don't re-bind the
-  // window listener on every parent render.
-  const cbRef = useRef(viewShortcut);
-  cbRef.current = viewShortcut;
-
+export function useSpatialController() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // 1. Tab / Shift+Tab — cycle top-level views. Stays global; the
-      //    spatial scope (modal focus trap) deliberately doesn't intercept
-      //    Tab because we want Tab to ALWAYS mean "next view" — users
-      //    lean on it heavily from the gamepad.
-      if (e.key === "Tab") {
-        // Don't fight text-input Tab (it should insert a \t inside an
-        // <input> / <textarea>). ActiveElement gating handles that.
-        const a = document.activeElement;
-        const isTextInput =
-          a instanceof HTMLInputElement &&
-          (a.type === "text" ||
-            a.type === "search" ||
-            a.type === "email" ||
-            a.type === "url" ||
-            a.type === "password") &&
-          !a.readOnly &&
-          !a.disabled;
-        if (isTextInput) return;
-        e.preventDefault();
-        cbRef.current(e.shiftKey ? -1 : 1);
-        return;
-      }
-
-      // 2. Escape — LIFO stack of handlers wins.
+      // 1. Escape — LIFO stack of handlers wins (modal/menu close).
+      //    When the stack is empty, fall through to the default handler:
+      //    focus the TopBar button for the currently-active view, so the
+      //    user gets a consistent "jump back to nav" escape hatch from
+      //    anywhere on the page (e.g. from inside a Settings row).
       if (e.key === "Escape") {
         const h = escapeStack.top();
         if (h) {
           e.preventDefault();
           h(e);
+          return;
+        }
+        const activeViewBtn = document.querySelector<HTMLElement>(
+          "[data-active-view]",
+        );
+        if (activeViewBtn) {
+          e.preventDefault();
+          activeViewBtn.focus();
         }
         return;
       }
 
-      // 3. Enter / Space — primary action of the focused element. Two
+      // 2. Enter / Space — primary action of the focused element. Two
       //    paths: a registered handler (modal "submit"), or the browser's
       //    native button activation (let `<button>` fire its `onClick`).
       //    We only intercept when a handler is on the stack.
@@ -187,7 +175,7 @@ export function useSpatialController(viewShortcut: (dir: 1 | -1) => void) {
         return;
       }
 
-      // 4. Arrow keys — spatial navigation.
+      // 3. Arrow keys — spatial navigation.
       const dir = directionFromKey(e.key);
       if (dir) {
         // When focus is in a text input (search, rename, password), arrow

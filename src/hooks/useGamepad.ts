@@ -7,6 +7,10 @@
  * is active — including modal focus traps.
  *
  * Mount once at the app root, alongside `useSpatialController`.
+ *
+ * View cycling: LB / RB dispatch a `moonblast:cycle-view` CustomEvent
+ * that App.tsx listens for. Keyboard Tab deliberately no longer cycles
+ * views — it follows native browser focus traversal instead.
  */
 import { useEffect } from "react";
 import { moveFocus } from "../input/spatialNav";
@@ -16,12 +20,12 @@ import { useSpatialControllerInternals } from "../input/controllerInternals";
 const ENTER_KEY = "Enter";
 const ESCAPE_KEY = "Escape";
 
-function dispatchKey(key: string, opts?: KeyboardEventInit) {
-  // Some consumers (e.g. View cycler) still rely on a real keydown event
-  // reaching the window listener. Dispatching a synthetic event keeps
-  // Tab / Enter / Escape working without needing direct calls into
-  // the controller for every gamepad button.
-  window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...opts }));
+function dispatchKey(key: string) {
+  // Fallback when no Enter/Escape handler is registered on the LIFO
+  // stack (e.g. gamepad A outside any modal). Synthesising the keydown
+  // lets native <button> click activation still fire through the
+  // spatial controller.
+  window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 }
 
 export function useGamepad() {
@@ -65,10 +69,17 @@ export function useGamepad() {
               const handler = peekEscape();
               if (handler) handler(new KeyboardEvent("keydown", { key: ESCAPE_KEY }));
               else dispatchKey(ESCAPE_KEY);
-            } else if (kind === "tab-prev") {
-              dispatchKey("Tab", { shiftKey: true });
-            } else {
-              dispatchKey("Tab");
+            } else if (kind === "tab-prev" || kind === "tab-next") {
+              // LB / RB cycle the top-level views. Keyboard Tab no longer
+              // does this — we want native Tab to traverse focusables
+              // (form controls, modal buttons, etc.) instead. Dispatch
+              // a custom event so App.tsx can swap views without the
+              // spatial controller needing to know about view state.
+              window.dispatchEvent(
+                new CustomEvent("moonblast:cycle-view", {
+                  detail: { dir: kind === "tab-next" ? 1 : -1 },
+                }),
+              );
             }
           } else if (!btn.pressed) {
             held.delete(id);

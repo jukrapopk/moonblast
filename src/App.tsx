@@ -92,16 +92,28 @@ export default function App() {
   const moonlightDir = settings.integrations.moonlight_folder;
   const appsEnabled = settings.integrations.apps_enabled;
 
-  // Single global keyboard listener. Tab / Shift+Tab cycles the top-level
-  // view; Arrow keys are routed through the spatial manager; Escape goes
-  // to the LIFO stack of modal/menu handlers.
-  useSpatialController((dir) => {
-    if (view === null) return;
-    const i = VIEW_ORDER.indexOf(view);
-    const next = (i + dir + VIEW_ORDER.length) % VIEW_ORDER.length;
-    setView(VIEW_ORDER[next]);
-  });
+  // Single global keyboard listener. Arrow keys route through the
+  // spatial manager; Escape goes to the LIFO stack of modal/menu
+  // handlers. Tab is intentionally not intercepted — native browser
+  // focus traversal handles form controls / buttons / links in
+  // document order.
+  useSpatialController();
   useGamepad();
+
+  // View cycling is the gamepad shoulders' job now. Keyboard Tab has
+  // no special meaning here. The custom event comes from `useGamepad`'s
+  // LB/RB handlers.
+  useEffect(() => {
+    function onCycle(e: Event) {
+      const dir = (e as CustomEvent<{ dir: 1 | -1 }>).detail.dir;
+      if (view === null) return;
+      const i = VIEW_ORDER.indexOf(view);
+      const next = (i + dir + VIEW_ORDER.length) % VIEW_ORDER.length;
+      setView(VIEW_ORDER[next]);
+    }
+    window.addEventListener("moonblast:cycle-view", onCycle);
+    return () => window.removeEventListener("moonblast:cycle-view", onCycle);
+  }, [view]);
 
   // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
   // asks the frontend to open the Power menu via this event. The

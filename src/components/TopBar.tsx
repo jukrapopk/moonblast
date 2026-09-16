@@ -202,7 +202,8 @@ export function TopBar({
     <header className="relative flex h-14 shrink-0 items-center gap-2 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       {/* Left nav cluster — the LRUD library treats <nav> as a container
        *  by default, so arrows stay within the cluster when it's focused.
-       *  Tab moves between clusters, arrows move within one. */}
+       *  Native Tab moves between clusters (document order); arrows move
+       *  within one. */}
       <nav className="lrud-container flex items-center gap-1">
         {visibleLeft.map((item) => (
           <TopBarButton
@@ -211,6 +212,7 @@ export function TopBar({
             icon={item.icon}
             active={view === item.id}
             onClick={() => onNavigate(item.id)}
+            viewId={item.id}
           />
         ))}
       </nav>
@@ -263,6 +265,7 @@ export function TopBar({
             icon={item.icon}
             active={view === item.id}
             onClick={() => onNavigate(item.id)}
+            viewId={item.id}
           />
         ))}
         <TopBarButton
@@ -302,18 +305,24 @@ function TopBarButton({
   onClick,
   active = false,
   danger = false,
+  // When set, exposes the active nav button via a DOM attribute so
+  // `useSpatialController`'s default-Escape handler can return focus to
+  // it (Escape with no modal open → focus the active view's nav button).
+  viewId,
 }: {
   label: string;
   icon: ReactNode;
   onClick: () => void;
   active?: boolean;
   danger?: boolean;
+  viewId?: View;
 }) {
   return (
     <button
       onClick={onClick}
       title={label}
       aria-label={label}
+      data-active-view={active && viewId ? viewId : undefined}
       className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
         active
           ? "bg-(--color-accent-soft) text-(--color-accent)"
