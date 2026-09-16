@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Input } from "./Input";
@@ -371,6 +371,46 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       setBusy(null);
     }
   }
+
+  // When a row triggers a connect / disconnect / forget, the row itself
+  // gets disabled (`anyBusy` flips on) and the browser drops focus to
+  // `<body>`. After the action completes and the row re-enables, restore
+  // focus to the row the user acted on so arrow-nav continues from
+  // where they left off. Tracked via a ref so a refocused-then-reclicked
+  // sequence doesn't double-fire (the ref is consumed once per action).
+  //
+  // The password-form connect path doesn't need this: `setPasswordTarget
+  // (null)` after success flips `initialFocus` and the focus trap's
+  // re-run picks up the matching `[data-network-row]` selector
+  // automatically.
+  const lastBusySsid = useRef<string | null>(null);
+  useEffect(() => {
+    if (busy?.ssid) {
+      lastBusySsid.current = busy.ssid;
+      return;
+    }
+    // busy just flipped to null — refocus the row the action came from,
+    // unless the password form is open (form's focus trap owns focus
+    // there) or the modal was closed mid-action.
+    if (!lastBusySsid.current || passwordTarget || !open) {
+      lastBusySsid.current = null;
+      return;
+    }
+    const ssid = lastBusySsid.current;
+    lastBusySsid.current = null;
+    // Defer past React's commit so the freshly-rerendered row is in the
+    // DOM (and re-enabled) before we focus it.
+    const id = requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(
+        `[data-network-row="${CSS.escape(ssid)}"]`,
+      );
+      // The row may be gone (Forget on the only matching SSID, or the
+      // row vanished mid-scan) — fall back to the first network row so
+      // focus isn't lost on body.
+      (row ?? document.querySelector<HTMLElement>("[data-network-row]"))?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [busy, passwordTarget, open]);
 
   async function handleConnect(ssid: string) {
     await runAction(ssid, "connect", async () => {
