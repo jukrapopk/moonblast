@@ -7,7 +7,6 @@ import { EmptyMessage } from "./EmptyMessage";
 import {
   Lock,
   CaretRight,
-  ArrowLeft,
   Eye,
   EyeSlash,
 } from "@phosphor-icons/react";
@@ -96,14 +95,6 @@ function PasswordForm({
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
-        <button
-          onClick={onBack}
-          disabled={busy}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:bg-(--color-surface) hover:text-(--color-text) disabled:opacity-40"
-          aria-label="Back to network list"
-        >
-          <ArrowLeft size={14} weight="bold" />
-        </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-(--color-text)">{network.ssid}</div>
           <div className="text-xs text-(--color-muted)">
@@ -122,7 +113,6 @@ function PasswordForm({
               onSubmit(network, password);
             }
           }}
-          autoFocus
           disabled={busy}
           // Mouse-only, matching the Apps search field — Left/Right inside
           // a text field would otherwise be caret movement (universal input
