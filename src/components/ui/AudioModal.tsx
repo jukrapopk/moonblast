@@ -235,7 +235,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <SectionLabel>Output</SectionLabel>
-      <div className="mb-5 max-h-44 space-y-1 overflow-y-auto">
+      <div className="mb-5 max-h-44 space-y-1 overflow-y-auto p-1">
         {loading && devices.length === 0 ? (
           <EmptyMessage>Loading</EmptyMessage>
         ) : devices.length === 0 ? (
@@ -302,7 +302,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
           </Button>
         )}
       </div>
-      <div className="max-h-56 space-y-1 overflow-y-auto">
+      <div className="max-h-56 space-y-1 overflow-y-auto p-1">
         {sessions.length === 0 ? (
           <EmptyMessage>{loading ? "Loading" : "No apps playing audio"}</EmptyMessage>
         ) : (

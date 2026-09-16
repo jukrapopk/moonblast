@@ -488,7 +488,7 @@ function AppsModal({
           {error ? "Couldn't load apps" : "Loading apps"}
         </p>
       ) : (
-        <div className="lrud-container max-h-80 space-y-1 overflow-y-auto">
+        <div className="lrud-container max-h-80 space-y-1 overflow-y-auto p-1">
           {apps.map((app) => (
             <button
               key={app}

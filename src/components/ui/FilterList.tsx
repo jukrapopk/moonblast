@@ -117,7 +117,7 @@ export function FilterList<T>({
         </div>
       )}
 
-      <div className="lrud-container max-h-80 space-y-1 overflow-y-auto">
+      <div className="lrud-container max-h-80 space-y-1 overflow-y-auto p-1">
         {loading ? (
           loadingPlaceholder ?? <EmptyMessage>Loading</EmptyMessage>
         ) : filtered.length === 0 ? (

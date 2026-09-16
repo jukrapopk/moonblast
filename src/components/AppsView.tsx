@@ -382,7 +382,7 @@ function SteamGridModal({
           >
             ← back to results
           </button>
-          <div className="lrud-container mt-2 grid max-h-64 grid-cols-4 gap-2 overflow-y-auto">
+          <div className="lrud-container mt-2 grid max-h-64 grid-cols-4 gap-2 overflow-y-auto p-1">
             {icons.length === 0 && !busy ? (
               <p className="col-span-full py-6 text-center text-sm text-(--color-muted)">
                 No icons for "{selected.name}"
@@ -401,7 +401,7 @@ function SteamGridModal({
           </div>
         </div>
       ) : (
-        <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+        <div className="mt-3 max-h-64 space-y-1 overflow-y-auto p-1">
           {titles.length === 0 && !busy ? (
             <EmptyMessage>Type a query to find a title.</EmptyMessage>
           ) : (
