@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
-import { Slider } from "./Slider";
+import { VolumeControl } from "./VolumeControl";
 import { SectionLabel } from "./SectionLabel";
 import { Check } from "@phosphor-icons/react";
 import { Spinner } from "./Spinner";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyMessage } from "./EmptyMessage";
-import { SpeakerIcon } from "./SpeakerIcon";
+
 import {
   fetchAudioDevices,
   fetchAudioMaster,
@@ -273,66 +273,52 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
       </div>
 
       <SectionLabel>Volume</SectionLabel>
-      <div className="mb-5 flex items-center gap-3 rounded-xl px-1 py-1">
-        <button
-          onClick={() => void handleMasterMute()}
-          title={master.muted || master.volume === 0 ? "Unmute" : "Mute"}
-          aria-label={master.muted || master.volume === 0 ? "Unmute" : "Mute"}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
-        >
-          <SpeakerIcon volume={master.volume} muted={master.muted} size={20} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <Slider
-            value={master.muted || master.volume === 0 ? 0 : master.volume}
-            onChange={handleMasterVolume}
-            label="Volume"
-          />
-        </div>
-        <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
-          {master.muted || master.volume === 0 ? "Muted" : `${master.volume}%`}
-        </span>
+      <div className="mb-5 rounded-xl px-1 py-1">
+        <VolumeControl
+          value={master.volume}
+          muted={master.muted || master.volume === 0}
+          label="Volume"
+          onVolumeChange={handleMasterVolume}
+          onToggleMute={() => void handleMasterMute()}
+        />
       </div>
 
-      <div className="mb-1 flex items-center justify-between">
-        <SectionLabel>Apps</SectionLabel>
-        {sessions.length > 0 && (
-          <Button variant="ghost" size="md" onClick={() => void handleResetAll()} className="px-3 py-1 text-xs">
-            Reset all
-          </Button>
-        )}
-      </div>
+      <SectionLabel>Apps</SectionLabel>
       <div className="max-h-56 space-y-1 overflow-y-auto p-1">
         {sessions.length === 0 ? (
           <EmptyMessage>{loading ? "Loading" : "No apps playing audio"}</EmptyMessage>
         ) : (
           sessions.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 rounded-xl px-1 py-1.5">
+            <div
+              key={s.id}
+              className="flex items-center gap-3 rounded-xl px-1 py-1.5"
+            >
               <div className="w-28 shrink-0 truncate text-sm font-medium text-(--color-text)" title={s.name}>
                 {s.name}
               </div>
-              <button
-                onClick={() => void handleSessionMute(s.id)}
-                title={s.muted || s.volume === 0 ? `Unmute ${s.name}` : `Mute ${s.name}`}
-                aria-label={s.muted || s.volume === 0 ? `Unmute ${s.name}` : `Mute ${s.name}`}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text)"
-              >
-                <SpeakerIcon volume={s.volume} muted={s.muted} size={16} />
-              </button>
-              <div className="min-w-0 flex-1">
-                <Slider
-                  value={s.muted || s.volume === 0 ? 0 : s.volume}
-                  onChange={(v) => handleSessionVolume(s.id, v)}
-                  label={`${s.name} volume`}
-                />
-              </div>
-              <span className="w-10 shrink-0 text-right text-xs text-(--color-muted) tabular-nums">
-                {s.muted || s.volume === 0 ? "Muted" : `${s.volume}%`}
-              </span>
+              <VolumeControl
+                value={s.volume}
+                muted={s.muted || s.volume === 0}
+                label={`${s.name} volume`}
+                onVolumeChange={(v) => handleSessionVolume(s.id, v)}
+                onToggleMute={() => void handleSessionMute(s.id)}
+              />
             </div>
           ))
         )}
       </div>
+      {sessions.length > 0 && (
+        <div className="mt-2 flex justify-end">
+          <Button
+            variant="ghost"
+            size="md"
+            onClick={() => void handleResetAll()}
+            className="px-3 py-1 text-xs"
+          >
+            Reset all
+          </Button>
+        </div>
+      )}
 
       </Modal>
   );
