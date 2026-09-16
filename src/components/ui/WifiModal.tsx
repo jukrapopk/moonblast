@@ -243,6 +243,10 @@ function NetworkRow({
           size="md"
           onClick={onDisconnect}
           disabled={anyBusy}
+          // Refocus target after a successful connect — the wrapper
+          // div isn't focusable (only the Disconnect button is), so
+          // focus restoration lands here instead of on the row.
+          data-network-disconnect=""
           className="px-3 py-1 text-xs"
         >
           Disconnect
@@ -259,6 +263,7 @@ function NetworkRow({
       <div
         onContextMenu={(e) => onMenu(e, net)}
         data-context-menu
+        data-network-row={net.ssid}
         className={`flex items-center gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5 ${
           busy?.kind === "disconnect" ? "opacity-40" : ""
         }`}
@@ -401,13 +406,22 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     // Defer past React's commit so the freshly-rerendered row is in the
     // DOM (and re-enabled) before we focus it.
     const id = requestAnimationFrame(() => {
+      const escaped = CSS.escape(ssid);
       const row = document.querySelector<HTMLElement>(
-        `[data-network-row="${CSS.escape(ssid)}"]`,
+        `[data-network-row="${escaped}"]`,
       );
+      // After a successful connect, the row becomes "connected": the
+      // wrapper switches from <button> to <div> with a Disconnect
+      // button inside. The wrapper is non-focusable, so target the
+      // button — that's the natural next action after connecting.
+      const disconnect = row?.querySelector<HTMLElement>(
+        "[data-network-disconnect]",
+      );
+      const target = disconnect ?? row;
       // The row may be gone (Forget on the only matching SSID, or the
       // row vanished mid-scan) — fall back to the first network row so
       // focus isn't lost on body.
-      (row ?? document.querySelector<HTMLElement>("[data-network-row]"))?.focus();
+      (target ?? document.querySelector<HTMLElement>("[data-network-row]"))?.focus();
     });
     return () => cancelAnimationFrame(id);
   }, [busy, passwordTarget, open]);
