@@ -240,29 +240,37 @@ export function useSpatialController() {
         if (a instanceof HTMLSelectElement) return;
         // Native range input: arrow keys step the value. Same.
         if (a instanceof HTMLInputElement && a.type === "range") return;
-        // Up-arrow "jump back to nav" escape hatch: when focus is in the
-        // page (not inside a topbar-style horizontal lock) and there's no
-        // modal, treat Up like Escape's no-modal fallback and focus the
-        // active TopBar button. Lets the user return to nav from anywhere
-        // on the page without first reaching the topbar via Up.
-        if (dir === "up" && !escapeStack.top()) {
-          const locked = findDirectionalScope(a, "up");
-          if (!locked) {
-            const btn = focusActiveViewButton();
-            if (btn) {
-              e.preventDefault();
-              return;
-            }
-          }
-        }
         // Directional scope lock: if a `data-lrud-scope-lock` ancestor
         // applies to this direction, use it as the library's scope so the
         // fallback search stays inside the locked container even when no
         // sibling matches.
         const dirScope = findDirectionalScope(a, dir);
         const scope = dirScope ?? readScope();
+        // Up-arrow "jump back to nav" only when the library has no
+        // candidate above — i.e. focus is in the topmost row of the page
+        // and pressing Up would otherwise do nothing. Earlier versions
+        // jumped unconditionally on Up from anywhere in the page,
+        // which was wrong (e.g. mid-grid Up should move one row up, not
+        // warp to the topbar). Now we run the spatial search first,
+        // and only when it returns null do we jump to the active topbar
+        // button — same fallback semantics as Esc.
+        if (dir === "up" && !escapeStack.top() && !dirScope) {
+          const next = moveFocus(a, "up", scope);
+          if (next) {
+            // Library moved focus normally — we're done.
+            e.preventDefault();
+            return;
+          }
+          // No candidate above within scope. Jump to the active topbar
+          // button — symmetric with the Esc fallback.
+          const btn = focusActiveViewButton();
+          if (btn) {
+            e.preventDefault();
+            return;
+          }
+        }
         e.preventDefault();
-        moveFocus(document.activeElement, dir, scope);
+        moveFocus(a, dir, scope);
       }
     }
 
