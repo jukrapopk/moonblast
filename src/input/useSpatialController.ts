@@ -169,10 +169,25 @@ function findDirectionalScope(
 /**
  * Focus the TopBar button for the currently-active view
  * (`[data-active-view]`), if any. Used as the default handler for
- * Escape (no modal) and Up arrow (no directional lock above focus).
+ * Escape and Up arrow when no modal is open.
+ *
+ * `data-active-view` is set by `TopBarButton` only when the button's
+ * `view === viewId` — but React's data-* handling has a quirk: an
+ * attribute value of `false` (the JS literal — see the JSX in
+ * TopBarButton's `active && viewId ? viewId : undefined` expression)
+ * is serialised to the DOM string `"false"`. So inactive nav buttons
+ * (Apps / Moonlight / Settings) all end up with `data-active-view="false"`
+ * alongside the active button's `data-active-view="<view>"`. A bare
+ * `[data-active-view]` selector returns whichever comes first in
+ * DOM order — always the Apps button.
+ *
+ * Filter out the literal "false" (and empty) values with the `:not()`
+ * pseudo-class so we only match the real active-view button.
  */
 function focusActiveViewButton(): HTMLElement | null {
-  const btn = document.querySelector<HTMLElement>("[data-active-view]");
+  const btn = document.querySelector<HTMLElement>(
+    '[data-active-view]:not([data-active-view=""]):not([data-active-view="false"])',
+  );
   if (btn) btn.focus();
   return btn;
 }
@@ -280,28 +295,38 @@ export function useSpatialController() {
         // sibling matches.
         const dirScope = findDirectionalScope(a, dir);
         const scope = dirScope ?? readScope();
-        // Up-arrow "jump back to nav" only when the library has no
-        // candidate above — i.e. focus is in the topmost row of the page
-        // and pressing Up would otherwise do nothing. Earlier versions
-        // jumped unconditionally on Up from anywhere in the page,
-        // which was wrong (e.g. mid-grid Up should move one row up, not
-        // warp to the topbar). Now we run the spatial search first,
-        // and only when it returns null do we jump to the active topbar
-        // button — same fallback semantics as Esc.
+        // Up arrow with no modal and no vertical lock — run the library's
+        // normal Up search, but if it picks a topbar button, override
+        // with the active view's nav button (Esc semantics). The library
+        // picks by Euclidean distance and would otherwise land on the
+        // Apps button or a status chip from any page focusable whose
+        // vertical line crosses them — but the user expects the
+        // active view's button.
+        //
+        // Mid-content Up is unaffected: the library finds the row above
+        // first, the override doesn't trigger (the row-above candidate
+        // isn't in the topbar), and focus moves one row up.
         if (dir === "up" && !escapeStack.top() && !dirScope) {
+          e.preventDefault();
           const next = moveFocus(a, "up", scope);
           if (next) {
-            // Library moved focus normally — we're done.
-            e.preventDefault();
-            return;
+            // Target the topbar header specifically — `document.querySelector("header")`
+            // matches TitleBar (the window-chrome header) first in DOM
+            // order, but only TopBar's header carries the `lrud-container`
+            // class. Without the class qualifier, `contains()` would
+            // return false and the override would never fire.
+            const topbar = document.querySelector("header.lrud-container");
+            if (topbar?.contains(next)) {
+              // Library picked a topbar button — replace with the
+              // active view's nav button.
+              const activeBtn = focusActiveViewButton();
+              if (activeBtn) return;
+            }
+            // Either the library picked something not in the topbar
+            // (mid-content row-above), or the active-button lookup
+            // failed — focus stays where the library put it.
           }
-          // No candidate above within scope. Jump to the active topbar
-          // button — symmetric with the Esc fallback.
-          const btn = focusActiveViewButton();
-          if (btn) {
-            e.preventDefault();
-            return;
-          }
+          return;
         }
         e.preventDefault();
         moveFocus(a, dir, scope);
