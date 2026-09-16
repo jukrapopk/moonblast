@@ -287,8 +287,13 @@ export function useSpatialController() {
         // Native <select>: arrow keys cycle the open dropdown. Leave them
         // alone so the OS-native picker works.
         if (a instanceof HTMLSelectElement) return;
-        // Native range input: arrow keys step the value. Same.
-        if (a instanceof HTMLInputElement && a.type === "range") return;
+        // Native range input: Left/Right step the value, but Up/Down
+        // should escape the slider so the user can move focus out
+        // without first clearing the slider. Suppress only the
+        // value-stepping axes.
+        if (a instanceof HTMLInputElement && a.type === "range") {
+          if (dir === "left" || dir === "right") return;
+        }
         // Directional scope lock: if a `data-lrud-scope-lock` ancestor
         // applies to this direction, use it as the library's scope so the
         // fallback search stays inside the locked container even when no
