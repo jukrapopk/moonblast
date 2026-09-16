@@ -147,7 +147,7 @@ function PasswordForm({
         {error && <ErrorBanner className="mb-0">{error}</ErrorBanner>}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" size="md" onClick={onBack} disabled={busy}>
-            Cancel
+            Back
           </Button>
           <Button
             size="md"
