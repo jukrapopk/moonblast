@@ -143,7 +143,7 @@ export default function App() {
     };
   }, []);
 
-  // Kill the WebView's native context menu and provide our own "Back/Refresh" menu
+  // Kill the WebView's native context menu and provide our own "Refresh" menu
   // for any right-click not handled by a more specific menu. An element is
   // considered "specific" when it (or an ancestor) carries the
   // `data-context-menu` attribute — AppsView AppTiles, MoonlightView
@@ -166,7 +166,6 @@ export default function App() {
       // right-click).
       const keyboard = "__keyboard" in me && (me as MouseEvent & { __keyboard?: boolean }).__keyboard === true;
       pageCtx.openAt(me.clientX, me.clientY, keyboard, [
-        { label: "Back", disabled: history.length <= 1, onClick: () => window.history.back() },
         { label: "Refresh", onClick: () => window.location.reload() },
       ]);
     }
