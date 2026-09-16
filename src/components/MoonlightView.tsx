@@ -243,6 +243,9 @@ function HostCard({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
+      // Marker so App-level Back/Refresh fallback (src/App.tsx)
+      // steps out of the way for host cards.
+      data-context-menu
       onContextMenu={onContextMenu}
     >
       <Card streaming={streaming}>

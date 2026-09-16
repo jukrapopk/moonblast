@@ -64,6 +64,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       <input
         ref={ref}
         {...props}
+        // Marker so App-level Back/Refresh fallback steps out of the
+        // way for text-edit menus (Undo / Redo / Cut / Copy / Paste /
+        // Select All).
+        data-context-menu
         onContextMenu={(e) => {
           handleContextMenu(e);
           onContextMenu?.(e);

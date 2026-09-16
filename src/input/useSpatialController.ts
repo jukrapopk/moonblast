@@ -180,6 +180,40 @@ function focusActiveViewButton(): HTMLElement | null {
 export function useSpatialController() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // 0. Context-menu shortcut. Two equivalent triggers:
+      //    - The dedicated ContextMenu key on Windows keyboards
+      //      (`e.key === "ContextMenu"`).
+      //    - Shift+F10, the standard Windows shortcut for "show context
+      //      menu for the focused element".
+      // Both dispatch a synthetic `contextmenu` event on the focused
+      // element so any React `onContextMenu` handler in the focus chain
+      // fires — the same code path as a real right-click. No-op when
+      // focus is on the body or another element without a context menu.
+      if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+        const target = document.activeElement;
+        if (target && target !== document.body && target instanceof Element) {
+          // Position the menu at the focused element's centre so the
+          // shortcut behaves like a real right-click — without this,
+          // the menu opens at viewport (0, 0). For very small targets
+          // (e.g. an icon-only TopBar button) we offset slightly so the
+          // menu doesn't sit exactly on the centre pixel.
+          const rect = target.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          e.preventDefault();
+          target.dispatchEvent(
+            new MouseEvent("contextmenu", {
+              bubbles: true,
+              cancelable: true,
+              clientX: cx,
+              clientY: cy,
+              view: window,
+            }),
+          );
+        }
+        return;
+      }
+
       // 1. Escape — LIFO stack of handlers wins (modal/menu close).
       //    When the stack is empty, fall through to the default handler:
       //    focus the TopBar button for the currently-active view, so the

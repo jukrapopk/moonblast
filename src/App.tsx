@@ -128,15 +128,21 @@ export default function App() {
   }, []);
 
   // Kill the WebView's native context menu and provide our own "Back/Refresh" menu
-  // for any right-click not handled by a more specific menu.
+  // for any right-click not handled by a more specific menu. An element is
+  // considered "specific" when it (or an ancestor) carries the
+  // `data-context-menu` attribute — AppsView AppTiles, MoonlightView
+  // HostCards, WifiModal NetworkRows, and the shared Input all set it.
+  // The Shift+F10 / ContextMenu-key shortcut in `useSpatialController`
+  // synthesises a contextmenu event on `document.activeElement`, which
+  // bubbles up the same way a real right-click would.
   const pageCtx = useContextMenu();
   useEffect(() => {
     function onCapture(e: Event) {
       e.preventDefault();
     }
-    // Any input/textarea right-click is handled by the shared `Input`/textarea
-    // components (they stopPropagation), so here we only serve the generic menu.
     function onBubble(e: Event) {
+      const target = e.target as Element | null;
+      if (target?.closest("[data-context-menu]")) return;
       const me = e as MouseEvent;
       pageCtx.openAt(me.clientX, me.clientY, [
         { label: "Back", disabled: history.length <= 1, onClick: () => window.history.back() },

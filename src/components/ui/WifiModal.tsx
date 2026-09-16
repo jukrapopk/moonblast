@@ -249,6 +249,7 @@ function NetworkRow({
     return (
       <div
         onContextMenu={(e) => onMenu(e, net)}
+        data-context-menu
         className={`flex items-center gap-3 rounded-xl bg-(--color-accent-soft) px-3 py-2.5 ${
           busy?.kind === "disconnect" ? "opacity-40" : ""
         }`}
@@ -265,6 +266,7 @@ function NetworkRow({
         else onConnect(net.ssid);
       }}
       onContextMenu={(e) => onMenu(e, net)}
+      data-context-menu
       disabled={anyBusy}
       aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
       title={needsSignIn ? "Sign in" : "Connect"}

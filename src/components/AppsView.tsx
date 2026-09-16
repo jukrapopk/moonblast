@@ -131,6 +131,15 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
+      // `data-context-menu` marks the element as having an
+      // `onContextMenu` handler. The App-level "Back/Refresh" fallback
+      // (src/App.tsx) checks for this attribute on the event target's
+      // ancestor chain so it can step out of the way when an
+      // element-specific menu is registered — otherwise right-click
+      // (and the Shift+F10 / ContextMenu-key shortcut) would always
+      // land on the generic menu instead of the focused element's
+      // actual actions.
+      data-context-menu
       className="group"
       onContextMenu={onContextMenu}
     >
