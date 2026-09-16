@@ -15,6 +15,13 @@ interface SliderProps {
 /**
  * Shared volume-style slider. Native range input tinted with the accent
  * token — arrows/drag work with keyboard and gamepad focus out of the box.
+ *
+ * Focus ring lives on the rounded wrapper, not on the <input> itself.
+ * Range inputs are replaced elements: their outline ignores
+ * border-radius and wraps the full rectangular element, so we draw
+ * the ring on the wrapper via `:has(:focus-visible)` instead. The
+ * inner <input> gets `outline: none` so the wrapper's ring is the
+ * only one rendered.
  */
 export function Slider({
   value,
@@ -26,17 +33,25 @@ export function Slider({
   disabled,
 }: SliderProps) {
   return (
-    <input
-      type="range"
-      min={min}
-      max={max}
-      step={step}
-      value={value}
-      aria-label={label}
-      disabled={disabled}
-      onChange={(e) => onChange(Number(e.currentTarget.value))}
-      className="w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
-      style={{ accentColor: "var(--color-accent)" }}
-    />
+    <div
+      className={`rounded-full outline outline-2 outline-transparent transition outline-offset-2 ${
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : "has-[:focus-visible]:outline-(--color-accent)"
+      }`}
+    >
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.currentTarget.value))}
+        className="w-full cursor-pointer !outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ accentColor: "var(--color-accent)" }}
+      />
+    </div>
   );
 }
