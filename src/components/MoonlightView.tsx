@@ -816,10 +816,18 @@ export function MoonlightView() {
               <Button
                 variant="outline"
                 size="md"
-                onClick={() => scan({ force: true })}
-                disabled={scanning}
+                // `aria-disabled` instead of `disabled` — keeps the button
+                // in the spatial-nav focusable list while still being
+                // non-clickable. The library's `getFocusables` filters by
+                // `[disabled]` (HTML attribute) which would drop focus from
+                // the button to body when scanning starts; aria-disabled
+                // is a CSS-attribute-only signal the library ignores.
+                // The onClick guard below prevents firing scan() while
+                // a scan is already running.
+                aria-disabled={scanning}
+                onClick={() => !scanning && scan({ force: true })}
                 icon={<Spinner size={16} spinning={scanning} />}
-                className="h-9 bg-(--color-surface) px-4 disabled:opacity-50"
+                className={`h-9 bg-(--color-surface) px-4 ${scanning ? "cursor-not-allowed opacity-50" : ""}`}
               >
                 Scan
               </Button>
