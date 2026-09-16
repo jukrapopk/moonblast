@@ -97,29 +97,31 @@ html {
   background: transparent;
 }
 
-/* Suppress the default browser focus outline so our accent ring is
- * the only one. `!important` is required here to beat Tailwind's
- * `outline-none` utility (which sets `outline: 2px solid transparent`
- * with class-level specificity — same as the universal selector, so
- * without `!important` it would win on source order in some configs). */
-*:focus,
-*:focus-visible {
-  outline: 0 !important;
-}
-
-/* Consistent keyboard focus ring — a 2px accent-colored outline floating
- * 2px outside any focused element. `:focus-visible` (not `:focus`) so
- * mouse clicks don't trigger the ring — only keyboard navigation. The
- * rule is intentionally a universal selector so every focusable gets
- * it for free; individual components can layer their own background /
- * scale / shadow treatment on top. Programmatic focus on tabindex=-1
- * containers doesn't trigger `:focus-visible` in any browser, so the
- * grid / list wrappers we use to claim initial focus stay ringless.
+/* Focus ring: 2px accent outline floating 2px outside any focused
+ * element on keyboard nav. Mouse clicks don't trigger the ring
+ * (`:focus:not(:focus-visible)` overrides).
  *
- * Modern browsers (Chrome 94+, Edge, Firefox 88+, Safari 16.4+) make
- * `outline` follow the element's `border-radius`, so circular chips
- * and rounded tiles get a matching accent ring without extra work. */
+ * Approach (no `!important`):
+ *   - `*:focus-visible` draws the accent ring at standard specificity.
+ *     Tailwind's `outline-none` utility has the same specificity but
+ *     is applied via class — our `*:focus-visible` wins on cascade
+ *     order because this rule appears later in the stylesheet.
+ *   - The universal `*` rule above sets `outline: 2px solid
+ *     transparent` so any UA default ring style (which uses the
+ *     same width / color format) is rendered invisible. Same width
+ *     means layout doesn't shift between focused / unfocused states.
+ *   - `*:focus:not(:focus-visible)` clears the ring entirely on
+ *     mouse clicks so the accent ring only shows for keyboard nav. */
+* {
+  outline: 2px solid transparent;
+}
+*:focus {
+  outline: none;
+}
+*:focus:not(:focus-visible) {
+  outline: none;
+}
 *:focus-visible {
-  outline: 2px solid var(--color-accent) !important;
-  outline-offset: 2px !important;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
