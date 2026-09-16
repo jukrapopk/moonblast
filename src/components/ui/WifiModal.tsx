@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { pushEscapeHandler } from "../../input/useSpatialController";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Input } from "./Input";
@@ -92,6 +93,16 @@ function PasswordForm({
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const canSubmit = !busy && password.length > 0;
+
+  // Escape from the password form returns to the network list
+  // instead of closing the entire Wi-Fi modal. Pushes onto the
+  // controller's LIFO escape stack so it wins over the modal's
+  // close handler; pops on unmount so a second Escape (or
+  // any later interaction) closes the modal as before.
+  useEffect(() => {
+    const pop = pushEscapeHandler(() => onBack());
+    return pop;
+  }, [onBack]);
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
@@ -515,6 +526,14 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     ]);
   }
 
+  // Memoized so the password form's escape-handler effect (which
+  // depends on this callback) doesn't re-register its handler on
+  // every render.
+  const handlePasswordBack = useCallback(() => {
+    setPasswordTarget(null);
+    setError(null);
+  }, []);
+
   return (
     <Modal
       open={open}
@@ -542,10 +561,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
           busy={busy !== null && busy.ssid === passwordTarget.ssid && busy.kind === "connect"}
           error={error}
           onSubmit={handleConnectWithPassword}
-          onBack={() => {
-            setPasswordTarget(null);
-            setError(null);
-          }}
+          onBack={handlePasswordBack}
         />
       ) : (
         <>

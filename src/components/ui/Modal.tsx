@@ -69,8 +69,16 @@ export function Modal({
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-    } else if (prevFocused.current) {
+    } else {
+      // Force `useFocusTrap` to re-run with `panelEl=null` so its
+      // pending autoFocus rAF is cancelled before our restore-focus
+      // rAF fires. Without this, a previously-scheduled row-focus
+      // (from initialFocus changing when returning from the password
+      // form) would fire AFTER our chip-focus rAF and steal focus
+      // back to the row.
+      setPanelEl(null);
       const el = prevFocused.current;
+      if (!el) return;
       // Defer past framer-motion's exit animation so the focus doesn't
       // fight the unmount.
       const id = requestAnimationFrame(() => {
