@@ -276,6 +276,7 @@ function NetworkRow({
       }}
       onContextMenu={(e) => onMenu(e, net)}
       data-context-menu
+      data-network-row={net.ssid}
       disabled={anyBusy}
       aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
       title={needsSignIn ? "Sign in" : "Connect"}
@@ -307,9 +308,24 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   }, [open, currentSsid]);
   // When set, the modal shows the password-entry form for this network
   // instead of the list. Cleared on submit-success / back / modal close.
-  const [passwordTarget, setPasswordTarget] = useState<WifiNetwork | null>(null);
+  const [passwordTarget, _setPasswordTarget] = useState<WifiNetwork | null>(null);
+  // SSID of the last network the user entered the password form for.
+  // Captured when the form opens so the Back button can return focus
+  // to that exact row (otherwise the focus trap would land on the
+  // X Close or the first network — neither matches user intent).
+  const [lastNetworkSsid, setLastNetworkSsid] = useState<string | null>(null);
+  // Wrapper that mirrors `passwordTarget` into `lastNetworkSsid` so the
+  // list view can restore focus to the row the user came from. Called
+  // both from the row's left-click and from its context-menu Connect.
+  const setPasswordTarget = (net: WifiNetwork | null) => {
+    if (net) setLastNetworkSsid(net.ssid);
+    _setPasswordTarget(net);
+  };
   useEffect(() => {
-    if (!open) setPasswordTarget(null);
+    if (!open) {
+      _setPasswordTarget(null);
+      setLastNetworkSsid(null);
+    }
   }, [open]);
   // Clear in-flight state when the modal closes so a fresh open doesn't
   // show a stale in-flight subtitle. The chip picks up the real state
@@ -452,9 +468,19 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       title="Wi-Fi"
       width="max-w-sm"
       // Focus the Back button when the password form is the modal's
-      // content; otherwise fall back to the first focusable (a network
-      // row in the list view).
-      initialFocus={passwordTarget ? "[data-modal-back]" : undefined}
+      // content. When returning from the password form back to the
+      // list, focus the row the user came from (their last-targeted
+      // network) — the form's onBack clears `passwordTarget` but keeps
+      // the SSID in `lastNetworkSsid` for this exact selector match.
+      // Falls back to the first network row when there's no last-target
+      // (e.g. modal opened directly into the list).
+      initialFocus={
+        passwordTarget
+          ? "[data-modal-back]"
+          : lastNetworkSsid
+            ? `[data-network-row="${lastNetworkSsid}"]`
+            : undefined
+      }
     >
       {passwordTarget ? (
         <PasswordForm
