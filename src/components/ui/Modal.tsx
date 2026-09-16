@@ -116,7 +116,14 @@ export function Modal({
                 </div>
                 <button
                   onClick={onClose}
-                  className="text-(--color-muted) transition hover:text-(--color-text)"
+                  aria-label="Close"
+                  // Circular shape so the focus ring follows a circle
+                  // instead of the default rectangular button outline.
+                  // Sized to comfortably fit the 20px X icon plus the
+                  // 2px focus ring outside; h-9 / w-9 matches the
+                  // TopBarButton's circular touch target for visual
+                  // consistency across the app.
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface) hover:text-(--color-text) focus-visible:bg-(--color-surface) focus-visible:text-(--color-text)"
                 >
                   <X size={20} weight="bold" />
                 </button>
