@@ -30,8 +30,8 @@
  *    can't escape a modal panel. `setSpatialScope(el)` is called by the
  *    container that wants focus to be trapped within it.
  */
-import { useCallback, useEffect, useRef } from "react";
-import { directionFromKey, moveFocus } from "./spatialNav";
+import { useEffect, useRef } from "react";
+import { directionFromKey, focusInitial, moveFocus } from "./spatialNav";
 import { useSpatialControllerInternals } from "./controllerInternals";
 
 type KeyHandler = (e: KeyboardEvent) => void;
@@ -213,17 +213,11 @@ export function useSpatialController() {
 /**
  * Re-focus the most-recently-focused element inside `scope`. Used by
  * modals on open to honour a caller-provided `initialFocus` selector.
+ * Re-exported from `./spatialNav` so consumers can `import { focusInitial }
+ * from "../../input/useSpatialController"` alongside the other
+ * controller hooks.
  */
-export function focusInitial(scope: HTMLElement | null, selector?: string): void {
-  if (!scope) return;
-  const target = selector ? scope.querySelector<HTMLElement>(selector) : null;
-  const fallback =
-    target ??
-    scope.querySelector<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    );
-  fallback?.focus();
-}
+export { focusInitial };
 
 /**
  * Lightweight "focus trap" used by modals. While active, the spatial
@@ -290,20 +284,65 @@ export function useFocusTrap(
 }
 
 /**
- * Focus a target element on mount and whenever `when` flips truthy.
- * `when` defaults to `true`. Used by views to claim initial focus on
- * mount / on view change.
+ * Focus the first focusable inside `scope` once on mount, and again
+ * whenever `when` flips from falsy to truthy. Used by views to claim
+ * initial focus on mount / on view change.
+ *
+ * Pass a CONTAINER (the grid wrapper, the page wrapper, the host list).
+ * The hook focuses the first focusable child via `focusInitial`, NOT
+ * the container itself — focusing the container would put the user on
+ * a tabindex=-1 wrapper that the LRUD library can't navigate *out of*
+ * (its `getNextFocus` looks for siblings of the parent container, but
+ * the container's own rectangle covers the area, so arrows find no
+ * valid candidates and the user is stuck).
+ *
+ * Crucially, this fires ONCE — not on every parent re-render. The
+ * `when` predicate is read via a ref so a new function reference on
+ * each render doesn't re-trigger the focus steal. (Earlier versions
+ * included `when` in the effect deps and stole focus from a text
+ * input on every keystroke — a real bug, fixed here.)
+ *
+ * If the container has no focusable children (empty state), nothing
+ * is focused — the user can still Tab / arrow from wherever they came
+ * from.
  */
 export function useAutoFocus(
-  target: HTMLElement | null,
+  scope: HTMLElement | null,
   when: boolean | (() => boolean) = true,
 ): void {
-  const should = useCallback(() => (typeof when === "function" ? when() : when), [when]);
+  // Hold the latest `when` in a ref so we don't have to add it to
+  // the effect deps. Reading the ref inside the effect lets the caller
+  // pass an inline `() => shortcuts.length > 0` without re-firing on
+  // every render.
+  const whenRef = useRef(when);
+  whenRef.current = when;
+  // Track whether we've ever fired successfully. If we've already
+  // focused once, don't focus again — even if `when` flips. The user
+  // may have moved focus elsewhere and we shouldn't yank it back.
+  const firedRef = useRef(false);
+
   useEffect(() => {
-    if (!target || !should()) return;
+    // Reset the fired flag whenever the scope itself changes (view
+    // remount, e.g. navigating to a new view).
+    firedRef.current = false;
+  }, [scope]);
+
+  useEffect(() => {
+    if (!scope) return;
+    if (firedRef.current) return;
+    const predicate =
+      typeof whenRef.current === "function"
+        ? (whenRef.current as () => boolean)
+        : () => whenRef.current as boolean;
+    if (!predicate()) return;
     const id = requestAnimationFrame(() => {
-      if (target.isConnected) target.focus();
+      if (!scope.isConnected) return;
+      if (firedRef.current) return;
+      // focusInitial returns the element it focused (or null). Mark as
+      // fired even if it returned null so we don't keep trying on every
+      // re-render with an empty container.
+      if (focusInitial(scope)) firedRef.current = true;
     });
     return () => cancelAnimationFrame(id);
-  }, [target, should]);
+  }, [scope]);
 }

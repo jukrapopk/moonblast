@@ -141,7 +141,7 @@ function AppTile({
         className="relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 hover:bg-(--color-accent-soft) hover:shadow-[0_12px_32px_-12px_var(--color-overlay)] focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)]"
       >
         <div
-          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold text-(--color-text) transition-transform group-hover:scale-[1.04] group-focus-visible:scale-[1.04]`}
+          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text) transition-transform group-hover:scale-[1.04] group-focus-visible:scale-[1.04]`}
           style={icon ? undefined : { background: gradientFor(name) }}
         >
           {icon ? (
@@ -459,7 +459,6 @@ export function AppsView() {
   const { settings, update } = useSettings();
   const shortcuts = settings.app_shortcuts;
   const [addOpen, setAddOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [bust, setBust] = useState(0);
   const ctx = useContextMenu();
   const [sgApp, setSgApp] = useState<Shortcut | null>(null);
@@ -597,11 +596,6 @@ export function AppsView() {
     }
   }
 
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? shortcuts.filter((a) => `${labelOf(a)} ${a.source}`.toLowerCase().includes(q))
-    : shortcuts;
-
   // One-time migration: localize legacy steamgrid URLs and out-of-cache custom
   // files into the `.icons` cache so they're stable and offline-safe.
   useEffect(() => {
@@ -638,23 +632,13 @@ export function AppsView() {
         title="Apps"
         subtitle="Shortcuts to your apps and games."
         actions={
-          <div className="flex items-center gap-2">
-            <div className="w-56">
-              <Input
-                icon={<MagnifyingGlass size={16} weight="bold" />}
-                value={query}
-                onChange={(e) => setQuery(e.currentTarget.value)}
-                placeholder="Search apps"
-              />
-            </div>
-            <Button
-              onClick={() => setAddOpen(true)}
-              icon={<Plus size={16} weight="bold" />}
-              className="h-9 px-4"
-            >
-              Add
-            </Button>
-          </div>
+          <Button
+            onClick={() => setAddOpen(true)}
+            icon={<Plus size={16} weight="bold" />}
+            className="h-9 px-4"
+          >
+            Add
+          </Button>
         }
       >
         {shortcuts.length === 0 ? (
@@ -664,20 +648,18 @@ export function AppsView() {
               Use Add to pick an installed app or browse to one.
             </p>
           </Card>
-        ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-sm text-(--color-muted)">No apps match "{query}"</div>
         ) : (
           // `lrud-container` opts the grid into the LRUD library: arrows
           // stay scoped to the tiles, and the last-focused tile is
           // remembered via `data-focus` so coming back to the view
-          // restores focus rather than dumping it back to the search box.
+          // restores focus to that tile.
           <div
             ref={gridRef}
             tabIndex={-1}
             className="lrud-container grid grid-cols-4 gap-4 outline-none focus:outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
           >
             <AnimatePresence>
-              {filtered.map((a) => (
+              {shortcuts.map((a) => (
                 <AppTile
                   key={a.path}
                   name={labelOf(a)}
