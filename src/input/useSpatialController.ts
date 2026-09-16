@@ -31,7 +31,7 @@
  *    container that wants focus to be trapped within it.
  */
 import { useEffect, useRef } from "react";
-import { directionFromKey, focusInitial, moveFocus } from "./spatialNav";
+import { directionFromKey, focusInitial, moveFocus, type Direction } from "./spatialNav";
 import { useSpatialControllerInternals } from "./controllerInternals";
 
 type KeyHandler = (e: KeyboardEvent) => void;
@@ -132,6 +132,51 @@ const readScope = () => spatialScope.current;
  * document order. View cycling is the gamepad shoulders' job (see
  * `useGamepad`).
  */
+/**
+ * Walk up from `el` looking for an ancestor with
+ * `data-lrud-scope-lock="horizontal|vertical|all"`. If found and `dir`
+ * is in the locked set, return that element as a directional scope
+ * override. Returns `null` if no directional lock applies (the caller
+ * falls back to the default scope stack).
+ *
+ * `horizontal` locks Left/Right (e.g. the topbar — arrows can move
+ * horizontally within the topbar but escape Up/Down). `vertical`
+ * locks Up/Down. `all` locks every direction (the current modal
+ * trap behaviour).
+ */
+function findDirectionalScope(
+  el: Element | null,
+  dir: Direction,
+): HTMLElement | null {
+  let cur: Element | null = el;
+  while (cur && cur !== document.body) {
+    const lock = cur.getAttribute?.("data-lrud-scope-lock");
+    if (lock) {
+      const dirs = lock.split(/\s+/);
+      const locked =
+        (dir === "left" || dir === "right")
+          ? dirs.includes("horizontal") || dirs.includes("all")
+          : dirs.includes("vertical") || dirs.includes("all");
+      if (locked && cur instanceof HTMLElement) return cur;
+      // Lock doesn't apply to this direction — keep walking in case a
+      // closer ancestor has a different lock.
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+/**
+ * Focus the TopBar button for the currently-active view
+ * (`[data-active-view]`), if any. Used as the default handler for
+ * Escape (no modal) and Up arrow (no directional lock above focus).
+ */
+function focusActiveViewButton(): HTMLElement | null {
+  const btn = document.querySelector<HTMLElement>("[data-active-view]");
+  if (btn) btn.focus();
+  return btn;
+}
+
 export function useSpatialController() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -147,13 +192,8 @@ export function useSpatialController() {
           h(e);
           return;
         }
-        const activeViewBtn = document.querySelector<HTMLElement>(
-          "[data-active-view]",
-        );
-        if (activeViewBtn) {
-          e.preventDefault();
-          activeViewBtn.focus();
-        }
+        const btn = focusActiveViewButton();
+        if (btn) e.preventDefault();
         return;
       }
 
@@ -200,8 +240,29 @@ export function useSpatialController() {
         if (a instanceof HTMLSelectElement) return;
         // Native range input: arrow keys step the value. Same.
         if (a instanceof HTMLInputElement && a.type === "range") return;
+        // Up-arrow "jump back to nav" escape hatch: when focus is in the
+        // page (not inside a topbar-style horizontal lock) and there's no
+        // modal, treat Up like Escape's no-modal fallback and focus the
+        // active TopBar button. Lets the user return to nav from anywhere
+        // on the page without first reaching the topbar via Up.
+        if (dir === "up" && !escapeStack.top()) {
+          const locked = findDirectionalScope(a, "up");
+          if (!locked) {
+            const btn = focusActiveViewButton();
+            if (btn) {
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+        // Directional scope lock: if a `data-lrud-scope-lock` ancestor
+        // applies to this direction, use it as the library's scope so the
+        // fallback search stays inside the locked container even when no
+        // sibling matches.
+        const dirScope = findDirectionalScope(a, dir);
+        const scope = dirScope ?? readScope();
         e.preventDefault();
-        moveFocus(document.activeElement, dir, readScope());
+        moveFocus(document.activeElement, dir, scope);
       }
     }
 

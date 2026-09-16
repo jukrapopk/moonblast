@@ -1,12 +1,11 @@
 import { Gear, Monitor, Power, ScreencastIcon, SquaresFour } from "@phosphor-icons/react";
 import { motion } from "framer-motion";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
 import { useBattery, type BatteryStatus } from "../hooks/useBattery";
 import { usePowerMenuTrigger } from "../hooks/usePowerMenuTrigger";
 import { formatClock, formatDate, useTime } from "../hooks/useTime";
 import { useWifi, type WifiConnection } from "../hooks/useWifi";
-import { setSpatialScope } from "../input/useSpatialController";
 import { PowerMenu } from "./PowerMenu";
 import { AudioModal } from "./ui/AudioModal";
 import { BatteryIcon } from "./ui/BatteryIcon";
@@ -199,45 +198,6 @@ export function TopBar({
   }, [batteryOpen, refreshBattery]);
   const time = useTime();
 
-  // Lock the spatial navigation scope to the topbar header while a
-  // topbar button has focus. The LRUD library searches within
-  // parentContainer first, then falls back to the document scope if
-  // no candidates are in the requested direction. Locking scope =
-  // header means the fallback also only considers topbar focusables,
-  // so Right from Power (the rightmost focusable) doesn't escape
-  // into the page content area — it just no-ops. Setting scope to
-  // null on focusout lets the controller fall back to default scope
-  // (document.body) when the user tabs out into the page.
-  const headerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    function onFocusIn(e: FocusEvent) {
-      const target = e.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (headerRef.current?.contains(target)) {
-        setSpatialScope(headerRef.current);
-      }
-    }
-    function onFocusOut(e: FocusEvent) {
-      const target = e.target;
-      if (!(target instanceof HTMLElement)) return;
-      // Only clear when focus is actually leaving the topbar (not
-      // just moving between buttons inside it). relatedTarget is
-      // null on blur in some browsers; fall back to checking if the
-      // new activeElement is inside the header.
-      if (!headerRef.current?.contains(target)) return;
-      const next = e.relatedTarget as Node | null;
-      if (!next || !headerRef.current?.contains(next)) {
-        setSpatialScope(null);
-      }
-    }
-    document.addEventListener("focusin", onFocusIn);
-    document.addEventListener("focusout", onFocusOut);
-    return () => {
-      document.removeEventListener("focusin", onFocusIn);
-      document.removeEventListener("focusout", onFocusOut);
-    };
-  }, []);
-
   return (
     /* `lrud-container` on the <header> scopes arrow movement to the
      * whole topbar (left nav + status chips + right nav + Power). Tab
@@ -245,8 +205,15 @@ export function TopBar({
      * only affects arrow keys. The three inner clusters no longer
      * carry their own lrud-container so the library picks the
      * <header> as parentContainer (closest ancestor) and treats all
-     * the topbar focusables as siblings. */
-    <header ref={headerRef} className="lrud-container relative flex h-14 shrink-0 items-center gap-2 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
+     * the topbar focusables as siblings.
+     *
+     * `data-lrud-scope-lock="horizontal"` tells the spatial controller
+     * to lock Left/Right movement to this container — Right from the
+     * rightmost focusable (Power) no-ops instead of escaping into the
+     * page content. Up/Down are NOT locked, so Down from a topbar
+     * button reaches the page content below and Up from the page
+     * content reaches the topbar above. */
+    <header data-lrud-scope-lock="horizontal" className="lrud-container relative flex h-14 shrink-0 items-center gap-2 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
       {/* Left nav cluster */}
       <nav className="flex items-center gap-1">
         {visibleLeft.map((item) => (
