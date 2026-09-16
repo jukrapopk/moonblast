@@ -459,6 +459,7 @@ export function AppsView() {
   const { settings, update } = useSettings();
   const shortcuts = settings.app_shortcuts;
   const [addOpen, setAddOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [bust, setBust] = useState(0);
   const ctx = useContextMenu();
   const [sgApp, setSgApp] = useState<Shortcut | null>(null);
@@ -596,6 +597,11 @@ export function AppsView() {
     }
   }
 
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? shortcuts.filter((a) => `${labelOf(a)} ${a.source}`.toLowerCase().includes(q))
+    : shortcuts;
+
   // One-time migration: localize legacy steamgrid URLs and out-of-cache custom
   // files into the `.icons` cache so they're stable and offline-safe.
   useEffect(() => {
@@ -632,13 +638,30 @@ export function AppsView() {
         title="Apps"
         subtitle="Shortcuts to your apps and games."
         actions={
-          <Button
-            onClick={() => setAddOpen(true)}
-            icon={<Plus size={16} weight="bold" />}
-            className="h-9 px-4"
-          >
-            Add
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Search input is mouse-only — `tabIndex={-1}` removes it
+             *  from the spatial-nav focusable list AND from native Tab
+             *  traversal, so the LRUD library can't get stuck trying
+             *  to find Left/Right candidates from inside a text input.
+             *  The user can still click into it and type; mouse works
+             *  exactly like before. */}
+            <div className="w-56">
+              <Input
+                tabIndex={-1}
+                icon={<MagnifyingGlass size={16} weight="bold" />}
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                placeholder="Search apps"
+              />
+            </div>
+            <Button
+              onClick={() => setAddOpen(true)}
+              icon={<Plus size={16} weight="bold" />}
+              className="h-9 px-4"
+            >
+              Add
+            </Button>
+          </div>
         }
       >
         {shortcuts.length === 0 ? (
@@ -648,6 +671,8 @@ export function AppsView() {
               Use Add to pick an installed app or browse to one.
             </p>
           </Card>
+        ) : filtered.length === 0 ? (
+          <div className="py-12 text-center text-sm text-(--color-muted)">No apps match "{query}"</div>
         ) : (
           // `lrud-container` opts the grid into the LRUD library: arrows
           // stay scoped to the tiles, and the last-focused tile is
@@ -659,7 +684,7 @@ export function AppsView() {
             className="lrud-container grid grid-cols-4 gap-4 outline-none focus:outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
           >
             <AnimatePresence>
-              {shortcuts.map((a) => (
+              {filtered.map((a) => (
                 <AppTile
                   key={a.path}
                   name={labelOf(a)}
