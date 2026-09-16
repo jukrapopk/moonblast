@@ -1,4 +1,13 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { useFocusTrap } from "../../input/useSpatialController";
+import { focusInitial } from "../../input/spatialNav";
 
 export interface CtxAction {
   label: string;
@@ -21,33 +30,67 @@ interface CtxMenuProps {
 
 export function ContextMenu({ state, onClose }: CtxMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
   // Hold onClose in a ref so the host's inline `() => storeSet(null)` doesn't
   // re-bind all four listeners on every render of ContextMenuHost while a
   // menu is open. Listeners are bound once per `state` flip.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  // Mark this element as a spatial container so the LRUD library treats
+  // the menu as one scoped island — arrows can't escape it back into the
+  // page below. `useFocusTrap` owns Escape (LIFO push), spatial scope,
+  // and autoFocus — no separate Escape handler needed.
+  useFocusTrap(panelEl, {
+    onEscape: () => onCloseRef.current(),
+    autoFocus: true,
+  });
+
+  // Capture outside-close / blur / scroll semantics (LRUD handles Up/Down).
   useEffect(() => {
     if (!state) return;
     function onDoc(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onCloseRef.current();
     }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCloseRef.current();
-    }
     function onScroll() {
       onCloseRef.current();
     }
     document.addEventListener("mousedown", onDoc, true);
-    document.addEventListener("keydown", onKey);
     window.addEventListener("blur", onCloseRef.current);
     window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDoc, true);
-      document.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onCloseRef.current);
       window.removeEventListener("scroll", onScroll, true);
     };
+  }, [state]);
+
+  // Restore focus to the previously-focused element on close (typically
+  // the tile / row the menu was opened from).
+  const prevFocused = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (state) {
+      prevFocused.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      // Move focus into the menu immediately so the LRUD library has a
+      // current element to navigate *from* — otherwise the first Up/Down
+      // press computes from `document.activeElement === <body>` and picks
+      // the nearest body-adjacent element instead of an item.
+      const id = requestAnimationFrame(() => {
+        if (ref.current) focusInitial(ref.current);
+      });
+      return () => cancelAnimationFrame(id);
+    }
+    if (prevFocused.current) {
+      const el = prevFocused.current;
+      const id = requestAnimationFrame(() => {
+        if (el.isConnected) el.focus();
+      });
+      prevFocused.current = null;
+      return () => cancelAnimationFrame(id);
+    }
   }, [state]);
 
   if (!state) return null;
@@ -60,10 +103,16 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
 
   return (
     <div
-      ref={ref}
+      ref={(node) => {
+        ref.current = node;
+        setPanelEl(node);
+      }}
       role="menu"
+      // `lrud-container` opts the panel into the LRUD library's
+      // container system: scope = panel only, last-focused tracking via
+      // data-focus, etc.
+      className="lrud-container fixed z-[70] overflow-hidden rounded-xl border border-(--color-border) bg-(--color-surface-2) p-1 shadow-2xl"
       style={{ left, top, width }}
-      className="fixed z-[70] overflow-hidden rounded-xl border border-(--color-border) bg-(--color-surface-2) p-1 shadow-2xl"
     >
       {state.items.map((it, i) => (
         <button

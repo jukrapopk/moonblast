@@ -16,6 +16,7 @@ import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import { useAutoFocus } from "../input/useSpatialController";
 import { Spinner } from "./ui/Spinner";
 
 interface Host {
@@ -158,10 +159,11 @@ function formatElapsed(startedAt: number, now: number) {
 }
 
 /**
- * Single card UI for the unified host list. Replaces the old `MachineCard`
- * and `DiscoveredCard` which were visual duplicates and made it impossible
- * to render the same logical host in one row when it came from multiple
- * sources (e.g. paired + saved with different addresses).
+ * Single card UI for the unified host list. Wraps its action buttons in
+ * an `lrud-container` so the spatial library keeps Left/Right arrow
+ * movement within the card (Desktop → Apps → Forget) while Up/Down
+ * jump between cards. Container distance is *not* enabled for the card
+ * itself — only its inner buttons are focusable.
  */
 function HostCard({
   entry,
@@ -273,7 +275,11 @@ function HostCard({
               onDisconnect={onDisconnect}
             />
           ) : (
-            <>
+            // `lrud-container` keeps Left/Right arrow movement contained
+            // within the card's action buttons. Up/Down naturally moves
+            // between cards because the LRUD library treats the cards'
+            // own container as siblings at the page level.
+            <div className="lrud-container flex items-center gap-2">
               {renderStream && (
                 <>
                   <Button
@@ -313,12 +319,12 @@ function HostCard({
                   onClick={onRemoveSaved}
                   title="Forget saved address"
                   aria-label="Forget saved address"
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger)"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger) focus:text-(--color-danger) focus:outline-none"
                 >
                   <Trash size={16} weight="bold" />
                 </button>
               )}
-            </>
+            </div>
           )}
         </div>
       </Card>
@@ -342,7 +348,7 @@ function StreamActions({
   onDisconnect: () => void;
 }) {
   return (
-    <>
+    <div className="lrud-container flex items-center gap-2">
       <StatusPill pulse size="md">
         {app} · {elapsedLabel}
       </StatusPill>
@@ -365,7 +371,7 @@ function StreamActions({
       >
         Disconnect
       </Button>
-    </>
+    </div>
   );
 }
 
@@ -403,6 +409,7 @@ function AddMachineModal({
       onClose={onClose}
       title="Add machine"
       subtitle="Save a custom address — useful for Tailscale or other remote networks."
+      initialFocus="input[placeholder*='192.168']"
     >
       <div className="space-y-3">
         <Input
@@ -411,10 +418,8 @@ function AddMachineModal({
           placeholder="Name (optional)"
         />
         <Input
-          autoFocus
           value={address}
           onChange={(e) => setAddress(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="e.g. 192.168.1.20 or mybox.tailnet.ts.net"
         />
         <div className="flex justify-end gap-2 pt-2">
@@ -481,12 +486,12 @@ function AppsModal({
           {error ? "Couldn't load apps" : "Loading apps"}
         </p>
       ) : (
-        <div className="max-h-80 space-y-1 overflow-y-auto">
+        <div className="lrud-container max-h-80 space-y-1 overflow-y-auto">
           {apps.map((app) => (
             <button
               key={app}
               onClick={() => onPlay(app)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-base font-medium text-(--color-text) transition-colors hover:bg-(--color-surface)"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-base font-medium text-(--color-text) transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none"
             >
               <Play size={16} weight="bold" />
               {app}
@@ -562,6 +567,11 @@ export function MoonlightView() {
         .sort(sortStreamingFirst),
     [hostsWithProbe, streamingAddress],
   );
+
+  // Claim initial focus on the first card's first action button so the
+  // user can immediately Up/Down through the list with arrow keys.
+  const listRef = useRef<HTMLDivElement>(null);
+  useAutoFocus(listRef.current, () => sub === "machines" && (pairedGroup.length > 0 || discoveryGroup.length > 0));
 
   // Tracks when the last scan finished so focus/visibility bursts don't
   // spam the network. User-initiated scans bypass the debounce.
@@ -854,7 +864,10 @@ export function MoonlightView() {
                     : "No hosts found. Scan again or add a machine."}
                 </Card>
               ) : (
-                <div className="space-y-6">
+                // `lrud-container` keeps arrow movement inside the host
+                // list — Up/Down moves between cards, Left/Right stays
+                // within a card's action buttons (Desktop → Apps → Forget).
+                <div ref={listRef} tabIndex={-1} className="lrud-container space-y-6 outline-none focus:outline-none">
                   {pairedGroup.length > 0 && (
                     <div>
                       <h2 className="mb-3 mt-2 text-sm font-semibold uppercase tracking-wider text-(--color-muted)">Paired</h2>

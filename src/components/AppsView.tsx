@@ -17,6 +17,7 @@ import { LoadingChip } from "./ui/LoadingChip";
 import { EmptyMessage } from "./ui/EmptyMessage";
 import { gradientFor } from "./ui/gradients";
 import { useSettings } from "../settings/SettingsContext";
+import { useAutoFocus } from "../input/useSpatialController";
 
 interface AppEntry {
   id: string;
@@ -93,10 +94,7 @@ function AppTile({
   steamgridIcon,
   useDesktopIcon,
   bust,
-  focused,
   onLaunch,
-  onHover,
-  onUnhover,
   onContextMenu,
 }: {
   name: string;
@@ -105,12 +103,7 @@ function AppTile({
   steamgridIcon: string | null;
   useDesktopIcon: boolean;
   bust: number;
-  focused: boolean;
   onLaunch: () => void;
-  /** Mouse entered this tile — claim the lift. */
-  onHover: () => void;
-  /** Mouse left this tile — release the lift so keyboard focus (if any) can take it. */
-  onUnhover: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   // Custom file icon > pinned SteamGridDB icon > desktop/auto.
@@ -126,6 +119,12 @@ function AppTile({
     : null;
   const icon = customIcon ? convertFileSrc(customIcon) : (steamgridSrc ?? fetchedIcon);
 
+  // The tile is a `<button>` so the LRUD spatial library picks it up
+  // natively (it scans `button` / `input` / `[tabindex]` / `a`). The
+  // outer `<motion.div>` is for the entry/exit animation only — it
+  // isn't itself focusable and isn't marked `lrud-ignore` because the
+  // library's "ignore if contained in" rule would filter out its
+  // child button.
   return (
     <motion.div
       layout
@@ -133,21 +132,16 @@ function AppTile({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
-      onMouseEnter={onHover}
-      onMouseLeave={onUnhover}
-      className={`group relative rounded-2xl p-3 transition-all duration-150 hover:z-10 hover:scale-[1.08] hover:bg-(--color-accent-soft) hover:shadow-[0_12px_32px_-12px_var(--color-overlay)] ${
-        focused
-          ? "z-10 scale-[1.08] bg-(--color-accent-soft) shadow-[0_12px_32px_-12px_var(--color-overlay)]"
-          : ""
-      }`}
+      className="group"
       onContextMenu={onContextMenu}
     >
       <button
         onClick={onLaunch}
-        className="block w-full outline-none focus:outline-none"
+        aria-label={name}
+        className="relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 hover:bg-(--color-accent-soft) hover:shadow-[0_12px_32px_-12px_var(--color-overlay)] focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)]"
       >
         <div
-          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold text-(--color-text)`}
+          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl text-3xl font-semibold text-(--color-text) transition-transform group-hover:scale-[1.04] group-focus-visible:scale-[1.04]`}
           style={icon ? undefined : { background: gradientFor(name) }}
         >
           {icon ? (
@@ -207,7 +201,7 @@ function AddAppModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one. Some apps won't launch in Immersive Mode." width="max-w-lg">
+    <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one. Some apps won't launch in Immersive Mode." width="max-w-lg" initialFocus="input">
       <FilterList
         items={installed}
         loading={loading}
@@ -238,7 +232,7 @@ function AddAppModal({
         render={(a) => (
           <button
             onClick={() => pick(a)}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none"
           >
             <span className="truncate font-medium">{a.name}</span>
             {a.source && (
@@ -346,13 +340,13 @@ function SteamGridModal({
       title="SteamGridDB icon"
       subtitle={app ? `for ${app.name}` : ""}
       width="max-w-lg"
+      initialFocus="input"
     >
       <div className="flex items-center gap-2">
         <div className="flex-1">
           <Input
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && search()}
             placeholder="Search by name or game id"
           />
         </div>
@@ -380,7 +374,7 @@ function SteamGridModal({
           >
             ← back to results
           </button>
-          <div className="mt-2 grid max-h-64 grid-cols-4 gap-2 overflow-y-auto">
+          <div className="lrud-container mt-2 grid max-h-64 grid-cols-4 gap-2 overflow-y-auto">
             {icons.length === 0 && !busy ? (
               <p className="col-span-full py-6 text-center text-sm text-(--color-muted)">
                 No icons for "{selected.name}"
@@ -390,7 +384,7 @@ function SteamGridModal({
                 <button
                   key={ic.id}
                   onClick={() => choose(ic)}
-                  className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface) transition hover:border-(--color-accent)"
+                  className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface) transition hover:border-(--color-accent) focus:border-(--color-accent) focus:outline-none"
                 >
                   <img src={ic.url} alt="" loading="lazy" className="h-full w-full object-contain" />
                 </button>
@@ -407,7 +401,7 @@ function SteamGridModal({
               <button
                 key={t.id}
                 onClick={() => pickTitle(t)}
-                className="w-full rounded-lg px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface)"
+                className="w-full rounded-lg px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none"
               >
                 {t.name}
               </button>
@@ -472,55 +466,12 @@ export function AppsView() {
   const [renameApp, setRenameApp] = useState<Shortcut | null>(null);
   const { message: toast, show: setToast } = useToast(2600);
 
-  // Keyboard / gamepad grid navigation.
+  // Claim initial focus on the first app tile the moment the grid
+  // mounts. The LRUD library handles all subsequent arrow navigation
+  // — no `focusIdx` state needed. Tab/Shift+Tab still cycles views
+  // (that handler lives in App.tsx).
   const gridRef = useRef<HTMLDivElement>(null);
-  const [focusIdx, setFocusIdx] = useState(-1);
-  const COLS = 6;
-
-  useEffect(() => {
-    gridRef.current?.focus();
-  }, [shortcuts.length]);
-
-  useEffect(() => {
-    if (focusIdx >= 0 && gridRef.current) {
-      (gridRef.current.children[focusIdx] as HTMLElement | undefined)?.scrollIntoView({
-        block: "nearest",
-      });
-    }
-  }, [focusIdx]);
-
-  function onGridKey(e: React.KeyboardEvent) {
-    const n = filtered.length;
-    if (n === 0) return;
-    let idx = focusIdx < 0 ? 0 : focusIdx;
-    let moved = true;
-    switch (e.key) {
-      case "ArrowRight":
-        idx = Math.min(n - 1, idx + 1);
-        break;
-      case "ArrowLeft":
-        idx = Math.max(0, idx - 1);
-        break;
-      case "ArrowDown":
-        idx = Math.min(n - 1, idx + COLS);
-        break;
-      case "ArrowUp":
-        idx = Math.max(0, idx - COLS);
-        break;
-      case "Enter":
-      case " ": {
-        const a = filtered[idx];
-        if (a) launch(a);
-        return;
-      }
-      default:
-        moved = false;
-    }
-    if (moved) {
-      e.preventDefault();
-      setFocusIdx(idx);
-    }
-  }
+  useAutoFocus(gridRef.current, () => shortcuts.length > 0);
 
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
@@ -715,31 +666,28 @@ export function AppsView() {
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-(--color-muted)">No apps match "{query}"</div>
         ) : (
+          // `lrud-container` opts the grid into the LRUD library: arrows
+          // stay scoped to the tiles, and the last-focused tile is
+          // remembered via `data-focus` so coming back to the view
+          // restores focus rather than dumping it back to the search box.
           <div
-          ref={gridRef}
-          tabIndex={-1}
-          onKeyDown={onGridKey}
-          className="grid grid-cols-4 gap-4 outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
-        >
-          <AnimatePresence>
-            {filtered.map((a, i) => (
-              <AppTile
-                key={a.path}
-                name={labelOf(a)}
-                path={a.path}
-                customIcon={a.custom_icon}
-                steamgridIcon={a.steamgrid_icon}
-                useDesktopIcon={a.use_desktop_icon}
-                bust={bust}
-                focused={i === focusIdx}
-                onLaunch={() => launch(a)}
-                // Mouse hover claims the lift so only one tile is ever lifted;
-                // leaving the tile releases it, letting keyboard focus take
-                // over again on the next grid navigation.
-                onHover={() => setFocusIdx(i)}
-                onUnhover={() => setFocusIdx((cur) => (cur === i ? -1 : cur))}
-                onContextMenu={(e) => openAppMenu(e, a)}
-              />
+            ref={gridRef}
+            tabIndex={-1}
+            className="lrud-container grid grid-cols-4 gap-4 outline-none focus:outline-none sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
+          >
+            <AnimatePresence>
+              {filtered.map((a) => (
+                <AppTile
+                  key={a.path}
+                  name={labelOf(a)}
+                  path={a.path}
+                  customIcon={a.custom_icon}
+                  steamgridIcon={a.steamgrid_icon}
+                  useDesktopIcon={a.use_desktop_icon}
+                  bust={bust}
+                  onLaunch={() => launch(a)}
+                  onContextMenu={(e) => openAppMenu(e, a)}
+                />
               ))}
             </AnimatePresence>
           </div>

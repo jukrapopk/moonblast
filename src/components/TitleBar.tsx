@@ -102,8 +102,10 @@ export function TitleBar({
         <span className="truncate text-[13px]">Moonblast</span>
       </div>
 
-      {/* Window controls */}
-      <div className="flex items-stretch">
+      {/* Window controls — `lrud-container` keeps arrow movement
+       *  between minimize/maximize/close instead of bleeding into the
+       *  drag region to the left. */}
+      <div className="lrud-container flex items-stretch">
         <button
           onClick={minimize}
           title="Minimize"

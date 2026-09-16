@@ -10,6 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@bbc/tv-lrud-spatial": "^0.0.18",
     "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",

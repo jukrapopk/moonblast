@@ -63,7 +63,7 @@ function Status({
   // static `danger` red threshold so the chip never doubles up.
   const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
   return (
-    <div className="flex items-center gap-1">
+    <div className="lrud-container flex items-center gap-1">
       {showDisplay && (
         <TopBarButton
           label="Display"
@@ -200,7 +200,10 @@ export function TopBar({
 
   return (
     <header className="relative flex h-14 shrink-0 items-center gap-2 border-b border-(--color-border) bg-(--color-surface-ghost) px-4">
-      <nav className="flex items-center gap-1">
+      {/* Left nav cluster — the LRUD library treats <nav> as a container
+       *  by default, so arrows stay within the cluster when it's focused.
+       *  Tab moves between clusters, arrows move within one. */}
+      <nav className="lrud-container flex items-center gap-1">
         {visibleLeft.map((item) => (
           <TopBarButton
             key={item.id}
@@ -251,7 +254,7 @@ export function TopBar({
         showBattery={showBattery}
         showAudio={showAudio}
       />
-      <div className="flex items-center gap-1">
+      <div className="lrud-container flex items-center gap-1">
         <div aria-hidden className="mx-1 h-6 w-px bg-(--color-border)" />
         {rightItems.map((item) => (
           <TopBarButton

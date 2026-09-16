@@ -10,6 +10,7 @@ import { MoonlightView } from "./components/MoonlightView";
 import { SettingsView, DisplaySettingsModal } from "./components/SettingsView";
 import { useSettings, useSettingsField } from "./settings/SettingsContext";
 import { useGamepad } from "./hooks/useGamepad";
+import { useSpatialController } from "./input/useSpatialController";
 import { openPowerMenu } from "./hooks/usePowerMenuTrigger";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 
@@ -36,6 +37,8 @@ function writeSessionView(v: View) {
     /* ignore */
   }
 }
+
+const VIEW_ORDER: View[] = ["apps", "moonlight", "settings"];
 
 export default function App() {
   const { settings, ready, update } = useSettings();
@@ -89,6 +92,15 @@ export default function App() {
   const moonlightDir = settings.integrations.moonlight_folder;
   const appsEnabled = settings.integrations.apps_enabled;
 
+  // Single global keyboard listener. Tab / Shift+Tab cycles the top-level
+  // view; Arrow keys are routed through the spatial manager; Escape goes
+  // to the LIFO stack of modal/menu handlers.
+  useSpatialController((dir) => {
+    if (view === null) return;
+    const i = VIEW_ORDER.indexOf(view);
+    const next = (i + dir + VIEW_ORDER.length) % VIEW_ORDER.length;
+    setView(VIEW_ORDER[next]);
+  });
   useGamepad();
 
   // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
@@ -126,23 +138,6 @@ export default function App() {
       document.removeEventListener("contextmenu", onBubble);
     };
   }, []);
-
-  // Tab / Shift+Tab switches the top-level view (keyboard + gamepad LB/RB).
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Tab") {
-        e.preventDefault();
-        if (view === null) return;
-        const order: View[] = ["apps", "moonlight", "settings"];
-        let i = order.indexOf(view);
-        if (e.shiftKey) i = (i - 1 + order.length) % order.length;
-        else i = (i + 1) % order.length;
-        setView(order[i]);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [view]);
 
   // If apps are disabled, fall back to another view so we don't stay stuck.
   useEffect(() => {

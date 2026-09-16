@@ -13,6 +13,7 @@ import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import { useAutoFocus } from "../input/useSpatialController";
 import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
@@ -892,13 +893,16 @@ function PreferenceGroup({
           <button
             onClick={onIconClick}
             aria-label={`${title} settings`}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface-2) hover:text-(--color-text)"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface-2) hover:text-(--color-text) focus:bg-(--color-surface-2) focus:text-(--color-text) focus:outline-none"
           >
             {icon}
           </button>
         )}
       </div>
-      <div className="pl-9">{children}</div>
+      {/* `lrud-container` keeps the group's own controls (toggles,
+       *  buttons) navigable as one cluster — Up/Down moves between
+       *  groups, Left/Right stays inside. */}
+      <div className="lrud-container pl-9">{children}</div>
     </div>
   );
 }
@@ -1002,9 +1006,15 @@ export function SettingsView({
       setSgStatus("error");
     }
   }
+  // Claim initial focus on the first interactive control in the General
+  // section so Up/Down/Left/Right work as soon as the user lands on the
+  // Settings page. The LRUD library takes over from here.
+  const pageRef = useRef<HTMLDivElement>(null);
+  useAutoFocus(pageRef.current);
   return (
     <PageShell title="Settings" subtitle="Customize Moonblast">
-      <Section title="General">
+      <div ref={pageRef} tabIndex={-1} className="lrud-container space-y-6 outline-none focus:outline-none">
+        <Section title="General">
         <div className="flex items-start justify-between gap-4 py-4">
           <div className="flex-1">
             <div className="text-base font-medium text-(--color-text)">Auto Immersive Mode</div>
@@ -1108,6 +1118,7 @@ export function SettingsView({
           Moonlight streaming settings live on the Moonlight page.
         </div>
       </Section>
+      </div>
     </PageShell>
   );
 }
