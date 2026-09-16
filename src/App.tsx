@@ -160,7 +160,12 @@ export default function App() {
       const target = e.target as Element | null;
       if (target?.closest("[data-context-menu]")) return;
       const me = e as MouseEvent;
-      pageCtx.openAt(me.clientX, me.clientY, [
+      // Propagate the keyboard flag the spatial controller stamps on
+      // synthetic contextmenu events so the menu knows whether to
+      // autoFocus its first item (keyboard) or stay mouse-only (mouse
+      // right-click).
+      const keyboard = "__keyboard" in me && (me as MouseEvent & { __keyboard?: boolean }).__keyboard === true;
+      pageCtx.openAt(me.clientX, me.clientY, keyboard, [
         { label: "Back", disabled: history.length <= 1, onClick: () => window.history.back() },
         { label: "Refresh", onClick: () => window.location.reload() },
       ]);
@@ -171,6 +176,21 @@ export default function App() {
       document.removeEventListener("contextmenu", onCapture, true);
       document.removeEventListener("contextmenu", onBubble);
     };
+  }, []);
+
+  // Suppress the focus shift that the browser performs on right-click
+  // mousedown so right-clicking an element to open its context menu
+  // doesn't draw a focus ring under the menu and doesn't move focus
+  // off the previously-focused element. The context menu's own
+  // close-time focus restoration (in ContextMenu.tsx) lands back on
+  // whatever had focus before — which is correct when right-click
+  // never moved focus in the first place.
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 2) e.preventDefault();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
   }, []);
 
   // If apps are disabled, fall back to another view so we don't stay stuck.

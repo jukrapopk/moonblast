@@ -21,6 +21,13 @@ export interface MenuState {
   x: number;
   y: number;
   items: CtxAction[];
+  /**
+   * When true, the menu moves keyboard focus to its first item on open
+   * (used by Shift+F10 / ContextMenu key). When false (default — the
+   * mouse right-click path), the menu is mouse-only and skips autoFocus
+   * so the user's previous keyboard focus stays put.
+   */
+  keyboard?: boolean;
 }
 
 interface CtxMenuProps {
@@ -40,10 +47,11 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
   // Mark this element as a spatial container so the LRUD library treats
   // the menu as one scoped island — arrows can't escape it back into the
   // page below. `useFocusTrap` owns Escape (LIFO push), spatial scope,
-  // and autoFocus — no separate Escape handler needed.
+// and autoFocus — the latter is opt-in via `state.keyboard` so mouse
+// right-click doesn't yank focus off the previously-focused element.
   useFocusTrap(panelEl, {
     onEscape: () => onCloseRef.current(),
-    autoFocus: true,
+    autoFocus: state?.keyboard === true,
   });
 
   // Capture outside-close / blur / scroll semantics (LRUD handles Up/Down).
@@ -74,14 +82,17 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      // Move focus into the menu immediately so the LRUD library has a
-      // current element to navigate *from* — otherwise the first Up/Down
-      // press computes from `document.activeElement === <body>` and picks
-      // the nearest body-adjacent element instead of an item.
-      const id = requestAnimationFrame(() => {
-        if (ref.current) focusInitial(ref.current);
-      });
-      return () => cancelAnimationFrame(id);
+      // Only move focus into the menu when it was opened by keyboard
+      // (Shift+F10 / ContextMenu key). Mouse right-click leaves focus
+      // where it was so the previously-focused element keeps its
+      // outline and the close-restore is a no-op.
+      if (state.keyboard) {
+        const id = requestAnimationFrame(() => {
+          if (ref.current) focusInitial(ref.current);
+        });
+        return () => cancelAnimationFrame(id);
+      }
+      return;
     }
     if (prevFocused.current) {
       const el = prevFocused.current;
@@ -167,10 +178,22 @@ export function useContextMenu() {
   function open(e: ReactMouseEvent, items: CtxAction[]) {
     e.preventDefault();
     e.stopPropagation();
-    storeSet({ x: e.clientX, y: e.clientY, items });
+    // Detect the synthetic keyboard-flagged contextmenu event that the
+    // spatial controller dispatches for Shift+F10 / ContextMenu key.
+    // Real mouse right-clicks don't carry the flag — those stay
+    // mouse-only and don't yank focus.
+    const keyboard =
+      "__keyboard" in e.nativeEvent &&
+      (e.nativeEvent as MouseEvent & { __keyboard?: boolean }).__keyboard === true;
+    storeSet({ x: e.clientX, y: e.clientY, items, keyboard });
   }
-  const openAt = (x: number, y: number, items: CtxAction[]) => {
-    storeSet({ x, y, items });
+  const openAt = (
+    x: number,
+    y: number,
+    keyboard: boolean,
+    items: CtxAction[],
+  ) => {
+    storeSet({ x, y, items, keyboard });
   };
   const setMenu = (s: MenuState | null) => storeSet(s);
   return { open, openAt, setMenu };

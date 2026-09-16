@@ -216,15 +216,18 @@ export function useSpatialController() {
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
           e.preventDefault();
-          target.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              cancelable: true,
-              clientX: cx,
-              clientY: cy,
-              view: window,
-            }),
-          );
+          const synthetic = new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: cx,
+            clientY: cy,
+            view: window,
+          });
+          // Mark the event as keyboard-triggered so the context menu
+          // knows to autoFocus its first item — mouse right-click
+          // keeps focus where it was.
+          (synthetic as MouseEvent & { __keyboard?: boolean }).__keyboard = true;
+          target.dispatchEvent(synthetic);
         }
         return;
       }
