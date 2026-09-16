@@ -106,14 +106,18 @@ html {
  *     Tailwind's `outline-none` utility has the same specificity but
  *     is applied via class — our `*:focus-visible` wins on cascade
  *     order because this rule appears later in the stylesheet.
- *   - The universal `*` rule above sets `outline: 2px solid
- *     transparent` so any UA default ring style (which uses the
- *     same width / color format) is rendered invisible. Same width
- *     means layout doesn't shift between focused / unfocused states.
- *   - `*:focus:not(:focus-visible)` clears the ring entirely on
+ *   - The universal `*` rule sets `outline-style: solid;
+ *     outline-width: 0` so the focus ring can swap to a 2px width
+ *     without layout shift, while the 0-width placeholder keeps
+ *     the outline fully collapsed — WebView2/Chromium does NOT
+ *     render a faint white pixel border the way it does with a
+ *     2px transparent/rgba(0,0,0,0) outline.
+ *   - `:focus:not(:focus-visible)` clears the ring entirely on
  *     mouse clicks so the accent ring only shows for keyboard nav. */
 * {
-  outline: 2px solid transparent;
+  outline-style: solid;
+  outline-width: 0px;
+  outline-color: rgba(0, 0, 0, 0);
 }
 *:focus {
   outline: none;
