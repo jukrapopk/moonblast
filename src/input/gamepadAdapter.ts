@@ -57,13 +57,21 @@ const RIGHT_STICK_X = 2;
 const RIGHT_STICK_Y = 3;
 
 /**
- * Pixels per unit of stick deflection. The synthetic `wheel` event's
- * `deltaY` / `deltaX` are interpreted by the page in pixels
- * (`deltaMode: "pixel"`). We multiply stick magnitude (0..1) by this
- * factor so a full-tilt push scrolls ~120px — Chromium's default
- * line-height-ish amount. Tweak if it feels too fast / sluggish.
+ * Continuous-scroll tuning. The right stick emits a scroll tick
+ * every `SCROLL_INTERVAL_MS` while held outside the dead-zone, with
+ * magnitude proportional to deflection. Older revisions used a
+ * single edge-detected tick per push (felt like a button) — keeping
+ * that constant around in case we want to revert; the value is now
+ * unused but serves as historical context.
+ *
+ * `SCROLL_PIXELS_PER_UNIT` is the per-tick delta at full tilt; the
+ * actual scroll speed is `deflection × SCROLL_PIXELS_PER_UNIT ×
+ * (1000 / SCROLL_INTERVAL_MS)` px/sec. At our defaults (12 px ×
+ * 33Hz), full tilt = ~400 px/sec, which matches a moderate mouse-
+ * wheel flick without runaway scroll.
  */
-const SCROLL_PIXELS_PER_UNIT = 120;
+const SCROLL_INTERVAL_MS = 30;
+const SCROLL_PIXELS_PER_UNIT = 12;
 
 /* ---------------------------------------------------------------------------
  *  Direction helper.
@@ -241,14 +249,17 @@ function isScrollable(el: Element, axis: "x" | "y"): boolean {
  *  -------------------------------------------------------------------------*/
 
 /**
- * Right-stick tracking shape. We don't store the raw X/Y each
- * frame (that would imply continuous scroll while held — see
- * below); instead we store the *dominant axis* of the previous
- * frame so we can edge-detect a fresh push out of the dead-zone.
- * `null` means "inside the dead-zone" (no scroll triggered last
- * frame); `"x"` / `"y"` means "pushed along this axis last
- * frame" (next non-zero tick in the same axis is a repeat, which
- * we currently don't auto-fire).
+ * Right-stick tracking shape. We track the dominant axis of the
+ * current frame so we can keep scrolling while the stick is held,
+ * and we keep a timestamp of the last scroll tick so we can rate-
+ * limit dispatch to a comfortable scroll-rate (every ~30ms, ~33Hz)
+ * rather than firing on every rAF frame (~16ms, 60Hz) which would
+ * feel like runaway scroll.
+ *
+ * `rightAxis = null` means "inside the dead-zone" — no scroll
+ * triggered (this frame or any future frame until the stick exits
+ * the dead-zone again). When non-null, we fire a tick each time
+ * the throttle interval elapses.
  */
 type RightStickAxis = "x" | "y" | null;
 
@@ -260,13 +271,15 @@ interface State {
    *  dispatch on edge (push -> fires once; release -> no-op). */
   stick: Dir | null;
   dpad: Dir | null;
-  /** Dominant axis of last frame's right-stick deflection. */
+  /** Dominant axis of the current frame's right-stick deflection. */
   rightAxis: RightStickAxis;
-  /** Last wheel delta we dispatched (after magnitude scaling).
-   *  Tracked so we only fire on the edge: leaving the dead-zone
-   *  triggers one tick; releasing the stick resets the axis so the
-   *  next push fires again. */
+  /** Stick deflection magnitude this frame (signed, −1..+1) — the
+   *  per-tick delta will be `magnitude × SCROLL_PIXELS_PER_UNIT`. */
   rightDelta: number;
+  /** `performance.now()` at the last scroll tick we dispatched.
+   *  -1 when no tick has fired yet (initial state, after a release,
+   *  or after a long idle gap). */
+  lastTickAt: number;
 }
 
 function empty(): State {
@@ -278,6 +291,7 @@ function empty(): State {
     dpad: null,
     rightAxis: null,
     rightDelta: 0,
+    lastTickAt: -1,
   };
 }
 
@@ -288,8 +302,8 @@ function empty(): State {
 
 
 function read(navigator: Navigator): State {
-  const pads = navigator.getGamepads?.() ?? [];
   const next = empty();
+  const pads = navigator.getGamepads?.() ?? [];
   for (let i = 0; i < pads.length; i++) {
     const pad = pads[i];
     if (!pad) continue;
@@ -313,8 +327,9 @@ function read(navigator: Navigator): State {
     if (stick) next.stick = stick;
 
     // Right stick is reserved for scrolling. We carry the per-frame
-    // dominant axis + signed magnitude; the dispatch step converts
-    // this into a wheel event on the edge out of the dead-zone.
+    // dominant axis + signed magnitude; the dispatch step fires
+    // scroll ticks on a fixed interval while the stick is held
+    // outside the dead-zone (continuous-scroll behaviour).
     const rs = readRightStick(pad);
     next.rightAxis = rs.axis;
     next.rightDelta = rs.magnitude * SCROLL_PIXELS_PER_UNIT;
@@ -322,7 +337,7 @@ function read(navigator: Navigator): State {
   return next;
 }
 
-function dispatch(prev: State, next: State): State {
+function dispatch(prev: State, next: State, now: number): State {
   // Buttons: edge-detect (only fire on the press, not while held).
   if (!prev.primary && next.primary) sendKey("Enter");
   if (!prev.cancel && next.cancel) sendKey("Escape");
@@ -345,26 +360,28 @@ function dispatch(prev: State, next: State): State {
     }
   }
 
-  // Right stick → scroll. Fire on the *transition into* the deflection
-  // zone (either the dead-zone's outer edge or a swap between axis
-  // directions). Holding the stick at full tilt does not auto-repeat
-  // — that would feel like runaway scroll; users release + re-push
-  // for each tick. Edge cases:
-  //   - prevAxis=null, nextAxis="x"  → push-out, fire scroll.
-  //   - prevAxis=null, nextAxis="y"  → push-out, fire scroll.
-  //   - prevAxis="x", nextAxis="y"  → swap, fire scroll on y axis.
-  //   - prevAxis="x", nextAxis="x"  → held tilt, no fire (repeat
-  //     would surprise the user).
-  //   - prevAxis="x", nextAxis=null → release, no fire. Resets the
-  //     axis so the next push fires.
-  if (next.rightAxis !== prev.rightAxis && next.rightAxis !== null) {
+  // Right stick → continuous scroll. Fire a tick whenever the
+  // stick is held outside the dead-zone AND the throttle interval
+  // has elapsed since the last tick. The first push fires
+  // immediately (no debounce); subsequent ticks are rate-limited
+  // to `SCROLL_INTERVAL_MS` (~33Hz), which feels like a real wheel
+  // and avoids the runaway-feel of dispatching on every rAF frame.
+  //
+  // Releasing the stick resets `lastTickAt` so the next push fires
+  // its leading tick promptly even if a long time has passed.
+  let lastTickAt = next.lastTickAt;
+  if (next.rightAxis === null) {
+    lastTickAt = -1;
+  } else if (lastTickAt < 0 || now - lastTickAt >= SCROLL_INTERVAL_MS) {
     const start = document.activeElement instanceof Element
       ? document.activeElement
       : null;
     const dx = next.rightAxis === "x" ? next.rightDelta : 0;
     const dy = next.rightAxis === "y" ? next.rightDelta : 0;
     scrollByNear(start, dx, dy);
+    lastTickAt = now;
   }
+  next.lastTickAt = lastTickAt;
 
   return next;
 }
@@ -381,6 +398,8 @@ export function installGamepadAdapter(): () => void {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     return () => {};
   }
+  const now = () =>
+    typeof performance !== "undefined" ? performance.now() : Date.now();
   function start() {
     if (active || typeof requestAnimationFrame === "undefined") return;
     const pads = navigator.getGamepads?.() ?? [];
@@ -403,7 +422,7 @@ export function installGamepadAdapter(): () => void {
   }
   function tick() {
     if (!active) return;
-    prev = dispatch(prev, read(navigator));
+    prev = dispatch(prev, read(navigator), now());
     rafId = requestAnimationFrame(tick);
   }
   // Hot-plug: a controller connecting starts the loop; disconnecting
