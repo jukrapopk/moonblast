@@ -153,6 +153,36 @@ export function Modal({
     // is yanked back to the panel on the next frame. Covers all
     // focusin paths (mousedown, programmatic focus, Tab's natural
     // walk into the document body, etc).
+    //
+    // Exception: focus landing inside a sibling floating UI (a Select
+    // dropdown, a ContextMenu, another Modal) is left alone. Those
+    // are deliberate user actions — clicking a Select trigger inside
+    // the modal opens the dropdown panel and moves focus into an
+    // option; the sanitizer must not steal that focus back to the
+    // modal panel's first focusable (the X close button). Matches
+    // any ancestor marked as a "floating UI root" via role=dialog /
+    // role=listbox / role=menu / role=tooltip.
+    function isInsideFloatingUi(target: EventTarget | null): boolean {
+      let cur: Node | null = target instanceof Node ? target : null;
+      while (cur && cur !== document.body) {
+        if (!(cur instanceof Element)) {
+          cur = cur.parentNode;
+          continue;
+        }
+        const role = cur.getAttribute?.("role");
+        if (
+          role === "dialog" ||
+          role === "listbox" ||
+          role === "menu" ||
+          role === "tooltip" ||
+          cur.hasAttribute("data-modal-panel")
+        ) {
+          return true;
+        }
+        cur = cur.parentElement;
+      }
+      return false;
+    }
     function onFocusIn(e: FocusEvent) {
       if (closed) return;
       const panel = panelElRef.current;
@@ -160,11 +190,17 @@ export function Modal({
       const target = e.target;
       if (target instanceof Node && panel.contains(target)) return;
       if (target === panel) return;
+      if (isInsideFloatingUi(target)) return;
       // Defer so we don't fight the event that triggered the focus
       // shift (e.g. an overlay mousedown that also calls onClose —
       // we want onClose to win if it's the click-to-close path).
       requestAnimationFrame(() => {
         if (closed) return;
+        // Double-check at rAF time: focus may have moved again
+        // (e.g. Select's own initial-focus double-rAF fired). If
+        // activeElement is now inside a floating UI, leave it.
+        const active = document.activeElement;
+        if (active && !panel.contains(active) && isInsideFloatingUi(active)) return;
         applyInitialFocus();
       });
     }

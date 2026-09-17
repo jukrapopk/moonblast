@@ -115,6 +115,11 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
   // we measured matches reality. The single rAF defers past the
   // browser's first paint; `updatePosition` reads `panelRef.current`
   // which is set synchronously in the panel's ref callback.
+//
+// Deps: `[open, updatePosition]` ONLY. Including `pos` causes an
+// infinite loop — `updatePosition` calls `setPos` with a fresh object
+// literal every run, which the parent re-renders sees as a change,
+// which re-runs this effect, which schedules another rAF, etc.
   useEffect(() => {
     if (!open) return;
     const id = requestAnimationFrame(() => updatePosition());
@@ -125,7 +130,7 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [open, updatePosition, pos]);
+  }, [open, updatePosition]);
 
   // Focus trap for Escape handling, Tab trapping, and spatial
   // scope. We pass `autoFocus: false` so the trap doesn't race
@@ -142,7 +147,7 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
   // When the panel opens, focus the currently-selected option
   // (or the first enabled option) and scroll it into view. The
   // initial scroll matters: long option lists (resolution /
-  // refresh pickers) would otherwise render from the top while
+// refresh pickers) would otherwise render from the top while
   // the active row sits below the visible area, leaving the user
   // looking at irrelevant options on first paint. We match
   // buttons to options by element index so disabled entries in
@@ -151,16 +156,14 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
   // skip past them and mis-target the focused button).
   useEffect(() => {
     if (!open) return;
+    let id2 = 0;
     const id = requestAnimationFrame(() => {
-      // Two rAFs to be sure layout has settled — `useFocusTrap`'s
-      // autoFocus also fires on a single rAF and races with us.
-      // The second rAF guarantees the panel's `scrollHeight` is
-      // accurate and that the previous focus call (from
-      // `useFocusTrap` auto-focusing the first focusable) has
-      // already happened so our `target.focus()` wins.
-      const id2 = requestAnimationFrame(() => {
+      // Two rAFs to be sure layout has settled and the panel's
+      // `scrollHeight` is accurate by the time we measure.
+      id2 = requestAnimationFrame(() => {
+        id2 = 0;
         const panel = panelRef.current;
-        if (!panel) return;
+        if (!panel || !panel.isConnected) return;
         const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>("button"));
         const target =
           buttons.find((b, i) => i >= (selectedIndex ?? -1) && !b.disabled) ??
@@ -174,11 +177,11 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
         const targetCenter = offsetInPanel + targetRect.height / 2;
         panel.scrollTop = targetCenter - panel.clientHeight / 2;
       });
-      // Stash cleanup on the outer rAF — the inner rAF will run
-      // before this outer one is naturally GC'd.
-      return () => cancelAnimationFrame(id2);
     });
-    return () => cancelAnimationFrame(id);
+    return () => {
+      cancelAnimationFrame(id);
+      if (id2) cancelAnimationFrame(id2);
+    };
   }, [open, selectedIndex]);
 
   // Keep the focused option in view as the user navigates with
