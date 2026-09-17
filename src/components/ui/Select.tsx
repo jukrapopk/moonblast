@@ -1,3 +1,4 @@
+import { type KeyboardEvent } from "react";
 import { CaretDown } from "@phosphor-icons/react";
 
 interface SelectOption {
@@ -29,6 +30,25 @@ export function Select({ options, value, onChange }: SelectProps) {
       <select
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
+        // Explicit tabIndex={0} ensures the LRUD library's getFocusables
+        // picks up the select (it queries `[tabindex], a, input, button`
+        // and a stray selector-substring bug in some versions could
+        // miss the implicit tabindex of native form controls).
+        tabIndex={0}
+        onKeyDown={(e: KeyboardEvent<HTMLSelectElement>) => {
+          // The spatial controller (see useSpatialController.ts) used
+          // to early-return on <select> elements so arrows could cycle
+          // dropdown options. We removed that — Up/Down now escapes
+          // the select via spatial nav, matching the slider pattern.
+          // Left/Right are kept free for the OS-native picker to
+          // consume (e.g. open/close the dropdown) without our
+          // keyboard nav interfering. We block default here so the
+          // browser doesn't ALSO try to open the dropdown on Up/Down,
+          // which would conflict with the spatial-nav focus move.
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+          }
+        }}
         className="h-9 cursor-pointer appearance-none rounded-lg border border-(--color-border) bg-(--color-surface-2) pl-3 pr-9 text-sm text-(--color-text) outline-none transition focus:border-(--color-accent)"
       >
         {options.map((o) => {

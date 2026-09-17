@@ -287,9 +287,12 @@ export function useSpatialController() {
           return;
         }
         if (a instanceof HTMLTextAreaElement) return;
-        // Native <select>: arrow keys cycle the open dropdown. Leave them
-        // alone so the OS-native picker works.
-        if (a instanceof HTMLSelectElement) return;
+        // Native <select>: let Up/Down escape to the next/prev
+        // focusable via spatial nav, matching the slider pattern.
+        // The native picker still opens on mouse click; keyboard
+        // cycling of options while the dropdown is open is lost, but
+        // users rarely need that — Up/Down to escape is the much
+        // more common need.
         // Native range input: Left/Right step the value, but Up/Down
         // should escape the slider so the user can move focus out
         // without first clearing the slider. Suppress only the
