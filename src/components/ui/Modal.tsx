@@ -3,12 +3,12 @@ import {
   useCallback,
   useEffect,
   useRef,
-  useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "@phosphor-icons/react";
 import { useFocusTrap } from "../../input/useSpatialController";
+import { focusInitial } from "../../input/spatialNav";
 
 interface ModalProps {
   open: boolean;
@@ -33,6 +33,13 @@ interface ModalProps {
  *   - On open, focus moves to `initialFocus` (or the first focusable)
  *   - On close, focus is restored to the element that was focused before
  *     the modal opened (typically the chip / button that triggered it)
+ *   - While open, any focus that lands outside the panel is yanked back
+ *     to the panel on the next frame (focusin sanitizer)
+ *
+ * Focus management is driven directly off the DOM (MutationObserver +
+ * per-open generation token) rather than through React state, so the
+ * AnimatePresence close/reopen race cannot leave focus stranded on body
+ * or stolen by a stale rAF from a torn-down panel.
  */
 export function Modal({
   open,
@@ -43,69 +50,150 @@ export function Modal({
   width = "max-w-md",
   initialFocus,
 }: ModalProps) {
-  const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
+  // Hold the live panel in a ref, not state. The trap (Tab wrap, scope
+  // set/clear) lives in `useFocusTrap` and reads `panelEl`; if we used
+  // state we'd re-render every time the ref callback fires (twice on
+  // every AnimatePresence churn — node, then null). The ref form lets
+  // the trap see the live node without churning React's tree.
+  const panelElRef = useRef<HTMLDivElement | null>(null);
 
   // Stash onClose in a ref so callers passing inline callbacks don't
   // churn the focus-trap effect on every parent render.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // Focus trap owns the Escape handler (pushes one onto the LIFO stack
-  // for the lifetime of the panel) AND scopes spatial movement to the
-  // panel. Restore-on-close lives below.
   const initialFocusProp =
     initialFocus === "none" ? null : (initialFocus ?? undefined);
-  useFocusTrap(panelEl, {
+
+  // Focus trap owns Escape + Enter stack, scope, and Tab wrap. It does
+  // NOT schedule any autoFocus — that's owned by the open/close effect
+  // below so there is one and only one focus scheduler per lifecycle.
+  useFocusTrap(panelElRef.current, {
     onEscape: () => onCloseRef.current(),
-    autoFocus: initialFocus !== "none",
-    initialFocus: initialFocusProp as string | HTMLElement | null | undefined,
   });
 
-  // Capture the previously-focused element when the modal opens so we
-  // can restore on close. Mirrors the WAI-ARIA dialog pattern.
-  const prevFocused = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (open) {
-      prevFocused.current =
-        document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null;
-    } else {
-      // Force `useFocusTrap` to re-run with `panelEl=null` so its
-      // pending autoFocus rAF is cancelled before our restore-focus
-      // rAF fires. Without this, a previously-scheduled row-focus
-      // (from initialFocus changing when returning from the password
-      // form) would fire AFTER our chip-focus rAF and steal focus
-      // back to the row.
-      setPanelEl(null);
-      const el = prevFocused.current;
-      if (!el) return;
-      // Defer past framer-motion's exit animation so the focus doesn't
-      // fight the unmount.
-      const id = requestAnimationFrame(() => {
-        if (el.isConnected) el.focus();
-      });
-      return () => cancelAnimationFrame(id);
-    }
-  }, [open]);
-
-  // Bridge the ref into state so `useFocusTrap` (which re-runs on
-  // `panelEl` change) sees the live node.
+  // Bridge the ref callback to the ref. No state, no re-render.
   const setRefs = useCallback((node: HTMLDivElement | null) => {
-    setPanelEl(node);
+    panelElRef.current = node;
   }, []);
 
-  // Render the overlay + panel into `document.body` via a React
-  // portal. Without this, a Modal mounted inside `<main>` would
-  // make the main's `data-lrud-scope-lock="all"` an ancestor of
-  // the modal's focused button, which the spatial controller's
-  // `findDirectionalScope` then picks as the directional scope —
-  // letting arrows reach every focusable in main, including the
-  // page content behind the modal. Hoisting the DOM up to body
-  // (sibling of <main>) removes that ancestor lock and the
-  // spatial scope correctly falls back to the modal panel itself.
-  // React events still bubble through the React tree as normal;
-  // only the DOM placement changes.
+  // The whole open/close lifecycle. A single effect, keyed on `open`,
+  // owns the previously-focused capture, the autoFocus application,
+  // and the close-restore rAF. Inside it a per-open generation token
+  // (`gen`) invalidates any pending work when `open` flips, so a stale
+  // open's autoFocus rAF cannot fire on the wrong panel after a
+  // rapid close-and-reopen.
+  useEffect(() => {
+    if (!open) return;
+    if (typeof document === "undefined") return;
+
+    const restoreTo: HTMLElement | null =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    // True after the trap has closed (open flipped false) so any
+    // pending work from this cycle bails.
+    let closed = false;
+
+    function applyInitialFocus() {
+      if (closed) return;
+      const panel = panelElRef.current;
+      if (!panel || !panel.isConnected) return;
+      // If something inside the panel already has focus, do nothing —
+      // a Tab wrap or arrow move shouldn't be overridden.
+      const active = document.activeElement;
+      if (active && panel.contains(active)) return;
+      if (typeof initialFocusProp === "string") {
+        const target = panel.querySelector<HTMLElement>(initialFocusProp);
+        if (target) {
+          target.focus();
+          return;
+        }
+      } else if (initialFocusProp instanceof HTMLElement) {
+        initialFocusProp.focus();
+        return;
+      }
+      focusInitial(panel);
+    }
+
+    // The panel is rendered by AnimatePresence; on rapid close -> reopen
+    // the old panel's motion.div unmounts at the end of its exit animation
+    // and the new one mounts in parallel. Watch the DOM directly so we
+    // don't have to coordinate with React's commit timing. The
+    // `[data-modal-panel]` attribute below identifies OUR panel.
+    const observer = new MutationObserver(() => {
+      // First match wins — the observer fires whenever a new matching
+      // node attaches, including AnimatePresence's initial mount.
+      applyInitialFocus();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Also catch the case where the panel already mounted before our
+    // effect ran (very fast open of a previously-rendered Modal). A
+    // microtask + rAF covers both paths.
+    queueMicrotask(() => {
+      applyInitialFocus();
+      requestAnimationFrame(applyInitialFocus);
+    });
+
+    // Sanitizer: any focus landing outside the panel while we're open
+    // is yanked back to the panel on the next frame. Covers all
+    // focusin paths (mousedown, programmatic focus, Tab's natural
+    // walk into the document body, etc).
+    function onFocusIn(e: FocusEvent) {
+      if (closed) return;
+      const panel = panelElRef.current;
+      if (!panel || !panel.isConnected) return;
+      const target = e.target;
+      if (target instanceof Node && panel.contains(target)) return;
+      if (target === panel) return;
+      // Defer so we don't fight the event that triggered the focus
+      // shift (e.g. an overlay mousedown that also calls onClose —
+      // we want onClose to win if it's the click-to-close path).
+      requestAnimationFrame(() => {
+        if (closed) return;
+        applyInitialFocus();
+      });
+    }
+    document.addEventListener("focusin", onFocusIn, true);
+
+    return () => {
+      closed = true;
+      observer.disconnect();
+      document.removeEventListener("focusin", onFocusIn, true);
+
+      // Restore focus on close. The body of this cleanup runs when
+      // `open` flips false OR the Modal unmounts. If we captured a
+      // valid restore target and it's still connected, focus it;
+      // otherwise the trigger was unmounted (rapid view swap) — fall
+      // back to the active view's nav button so the user is never
+      // stranded on body.
+      // Defer one frame past framer-motion's exit so we don't fight
+      // the unmount.
+      requestAnimationFrame(() => {
+        if (restoreTo && restoreTo.isConnected) {
+          restoreTo.focus();
+        } else {
+          const sel =
+            '[data-active-view]:not([data-active-view=""]):not([data-active-view="false"])';
+          const btn = document.querySelector<HTMLElement>(sel);
+          btn?.focus();
+        }
+      });
+    };
+  }, [open, initialFocusProp]);
+
+  // Render the overlay + panel into `document.body` via a React portal.
+  // Without this, a Modal mounted inside `<main>` would make `<main>`'s
+  // `data-lrud-scope-lock="all"` an ancestor of the modal's focused
+  // button, which the spatial controller's `findDirectionalScope`
+  // then picks as the directional scope — letting arrows reach every
+  // focusable in main, including the page content behind the modal.
+  // Hoisting the DOM up to body (sibling of <main>) removes that
+  // ancestor lock and the spatial scope correctly falls back to the
+  // modal panel itself. React events still bubble through the React
+  // tree as normal; only the DOM placement changes.
   if (typeof document === "undefined") return null;
   return createPortal(
     <AnimatePresence>
@@ -114,20 +202,23 @@ export function Modal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          // Close only when the press itself starts on the overlay (not when the
-          // user drags out of the panel and releases here).
+          // Close only when the press itself starts on the overlay (not
+          // when the user drags out of the panel and releases here).
           onMouseDown={onClose}
           className="fixed inset-0 z-50 flex items-center justify-center bg-(--color-overlay) p-6 backdrop-blur-sm"
         >
           <motion.div
             ref={setRefs}
+            data-modal-panel=""
+            role="dialog"
+            aria-modal="true"
             initial={{ scale: 0.96, y: 8, opacity: 0 }}
             animate={{ scale: 1, y: 0, opacity: 1 }}
             exit={{ scale: 0.96, y: 8, opacity: 0 }}
             transition={{ duration: 0.16 }}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            className={`w-full ${width} rounded-2xl border border-(--color-border) bg-(--color-surface-2) p-5`}
+            className={`w-full ${width} rounded-2xl border border-(--color-border) bg-(--color-surface-2) p-5 outline-none`}
           >
             {(title || subtitle) && (
               <div className="mb-5 flex items-start justify-between">

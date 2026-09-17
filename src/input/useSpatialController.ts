@@ -369,6 +369,15 @@ export function useSpatialController() {
       //    focus the TopBar button for the currently-active view, so the
       //    user gets a consistent "jump back to nav" escape hatch from
       //    anywhere on the page (e.g. from inside a Settings row).
+      //
+      //    Suppressed while a modal is open (`spatialScope` is set).
+      //    Escape may briefly find no stack handler during the ~16ms
+      //    close-restore window in Modal.tsx (its handler has popped,
+      //    but focus hasn't moved back to the trigger yet). Without
+      //    this guard that window would let `focusActiveViewButton()`
+      //    fire and yank focus to the TopBar while the user is still
+      //    looking at the modal. Modal.tsx's `focusin` sanitizer owns
+      //    focus during the open lifecycle — leave it alone.
       if (e.key === "Escape") {
         const h = escapeStack.top();
         if (h) {
@@ -376,6 +385,7 @@ export function useSpatialController() {
           h(e);
           return;
         }
+        if (readScope()) return;
         const btn = focusActiveViewButton();
         if (btn) e.preventDefault();
         return;
@@ -434,23 +444,23 @@ export { focusInitial };
 /**
  * Lightweight "focus trap" used by modals. While active, the spatial
  * scope is set to `panel` so arrows can move *within* the panel but not
- * escape it. Returned function undoes both: pops the escape / enter
- * handlers and clears the scope.
+ * escape it; Tab / Shift+Tab wraps inside the panel's focusables; the
+ * escape / enter handlers pop on cleanup.
+ *
+ * `useFocusTrap` does NOT schedule any autoFocus or focus restoration.
+ * That lifecycle is owned by `Modal.tsx` directly (DOM-MutationObserver
+ * + generation token + close-restore rAF). Doing it here too would
+ * create the two-rAF race that caused focus to land on body on rapid
+ * open/close. Single source of truth: Modal owns open + close.
  */
 export function useFocusTrap(
   panel: HTMLElement | null,
   opts: {
     onEscape: () => void;
     onEnter?: () => void;
-    /** Called once the panel is mounted. Default: focus the first
-     *  focusable inside the panel. */
-    initialFocus?: string | HTMLElement | null;
-    /** Set to false to skip the autoFocus behaviour (e.g. when the
-     *  caller wants to manage it themselves). */
-    autoFocus?: boolean;
   },
 ): void {
-  const { onEscape, onEnter, initialFocus, autoFocus = true } = opts;
+  const { onEscape, onEnter } = opts;
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
   const onEnterRef = useRef(onEnter);
@@ -458,7 +468,6 @@ export function useFocusTrap(
 
   useEffect(() => {
     if (!panel) return;
-    // Push handlers + scope, then autoFocus.
     const popEscape = pushEscapeHandler(() => onEscapeRef.current());
     const popEnter = onEnterRef.current
       ? pushEnterHandler(() => onEnterRef.current!())
@@ -466,16 +475,15 @@ export function useFocusTrap(
     const prevScope = readScope();
     setSpatialScope(panel);
 
-    // Tab / Shift+Tab trap — arrows are already trapped via
-    // `setSpatialScope`. While a modal panel is mounted, browser-native
-    // Tab traversal would walk out of the panel (it's just a <div> in
-    // the page DOM, not a real dialog). Wrap Tab around the panel's
-    // first/last focusable so focus stays inside.
+    // Tab / Shift+Tab wrap. Arrows are trapped via `setSpatialScope`.
+    // Without this, browser-native Tab traversal would walk out of
+    // the panel (it's just a <div> in the page DOM, not a real dialog).
     const PANEL_FOCUSABLES =
       'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     function onTabKey(e: KeyboardEvent) {
       if (e.key !== "Tab") return;
-      const all = Array.from(panel!.querySelectorAll<HTMLElement>(PANEL_FOCUSABLES));
+      const p = panel!;
+      const all = Array.from(p.querySelectorAll<HTMLElement>(PANEL_FOCUSABLES));
       const focusables = all.filter(
         (el) => el.offsetParent !== null || el === document.activeElement,
       );
@@ -486,7 +494,7 @@ export function useFocusTrap(
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
-      const inside = active instanceof Node && panel!.contains(active);
+      const inside = active instanceof Node && p.contains(active);
       if (e.shiftKey) {
         if (!inside || active === first) {
           e.preventDefault();
@@ -501,33 +509,11 @@ export function useFocusTrap(
     }
     window.addEventListener("keydown", onTabKey, true);
 
-    if (autoFocus) {
-      // Defer one frame so the panel's framer-motion enter animation
-      // hasn't stolen focus mid-transition.
-      const id = requestAnimationFrame(() => {
-        if (!panel.isConnected) return;
-        if (typeof initialFocus === "string") {
-          focusInitial(panel, initialFocus);
-        } else if (initialFocus instanceof HTMLElement) {
-          initialFocus.focus();
-        } else {
-          focusInitial(panel);
-        }
-      });
-      return () => {
-        cancelAnimationFrame(id);
-        window.removeEventListener("keydown", onTabKey, true);
-        popEscape();
-        popEnter?.();
-        setSpatialScope(prevScope);
-      };
-    }
-
     return () => {
       window.removeEventListener("keydown", onTabKey, true);
       popEscape();
       popEnter?.();
       setSpatialScope(prevScope);
     };
-  }, [panel, autoFocus, initialFocus]);
+  }, [panel]);
 }

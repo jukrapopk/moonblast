@@ -51,7 +51,6 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
 // right-click doesn't yank focus off the previously-focused element.
   useFocusTrap(panelEl, {
     onEscape: () => onCloseRef.current(),
-    autoFocus: state?.keyboard === true,
   });
 
   // Capture outside-close / blur / scroll semantics (LRUD handles Up/Down).

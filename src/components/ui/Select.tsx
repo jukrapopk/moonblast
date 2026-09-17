@@ -137,7 +137,6 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
   // below.
   useFocusTrap(panelEl, {
     onEscape: () => close(),
-    autoFocus: false,
   });
 
   // When the panel opens, focus the currently-selected option
