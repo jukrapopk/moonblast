@@ -127,11 +127,17 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
     };
   }, [open, updatePosition, pos]);
 
-  // Focus trap for Escape handling and to anchor the spatial scope
-  // to the panel so D-pad / arrows don't leak out. Tab trap is
-  // handled by `useFocusTrap` natively.
+  // Focus trap for Escape handling, Tab trapping, and spatial
+  // scope. We pass `autoFocus: false` so the trap doesn't race
+  // our own focus-to-selected effect — the autoFocus branch in
+  // `useFocusTrap` schedules a single `requestAnimationFrame`
+  // that lands on the first focusable, which would steal focus
+  // from the selected option before our (double-rAF) selection
+  // focus call fires on first open. We own the initial focus
+  // below.
   useFocusTrap(panelEl, {
     onEscape: () => close(),
+    autoFocus: false,
   });
 
   // When the panel opens, focus the currently-selected option
