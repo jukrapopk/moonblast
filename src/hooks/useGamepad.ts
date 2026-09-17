@@ -17,6 +17,7 @@
 import { useEffect } from "react";
 import { dispatchDirection } from "../input/useSpatialController";
 import { useSpatialControllerInternals } from "../input/controllerInternals";
+import { enterLrudMode } from "./useLrudMode";
 
 const ENTER_KEY = "Enter";
 const ESCAPE_KEY = "Escape";
@@ -58,6 +59,13 @@ export function useGamepad() {
       const pad = pads.find((p) => p && p.connected && isLikelyGamepad(p)) ?? null;
 
       if (pad) {
+        // Treat every connected pad frame as LRUD-mode activity so
+        // the cursor hides and hover styles drop while the user is
+        // holding the controller. The window-level mouse listeners
+        // in `useLrudMode` will exit LRUD mode the moment the user
+        // moves the mouse, so this stays self-correcting without
+        // needing a separate "exit on gamepad idle" timer.
+        enterLrudMode();
         // Face + shoulder buttons.
         const faces: [number, "enter" | "escape" | "tab-prev" | "tab-next"][] = [
           [0, "enter"],
