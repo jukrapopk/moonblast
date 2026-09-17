@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pushEscapeHandler } from "../../input/useSpatialController";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
+import { Toggle } from "./Toggle";
 import { Input } from "./Input";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyMessage } from "./EmptyMessage";
@@ -21,6 +22,7 @@ import {
   wifiConnectWithPassword,
   wifiDisconnect,
   wifiForget,
+  wifiSetRadio,
   type WifiNetwork,
 } from "../../hooks/useWifi";
 import { useContextMenu } from "./ContextMenu";
@@ -49,13 +51,11 @@ interface WifiModalProps {
   /** SSID of the currently connected network, or null if disconnected. */
   currentSsid: string | null;
   /**
-   * Radio state from the parent's shared `useWifi` subscription.
-   * `false` = adapter exists but radio off (skip scans, show the
-   * off-hint, disable Rescan); `true`/`null` = on or unknown.
-   * `null` covers loading and no-adapter — both fall back to the
-   * old behavior (scan optimistically). The parent refreshes this
-   * on window focus, so toggling WiFi in OS Settings with the
-   * modal open updates the modal on return — no modal-local poll.
+   * Radio state from the parent's shared `useWifi` subscription. Seeds
+   * the modal's own `liveRadioOn` on open; `false` = adapter exists but
+   * radio off (skip scans, show the off-hint, disable Rescan); `true`/
+   * `null` = on or unknown. `null` covers loading and no-adapter — both
+   * fall back to the old behavior (scan optimistically).
    */
   radioOn: boolean | null;
 }
@@ -308,11 +308,24 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   // on). `null` when nothing is happening.
   const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" | "forget" } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Derived from the parent's subscription — no local fetch, no poll.
+  const [radioBusy, setRadioBusy] = useState(false);
+  // Local copy of the radio state so the header toggle reflects a
+  // just-performed change immediately. Seeded from the parent's shared
+  // subscription on open, but refreshed with a direct one-shot fetch
+  // (bypassing that subscription's `useDebouncedRead` 2s collapse
+  // window) after every toggle here — mirrors `liveSsid` below, and the
+  // same fix applied to the Bluetooth modal's radio toggle. Without
+  // this, toggling shortly after the modal's open-triggered refresh can
+  // silently collapse with that earlier read and never visually update,
+  // even though the radio itself did flip.
+  const [liveRadioOn, setLiveRadioOn] = useState<boolean | null>(radioOn);
+  useEffect(() => {
+    if (open) setLiveRadioOn(radioOn);
+  }, [open, radioOn]);
   // When off, scans are pointless (`netsh show networks` can only
   // return the empty cache), so the list stays empty with an off-hint
   // and Rescan is disabled until the radio comes back on.
-  const radioOff = radioOn === false;
+  const radioOff = liveRadioOn === false;
   // Local copy of the current SSID so connect/disconnect reflect
   // immediately. Seeded from the prop on open; re-fetched from the
   // OS after every connect/disconnect, and synced from the parent
@@ -346,21 +359,40 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   // show a stale in-flight subtitle. The chip picks up the real state
   // immediately via the parent's refresh effect.
   useEffect(() => {
-    if (!open) setBusy(null);
+    if (!open) {
+      setBusy(null);
+      setRadioBusy(false);
+    }
   }, [open]);
 
-  // Scan on open and on off→on transitions (parent refreshes `radioOn`
-  // on window focus, so returning from OS Settings auto-populates).
-  // On→off clears the now-stale list so the off-hint shows.
+  // Scan on open and on off→on transitions (including the in-app toggle
+  // below). On→off clears the now-stale list so the off-hint shows, and
+  // backs out of the password form (its target network is no longer
+  // reachable).
   useEffect(() => {
     if (!open) return;
     if (radioOff) {
       clear();
+      setPasswordTarget(null);
       return;
     }
     scan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, radioOff]);
+
+  async function handleToggleRadio(next: boolean) {
+    setRadioBusy(true);
+    setError(null);
+    try {
+      await wifiSetRadio(next);
+      const c = await fetchWifiCurrent();
+      setLiveRadioOn(c ? c.radioOn : next);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRadioBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -539,6 +571,17 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       onClose={onClose}
       title="Wi-Fi"
       width="max-w-sm"
+      headerAction={
+        radioBusy ? (
+          <Spinner size={14} />
+        ) : (
+          <Toggle
+            checked={liveRadioOn === true}
+            onChange={(v) => void handleToggleRadio(v)}
+            disabled={liveRadioOn === null}
+          />
+        )
+      }
       // Focus the Back button when the password form is the modal's
       // content. When returning from the password form back to the
       // list, focus the row the user came from (their last-targeted
@@ -573,7 +616,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
               </div>
             ) : networks.length === 0 ? (
               <EmptyMessage>
-                {radioOff ? "Turn Wi-Fi on in Windows settings to see networks" : "No networks found"}
+                {radioOff ? "Turn Wi-Fi on to see networks" : "No networks found"}
               </EmptyMessage>
             ) : (
               networks.map((net) => {

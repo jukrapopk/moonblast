@@ -15,6 +15,7 @@ mod cmd;
 mod display;
 mod hdr;
 mod logging;
+mod radio;
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
 /// window for the same host+app while one is already running. The host-side
@@ -2497,6 +2498,15 @@ fn wifi_forget(ssid: String) -> Result<(), String> {
     wifi::forget(&ssid)
 }
 
+/// Turn the WiFi radio on or off (same API Windows' own Quick Settings
+/// toggle uses).
+#[tauri::command]
+async fn wifi_set_radio(on: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || wifi::set_radio(on))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Bluetooth radio on/off state for the TopBar chip. `supported: false`
 /// means no Bluetooth radio at all — the UI hides the chip in that case.
 #[tauri::command]
@@ -2949,6 +2959,7 @@ pub fn run() {
             wifi_connect_with_password,
             wifi_disconnect,
             wifi_forget,
+            wifi_set_radio,
             bluetooth_radio_status,
             bluetooth_set_radio,
             bluetooth_paired_devices,

@@ -6,8 +6,9 @@
 //! for read opcodes — the wlan service's per-client cache goes stale. Only
 //! the `WlanScan` write opcode is reliable; the read opcodes don't survive
 //! multiple opens, so we shell out to `netsh` for everything that reads.
-//! Radio on/off is the user's job — the modal opens Windows Wi-Fi settings
-//! (`ms-settings:network-wifi`) for that.
+//! Radio on/off (`set_radio`) goes through the shared `Windows.Devices.Radios`
+//! helper in `radio.rs` (`RadioKind::WiFi`) — the same WinRT API used for
+//! Bluetooth's radio toggle and Windows' own Quick Settings toggle.
 //!
 //! `netsh wlan ...` — the reliable read path:
 //! - `netsh wlan show interfaces`     → current connection (chip)
@@ -610,6 +611,14 @@ pub fn disconnect() -> Result<(), String> {
         return Ok(());
     }
     Err(out.trim().to_string())
+}
+
+/// Turn the WiFi radio on or off, via the shared `Windows.Devices.Radios`
+/// helper (the same API Windows' own Quick Settings toggle uses). Can't
+/// override a physical hardware kill switch if the machine has one —
+/// Windows reports that as a denied request, surfaced here as an `Err`.
+pub fn set_radio(on: bool) -> Result<(), String> {
+    crate::radio::set_radio(windows::Devices::Radios::RadioKind::WiFi, on)
 }
 
 /// Delete a saved WiFi profile ("forget" the network). No-op when no

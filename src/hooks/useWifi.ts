@@ -131,3 +131,9 @@ export async function wifiDisconnect(): Promise<void> {
 export async function wifiForget(ssid: string): Promise<void> {
   await invoke("wifi_forget", { ssid });
 }
+
+/** Turn the WiFi radio on or off (same API Windows' own Quick Settings
+ *  toggle uses). Can't override a physical hardware kill switch. */
+export async function wifiSetRadio(on: boolean): Promise<void> {
+  await invoke("wifi_set_radio", { on });
+}

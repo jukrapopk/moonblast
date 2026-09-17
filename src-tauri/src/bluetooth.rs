@@ -8,9 +8,8 @@
 //! already a dependency for `hdr.rs`).
 //!
 //! Scope, deliberately kept modest:
-//!   - Radio on/off (`radio_status` / `set_radio`) — reliable and simple,
-//!     unlike the WiFi radio situation that pushed that module to defer to
-//!     OS settings.
+//!   - Radio on/off (`radio_status` / `set_radio`) — via the shared
+//!     `Windows.Devices.Radios` helper in `radio.rs` (also used by `wifi.rs`).
 //!   - Paired-device list with live connected state + a best-effort device
 //!     kind (from the classic Bluetooth class-of-device; LE-only devices
 //!     fall back to a generic kind since BLE has no equivalent field).
@@ -32,7 +31,8 @@
 
 #![cfg(windows)]
 
-use windows::core::{Error as WinError, Ref, HSTRING};
+use crate::radio::{self, win_err};
+use windows::core::{Ref, HSTRING};
 use windows::Devices::Bluetooth::{
     BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice, BluetoothMajorClass,
 };
@@ -40,35 +40,8 @@ use windows::Devices::Enumeration::{
     DeviceInformation, DeviceInformationCustomPairing, DeviceInformationUpdate,
     DevicePairingKinds, DevicePairingRequestedEventArgs, DeviceWatcher,
 };
-use windows::Devices::Radios::{Radio, RadioAccessStatus, RadioKind, RadioState};
+use windows::Devices::Radios::{RadioKind, RadioState};
 use windows::Foundation::TypedEventHandler;
-
-fn win_err(e: WinError) -> String {
-    e.message()
-}
-
-/// Ensure the calling thread has a WinRT apartment. All commands in this
-/// module run on a `spawn_blocking` worker thread, and WinRT calls need
-/// `RoInitialize` on each such thread before any `Devices::*` call — the
-/// pool doesn't guarantee the same thread across calls, and skipping this
-/// makes the first call on a fresh thread fail with `CO_E_NOTINITIALIZED`.
-/// Multithreaded (MTA) rather than STA: nothing here touches UI, and MTA
-/// is a superset of what these APIs need. Errors (e.g. "already
-/// initialized in a different mode") are ignored — either way COM/WinRT
-/// is live on this thread afterward.
-fn ensure_winrt() {
-    use std::cell::Cell;
-    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
-    thread_local! {
-        static INITED: Cell<bool> = const { Cell::new(false) };
-    }
-    INITED.with(|f| {
-        if !f.get() {
-            let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
-            f.set(true);
-        }
-    });
-}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,8 +60,7 @@ pub struct BluetoothRadioStatus {
 /// the same API Windows' own Quick Settings toggle uses — plus whether
 /// any paired device is currently connected (for the chip's glyph).
 pub fn radio_status() -> BluetoothRadioStatus {
-    ensure_winrt();
-    match find_bluetooth_radio() {
+    match radio::find_radio(RadioKind::Bluetooth) {
         Ok(Some(radio)) => match radio.State() {
             Ok(state) => {
                 let on = state == RadioState::On;
@@ -103,33 +75,7 @@ pub fn radio_status() -> BluetoothRadioStatus {
 
 /// Turn the Bluetooth radio on or off.
 pub fn set_radio(on: bool) -> Result<(), String> {
-    ensure_winrt();
-    let radio = find_bluetooth_radio()
-        .map_err(win_err)?
-        .ok_or_else(|| "No Bluetooth radio found".to_string())?;
-    let state = if on { RadioState::On } else { RadioState::Off };
-    let status = radio
-        .SetStateAsync(state)
-        .map_err(win_err)?
-        .get()
-        .map_err(win_err)?;
-    if status == RadioAccessStatus::Allowed {
-        Ok(())
-    } else {
-        Err(format!("Windows denied the request ({status:?})"))
-    }
-}
-
-fn find_bluetooth_radio() -> windows::core::Result<Option<Radio>> {
-    let radios = Radio::GetRadiosAsync()?.get()?;
-    let size = radios.Size()?;
-    for i in 0..size {
-        let radio = radios.GetAt(i)?;
-        if radio.Kind()? == RadioKind::Bluetooth {
-            return Ok(Some(radio));
-        }
-    }
-    Ok(None)
+    radio::set_radio(RadioKind::Bluetooth, on)
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -223,7 +169,7 @@ fn combined_selector(paired: bool) -> windows::core::Result<HSTRING> {
 
 /// Already-paired devices, for the modal's "Paired" section.
 pub fn paired_devices() -> Vec<BluetoothDeviceEntry> {
-    ensure_winrt();
+    radio::ensure_winrt();
     (|| -> windows::core::Result<Vec<BluetoothDeviceEntry>> {
         let filter = combined_selector(true)?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&filter)?.get()?;
@@ -257,7 +203,7 @@ pub fn paired_devices() -> Vec<BluetoothDeviceEntry> {
 /// Forget (unpair) a device by id. Idempotent — already-unpaired is
 /// treated as success.
 pub fn forget(id: &str) -> Result<(), String> {
-    ensure_winrt();
+    radio::ensure_winrt();
     let hid = HSTRING::from(id);
     let info = DeviceInformation::CreateFromIdAsync(&hid)
         .map_err(win_err)?
@@ -288,7 +234,7 @@ pub fn forget(id: &str) -> Result<(), String> {
 /// Windows' own "Add device" flyout. Runs for a fixed window (classic
 /// inquiry is slow to populate) then stops and returns whatever it found.
 pub fn scan(seconds: u64) -> Vec<BluetoothDeviceEntry> {
-    ensure_winrt();
+    radio::ensure_winrt();
     (|| -> windows::core::Result<Vec<BluetoothDeviceEntry>> {
         use std::sync::{Arc, Mutex};
         let filter = combined_selector(false)?;
@@ -366,7 +312,7 @@ pub fn scan(seconds: u64) -> Vec<BluetoothDeviceEntry> {
 /// opaque status) for devices that need a PIN or numeric-comparison
 /// prompt. That's a deliberate scope cut — see the module doc comment.
 pub fn pair(id: &str) -> Result<(), String> {
-    ensure_winrt();
+    radio::ensure_winrt();
     let hid = HSTRING::from(id);
     let info = DeviceInformation::CreateFromIdAsync(&hid)
         .map_err(win_err)?
