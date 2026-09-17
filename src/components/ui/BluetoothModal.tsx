@@ -4,7 +4,6 @@ import { Button } from "./Button";
 import { Toggle } from "./Toggle";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyMessage } from "./EmptyMessage";
-import { SectionLabel } from "./SectionLabel";
 import { Spinner } from "./Spinner";
 import { LoadingChip } from "./LoadingChip";
 import { BluetoothIcon } from "./BluetoothIcon";
@@ -222,7 +221,25 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
     ]);
   }
 
-  const nothingFound = paired.length === 0 && other.length === 0;
+  // Single unified list, mirroring the Wifi modal: connected first, then
+  // paired-but-not-connected, then everything else (discovered/unpaired),
+  // alphabetical within each tier. Dedupe by id — a device shouldn't
+  // normally appear in both buckets (scan only surfaces unpaired
+  // devices), but the paired entry wins if it ever does.
+  const merged: (BluetoothDevice & { paired: boolean })[] = (() => {
+    const byId = new Map<string, BluetoothDevice & { paired: boolean }>();
+    for (const d of paired) byId.set(d.id, { ...d, paired: true });
+    for (const d of other) {
+      if (!byId.has(d.id)) byId.set(d.id, { ...d, paired: false });
+    }
+    return Array.from(byId.values()).sort((a, b) => {
+      if (a.connected !== b.connected) return a.connected ? -1 : 1;
+      if (a.paired !== b.paired) return a.paired ? -1 : 1;
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+  })();
+
+  const nothingFound = merged.length === 0;
 
   return (
     <Modal open={open} onClose={onClose} title="Bluetooth" width="max-w-sm">
@@ -256,40 +273,17 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
             ) : nothingFound ? (
               <EmptyMessage>No devices found</EmptyMessage>
             ) : (
-              <>
-                {paired.length > 0 && (
-                  <>
-                    <SectionLabel>Paired</SectionLabel>
-                    {paired.map((d) => (
-                      <DeviceRow
-                        key={d.id}
-                        device={d}
-                        paired
-                        onPair={handlePair}
-                        onMenu={openDeviceMenu}
-                        busy={busy && busy.id === d.id ? { kind: busy.kind } : null}
-                        anyBusy={busy !== null}
-                      />
-                    ))}
-                  </>
-                )}
-                {other.length > 0 && (
-                  <>
-                    <SectionLabel>Other devices</SectionLabel>
-                    {other.map((d) => (
-                      <DeviceRow
-                        key={d.id}
-                        device={d}
-                        paired={false}
-                        onPair={handlePair}
-                        onMenu={openDeviceMenu}
-                        busy={busy && busy.id === d.id ? { kind: busy.kind } : null}
-                        anyBusy={busy !== null}
-                      />
-                    ))}
-                  </>
-                )}
-              </>
+              merged.map((d) => (
+                <DeviceRow
+                  key={d.id}
+                  device={d}
+                  paired={d.paired}
+                  onPair={handlePair}
+                  onMenu={openDeviceMenu}
+                  busy={busy && busy.id === d.id ? { kind: busy.kind } : null}
+                  anyBusy={busy !== null}
+                />
+              ))
             )}
           </div>
 
