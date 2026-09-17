@@ -281,8 +281,13 @@ export function Modal({
                   {title && <h2 className="text-lg font-semibold tracking-tight">{title}</h2>}
                   {subtitle && <p className="mt-0.5 text-sm text-(--color-muted)">{subtitle}</p>}
                 </div>
-                <div className="flex items-center gap-2">
-                  {headerAction}
+                {/* `flex-row-reverse` keeps X visually rightmost (the
+                 *  header action, e.g. a toggle, sits to its left) while
+                 *  the X button stays FIRST in DOM order — so it's still
+                 *  the default `focusInitial` target (document-order
+                 *  `querySelector`) and the first Tab stop, matching the
+                 *  original close-button-first behavior. */}
+                <div className="flex flex-row-reverse items-center gap-2">
                   <button
                     onClick={onClose}
                     aria-label="Close"
@@ -296,6 +301,7 @@ export function Modal({
                   >
                     <X size={20} weight="bold" />
                   </button>
+                  {headerAction}
                 </div>
               </div>
             )}
