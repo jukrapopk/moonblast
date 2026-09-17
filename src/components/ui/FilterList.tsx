@@ -91,7 +91,6 @@ export function FilterList<T>({
         {headerAction}
         <button
           onClick={() => setDesc((d) => !d)}
-          title={desc ? "Sort A→Z" : "Sort Z→A"}
           aria-label={desc ? "Sort A→Z" : "Sort Z→A"}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-(--color-border) text-(--color-muted) transition hover:text-(--color-text)"
         >

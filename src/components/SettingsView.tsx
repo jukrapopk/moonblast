@@ -697,7 +697,6 @@ function ColorPicker({
           <button
             key={p.id}
             onClick={() => onSetAccent(p.id)}
-            title={isAuto ? `Auto — ${windowsAccent ?? "reading"}` : p.label}
             aria-label={p.label}
             aria-pressed={active}
             className={`relative h-7 w-7 rounded-full border-2 transition ${
@@ -717,7 +716,6 @@ function ColorPicker({
       })}
       <button
         onClick={() => onSetAccent("custom")}
-        title="Custom color"
         aria-label="Custom color"
         aria-pressed={accent === "custom"}
         className={`h-7 w-7 overflow-hidden rounded-full border-2 transition ${

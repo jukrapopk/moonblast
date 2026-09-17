@@ -112,7 +112,6 @@ export function TitleBar({
         <button
           tabIndex={-1}
           onClick={minimize}
-          title="Minimize"
           aria-label="Minimize"
           className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text)"
         >
@@ -121,7 +120,6 @@ export function TitleBar({
         <button
           tabIndex={-1}
           onClick={toggleMaximize}
-          title={maximized ? "Restore" : "Maximize"}
           aria-label={maximized ? "Restore" : "Maximize"}
           className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text)"
         >
@@ -130,7 +128,6 @@ export function TitleBar({
         <button
           tabIndex={-1}
           onClick={close}
-          title="Close"
           aria-label="Close"
           className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-danger) hover:text-white"
         >

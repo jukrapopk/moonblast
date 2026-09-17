@@ -39,7 +39,6 @@ function PencilButton({ onClick, label }: { onClick: () => void; label: string }
   return (
     <button
       onClick={onClick}
-      title={label}
       aria-label={label}
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--color-border) bg-(--color-surface) text-(--color-muted) transition hover:text-(--color-text)"
     >

@@ -195,7 +195,6 @@ export function TopBar({
         {showTime && (
           <span
             className="flex h-9 items-center rounded-full px-2 text-lg font-medium text-(--color-muted) tabular-nums"
-            title={time.toLocaleString()}
           >
             {formatClock(time)}
           </span>
@@ -206,7 +205,6 @@ export function TopBar({
         {showDate && (
           <span
             className="flex h-9 items-center rounded-full px-2 text-lg font-medium text-(--color-muted) tabular-nums"
-            title={time.toLocaleString()}
           >
             {formatDate(time)}
           </span>
@@ -281,7 +279,6 @@ function TopBarButton({
   return (
     <button
       onClick={onClick}
-      title={label}
       aria-label={label}
       data-active-view={active && viewId ? viewId : undefined}
       className={`flex h-9 w-9 items-center justify-center rounded-full outline-none transition-colors ${active

@@ -293,7 +293,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
               key={s.id}
               className="flex items-center gap-3 rounded-xl px-1 py-1.5"
             >
-              <div className="w-28 shrink-0 truncate text-sm font-medium text-(--color-text)" title={s.name}>
+              <div className="w-28 shrink-0 truncate text-sm font-medium text-(--color-text)">
                 {s.name}
               </div>
               <VolumeControl

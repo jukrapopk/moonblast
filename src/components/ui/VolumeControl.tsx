@@ -98,7 +98,6 @@ export function VolumeControl({
         // mouse-clickable but doesn't take keyboard focus away
         // (tabIndex={-1} so spatial nav + Tab skip past it).
         tabIndex={-1}
-        title={muted ? "Unmute" : "Mute"}
         aria-label={muted ? "Unmute" : "Mute"}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-(--color-muted) transition-colors hover:text-(--color-text) focus:outline-none focus-visible:outline-none"
       >

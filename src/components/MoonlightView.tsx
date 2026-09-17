@@ -319,7 +319,6 @@ function HostCard({
               {entry.saved && (
                 <button
                   onClick={onRemoveSaved}
-                  title="Forget saved address"
                   aria-label="Forget saved address"
                   className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger) focus:text-(--color-danger) focus:outline-none"
                 >
