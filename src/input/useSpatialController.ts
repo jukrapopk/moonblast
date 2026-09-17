@@ -433,6 +433,19 @@ export function useSpatialController() {
         // including ones from React's capture-phase `onKeyDownCapture`
         // handlers that ran earlier in the dispatch.
         if (e.defaultPrevented) return;
+        if (e.repeat) {
+          // The OS is auto-repeating the held key. We've already
+          // handled the leading edge on the non-repeat press (and
+          // registered the arrow-hold entry below), so the cadence
+          // is owned by the auto-fire rAF loop from here on.
+          // ProcessDirection would otherwise double-fire alongside
+          // the loop. Suppress the OS auto-repeat's default so its
+          // occasional repeat bursts don't drift focus movement
+          // even if our state machine misses an edge — the
+          // existing hold entry is enough.
+          e.preventDefault();
+          return;
+        }
         processDirection(dir, () => e.preventDefault());
         // Register the hold for auto-fire. The leading-edge keydown
         // we just handled above IS the leading tick — `arrowAutoFire`

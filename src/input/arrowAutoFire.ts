@@ -85,6 +85,23 @@ export function bindArrowAutoFire(
  */
 export function startArrowHold(source: string, direction: Direction): () => void {
   const t = now();
+  const existing = holds.get(source);
+  if (existing && existing.direction === direction) {
+    // Same direction already held — leave cadence alone. The OS
+    // will keep auto-repeating; we ignore those (the
+    // keyboard listener's `e.repeat` branch calls this just to
+    // keep the entry alive across spurious remounts, not to start
+    // a fresh cadence). Don't reset `leading` (we already
+    // consumed it on the leading edge); don't reset `nextFireAt`.
+    return () => {
+      if (holds.get(source)?.direction === direction) holds.delete(source);
+    };
+  }
+  // New direction (or first press in this source). Insert a fresh
+  // entry; the loop will skip its leading edge because the keyboard
+  // listener fired the user-facing `processDirection` synchronously
+  // on the `!e.repeat` keydown, and the entry's `leading: true`
+  // signals the loop to skip until nextFireAt.
   holds.set(source, { direction, startedAt: t, leading: true, nextFireAt: t + HOLD_INITIAL_DELAY_MS });
   ensureLoop();
   return () => {
