@@ -39,9 +39,22 @@ export function useGamepad() {
       return v < -0.5 ? -1 : v > 0.5 ? 1 : 0;
     }
 
+    function isLikelyGamepad(pad: Gamepad): boolean {
+      // Chromium's `navigator.getGamepads()` enumerates every HID
+      // device that exposes a gamepad descriptor — including
+      // Bluetooth audio dongles, presentation clickers, and other
+      // non-gamepad hardware that happens to advertise the class.
+      // Filter them out with two cheap heuristics:
+      //   - a real pad has at least 4 buttons (A/B/X/Y minimum)
+      //   - a real pad has at least 2 axes (left stick)
+      // The Xbox 360/One/Series, DualShock 4, DualSense, Switch Pro,
+      // and every HID-XInput clone all satisfy both.
+      return pad.buttons.length >= 4 && pad.axes.length >= 2;
+    }
+
     function poll() {
       const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
-      const pad = pads.find((p) => p && p.connected) ?? null;
+      const pad = pads.find((p) => p && p.connected && isLikelyGamepad(p)) ?? null;
 
       if (pad) {
         // Face + shoulder buttons.
