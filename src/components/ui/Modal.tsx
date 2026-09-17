@@ -291,6 +291,20 @@ export function Modal({
                   <button
                     onClick={onClose}
                     aria-label="Close"
+                    // The spatial-nav library scores an "up" candidate by
+                    // a weighted point biased 30% toward its far edge
+                    // (`data-lrud-overlap-threshold`, default 0.3) — with
+                    // X (h-9) and headerAction (e.g. a shorter h-7 toggle)
+                    // vertically centered on the same row, that biased
+                    // point never clears the toggle's top edge, so
+                    // pressing Up from the toggle finds no candidate.
+                    // Raising the threshold to 1 moves the comparison
+                    // point to X's own top edge, which — being taller and
+                    // centered on the same line — genuinely sits above
+                    // the shorter control, making "Up" resolve to X.
+                    // Scoped to when a headerAction exists; harmless
+                    // otherwise since there's nothing to navigate up from.
+                    data-lrud-overlap-threshold={headerAction ? "1" : undefined}
                     // Circular shape so the focus ring follows a circle
                     // instead of the default rectangular button outline.
                     // Sized to comfortably fit the 20px X icon plus the
