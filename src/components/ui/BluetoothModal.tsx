@@ -19,6 +19,7 @@ import {
   bluetoothPair,
   bluetoothSetRadio,
   fetchBluetoothPairedDevices,
+  fetchBluetoothRadioStatus,
   useBluetoothScan,
   type BluetoothDevice,
 } from "../../hooks/useBluetooth";
@@ -141,8 +142,21 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
   const [radioBusy, setRadioBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const radioKnown = radioOn === true || radioOn === false;
-  const radioOff = radioOn === false;
+  // Local copy of the radio state so the toggle reflects a just-performed
+  // change immediately. Seeded from the parent's shared subscription on
+  // open, but refreshed with a direct one-shot fetch (bypassing that
+  // subscription's `useDebouncedRead` 2s collapse window) after every
+  // toggle here — mirrors WifiModal's `liveSsid`. Without this, toggling
+  // shortly after open (well within 2s of the open-triggered refresh)
+  // silently collapsed with the earlier read and the switch never
+  // visually updated, even though the radio itself did flip.
+  const [liveOn, setLiveOn] = useState<boolean | null>(radioOn ?? null);
+  useEffect(() => {
+    if (open) setLiveOn(radioOn ?? null);
+  }, [open, radioOn]);
+
+  const radioKnown = liveOn === true || liveOn === false;
+  const radioOff = liveOn === false;
 
   async function refreshPaired() {
     setPaired(await fetchBluetoothPairedDevices());
@@ -172,6 +186,11 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
     setError(null);
     try {
       await bluetoothSetRadio(next);
+      const status = await fetchBluetoothRadioStatus();
+      setLiveOn(status?.on ?? next);
+      // Nudge the parent's shared subscription too, so the TopBar chip
+      // catches up — its own debounce/cadence is fine for a background
+      // chip, unlike this modal's own toggle which needs to be exact.
       onRadioChanged();
     } catch (e) {
       setError(String(e));
@@ -256,7 +275,7 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
           <Spinner size={14} />
         ) : (
           <Toggle
-            checked={radioOn === true}
+            checked={liveOn === true}
             onChange={(v) => void handleToggleRadio(v)}
             disabled={!radioKnown}
           />
