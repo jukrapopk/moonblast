@@ -4,27 +4,25 @@
  * function the keyboard listener uses — so gamepad and keyboard
  * are indistinguishable in behaviour: same lost-focus recovery,
  * same text-input passthrough, same scope locks, same Up-arrow
- * "jump to nav" override. Face buttons (A/B) handle activate /
- * cancel; no other gamepad buttons are mapped — view cycling
- * and other navigation flows go through the directional pad.
+ * "jump to nav" override.
+ *
+ * Face buttons (A/B) route through the element-aware action
+ * helpers in `gamepadActions.ts`:
+ *   - A → `activateFocused()` (Enter + user-gesture activation,
+ *     element-type aware).
+ *   - B → `cancel()` (Escape).
+ *
+ * No other gamepad buttons are mapped. View switching goes
+ * through the directional pad → TopBar nav buttons, the same
+ * path keyboard users take.
  *
  * Mount once at the app root, alongside `useSpatialController`.
  */
 import { useEffect } from "react";
 import { dispatchDirection } from "../input/useSpatialController";
+import { activateFocused, cancel } from "../input/gamepadActions";
 import { useSpatialControllerInternals } from "../input/controllerInternals";
 import { enterLrudMode } from "./useLrudMode";
-
-const ENTER_KEY = "Enter";
-const ESCAPE_KEY = "Escape";
-
-function dispatchKey(key: string) {
-  // Fallback when no Enter/Escape handler is registered on the LIFO
-  // stack (e.g. gamepad A outside any modal). Synthesising the keydown
-  // lets native <button> click activation still fire through the
-  // spatial controller.
-  window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-}
 
 export function useGamepad() {
   useEffect(() => {
@@ -55,20 +53,16 @@ export function useGamepad() {
       const pad = pads.find((p) => p && p.connected && isLikelyGamepad(p)) ?? null;
 
       if (pad) {
-        // Face buttons only — A activates, B cancels. The
-        // shoulders (LB/RB) used to cycle top-level views, but
-        // that flow is gone: view switching now happens through
-        // the directional pad via the TopBar nav buttons, the
-        // same path keyboard users take. Each pressed-button /
-        // pressed-axis edge also drives LRUD-mode entry so the
+        // Face buttons only — A activates, B cancels. Each
+        // pressed-button edge also drives LRUD-mode entry so the
         // cursor hides when the user starts interacting with the
-        // pad (matching the keyboard's `keydown` entry path).
-        // No per-frame re-arm — that approach caused cursor
-        // flicker because mousemove would exit at 60Hz while the
-        // pad was plugged in.
-        const faces: [number, "enter" | "escape"][] = [
-          [0, "enter"],
-          [1, "escape"],
+        // pad (matching the keyboard's `keydown` entry path). No
+        // per-frame re-arm — that approach caused cursor flicker
+        // because mousemove would exit at 60Hz while the pad
+        // was plugged in.
+        const faces: [number, "activate" | "cancel"][] = [
+          [0, "activate"],
+          [1, "cancel"],
         ];
         for (const [idx, kind] of faces) {
           const btn = pad.buttons[idx];
@@ -77,27 +71,20 @@ export function useGamepad() {
           if (btn.pressed && !held.has(id)) {
             held.add(id);
             enterLrudMode();
-            if (kind === "enter") {
-              // Route through the registered enter-stack so modal
-              // primary actions (submit / pick) win. If nothing is on
-              // the stack, manually click the focused element —
-              // synthesised `KeyboardEvent`s don't trigger the
-              // browser's native button activation (only trusted
-              // keydowns do), so we have to drive it ourselves.
+            // Modal LIFO handlers (registered via
+            // `pushEnterHandler` / `pushEscapeHandler` from
+            // useFocusTrap) win when active — they let modal
+            // "submit" / "cancel" run before any element-specific
+            // activation. When the stack is empty, fall through to
+            // the element-aware action helper.
+            if (kind === "activate") {
               const handler = peekEnter();
-              if (handler) handler(new KeyboardEvent("keydown", { key: ENTER_KEY }));
-              else {
-                const a = document.activeElement;
-                if (a instanceof HTMLElement && typeof a.click === "function") {
-                  a.click();
-                } else {
-                  dispatchKey(ENTER_KEY);
-                }
-              }
-            } else if (kind === "escape") {
+              if (handler) handler(new KeyboardEvent("keydown", { key: "Enter" }));
+              else activateFocused();
+            } else if (kind === "cancel") {
               const handler = peekEscape();
-              if (handler) handler(new KeyboardEvent("keydown", { key: ESCAPE_KEY }));
-              else dispatchKey(ESCAPE_KEY);
+              if (handler) handler(new KeyboardEvent("keydown", { key: "Escape" }));
+              else cancel();
             }
           } else if (!btn.pressed) {
             held.delete(id);
