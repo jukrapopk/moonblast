@@ -605,6 +605,8 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
           onSubmit={handleConnectWithPassword}
           onBack={handlePasswordBack}
         />
+      ) : radioOff ? (
+        <EmptyMessage>Turn Wi-Fi on to see networks</EmptyMessage>
       ) : (
         <>
           {error && <ErrorBanner>{error}</ErrorBanner>}
@@ -615,9 +617,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
                 <LoadingChip label="Scanning networks" variant="plain" />
               </div>
             ) : networks.length === 0 ? (
-              <EmptyMessage>
-                {radioOff ? "Turn Wi-Fi on to see networks" : "No networks found"}
-              </EmptyMessage>
+              <EmptyMessage>No networks found</EmptyMessage>
             ) : (
               networks.map((net) => {
                 // Per-row busy state: this row shows the spinner only
@@ -652,12 +652,12 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
               // to <body> when scanning starts; `aria-disabled` is a
               // CSS-attribute-only signal the library ignores. The
               // onClick guard below is the actual gate.
-              aria-disabled={loading || busy !== null || radioOff}
+              aria-disabled={loading || busy !== null}
               onClick={() => {
-                if (loading || busy !== null || radioOff) return;
+                if (loading || busy !== null) return;
                 scan();
               }}
-              className={`${loading || busy !== null || radioOff ? "cursor-not-allowed opacity-40" : ""}`}
+              className={`${loading || busy !== null ? "cursor-not-allowed opacity-40" : ""}`}
               icon={<Spinner size={14} spinning={loading} />}
             >
               Rescan
