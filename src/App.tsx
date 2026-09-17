@@ -7,12 +7,19 @@ import { TopBar, type View } from "./components/TopBar";
 import { TitleBar } from "./components/TitleBar";
 import { AppsView } from "./components/AppsView";
 import { MoonlightView } from "./components/MoonlightView";
+import { PowerMenu } from "./components/PowerMenu";
 import { SettingsView, DisplaySettingsModal } from "./components/SettingsView";
 import { useSettings, useSettingsField } from "./settings/SettingsContext";
+import { useAudioMaster } from "./hooks/useAudio";
+import { useBattery } from "./hooks/useBattery";
 import { useGamepad } from "./hooks/useGamepad";
 import { useSpatialController } from "./input/useSpatialController";
-import { openPowerMenu } from "./hooks/usePowerMenuTrigger";
+import { openPowerMenu, usePowerMenuTrigger } from "./hooks/usePowerMenuTrigger";
+import { useWifi } from "./hooks/useWifi";
+import { AudioModal } from "./components/ui/AudioModal";
+import { BatteryModal } from "./components/ui/BatteryModal";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
+import { WifiModal } from "./components/ui/WifiModal";
 
 // Session-only view override — let users refresh (F5) on the Settings page
 // without losing their place, while still always booting the launcher into
@@ -199,14 +206,38 @@ export default function App() {
 
   // Modal open state — owned at the App level so both the TopBar chips
   // and the Preferences gear buttons in Settings can open the same
-  // WifiModal / AudioModal / BatteryModal. The modals themselves stay
-  // in TopBar (rendered alongside the chips) since they need the hook
-  // data (currentSsid, master volume, battery percent) that's bound
-  // there.
+  // modals. The modals themselves also render at the App level (alongside
+  // `<main>` and DisplaySettingsModal) so they're not descendants of the
+  // TopBar `<header>` — keeping them out of the TopBar's lrud-container
+  // ancestor chain means TopBar's `data-lrud-scope-lock="horizontal"`
+  // can't override the modal's spatial scope and leak arrows out to the
+  // TopBar buttons.
   const [wifiOpen, setWifiOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [batteryOpen, setBatteryOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
+  const [powerOpen, setPowerOpen] = useState(false);
+
+  // Data hooks for the status modals. Live here (not in TopBar) so the
+  // modals can render at the App root.
+  const { current: wifi, refresh: refreshWifi } = useWifi();
+  useEffect(() => {
+    refreshWifi();
+  }, [wifiOpen, refreshWifi]);
+  const { master: audio, refresh: refreshAudio } = useAudioMaster();
+  useEffect(() => {
+    if (!audioOpen) refreshAudio();
+  }, [audioOpen, refreshAudio]);
+  const { status: battery, refresh: refreshBattery } = useBattery();
+  useEffect(() => {
+    if (!batteryOpen) refreshBattery();
+  }, [batteryOpen, refreshBattery]);
+
+  // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
+  // asks us to open the Power menu. Subscribe here so the trigger reaches
+  // App-owned state (TopBar no longer manages PowerMenu).
+  const { subscribe: subscribePower } = usePowerMenuTrigger();
+  useEffect(() => subscribePower(() => setPowerOpen(true)), [subscribePower]);
 
   const setAppsEnabled = useSettingsField("integrations", "apps_enabled");
   const setMoonlightEnabled = useSettingsField("integrations", "moonlight_enabled");
@@ -325,10 +356,6 @@ export default function App() {
       <TopBar
         view={view}
         onNavigate={setView}
-        fullscreen={fullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        immersive={immersive}
-        onToggleImmersive={immersive ? exitImmersive : enterImmersive}
         showMoonlight={moonlightEnabled && moonlightDir !== null}
         showApps={appsEnabled}
         showTime={settings.customization.show_time}
@@ -337,14 +364,17 @@ export default function App() {
         showWifi={settings.customization.show_wifi}
         showBattery={settings.customization.show_battery}
         showAudio={settings.customization.show_audio}
-        wifiOpen={wifiOpen}
-        setWifiOpen={setWifiOpen}
-        audioOpen={audioOpen}
-        setAudioOpen={setAudioOpen}
         batteryOpen={batteryOpen}
-        setBatteryOpen={setBatteryOpen}
+        onWifiClick={() => setWifiOpen(true)}
+        onAudioClick={() => setAudioOpen(true)}
+        onBatteryClick={() => setBatteryOpen(true)}
         displayOpen={displayOpen}
-        setDisplayOpen={setDisplayOpen}
+        onDisplayClick={() => setDisplayOpen(true)}
+        powerOpen={powerOpen}
+        onPowerClick={() => setPowerOpen((o) => !o)}
+        wifi={wifi}
+        audio={audio}
+        battery={battery}
       />
       <main data-lrud-scope-lock="all" className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
@@ -420,6 +450,26 @@ export default function App() {
       <DisplaySettingsModal
         open={displayOpen}
         onClose={() => setDisplayOpen(false)}
+      />
+      <WifiModal
+        open={wifiOpen}
+        onClose={() => setWifiOpen(false)}
+        currentSsid={wifi?.ssid ?? null}
+        radioOn={wifi?.radioOn ?? null}
+      />
+      <AudioModal
+        open={audioOpen}
+        onClose={() => setAudioOpen(false)}
+        onChanged={refreshAudio}
+      />
+      <BatteryModal open={batteryOpen} onClose={() => setBatteryOpen(false)} />
+      <PowerMenu
+        open={powerOpen}
+        onClose={() => setPowerOpen(false)}
+        fullscreen={fullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        immersive={immersive}
+        onToggleImmersive={immersive ? exitImmersive : enterImmersive}
       />
     </div>
   );

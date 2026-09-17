@@ -1,19 +1,14 @@
 import { Gear, Monitor, Power, ScreencastIcon, SquaresFour } from "@phosphor-icons/react";
 import { motion } from "framer-motion";
-import { useEffect, useState, type ReactNode } from "react";
-import { useAudioMaster, type AudioMaster } from "../hooks/useAudio";
-import { useBattery, type BatteryStatus } from "../hooks/useBattery";
-import { usePowerMenuTrigger } from "../hooks/usePowerMenuTrigger";
+import { type ReactNode } from "react";
+import { type AudioMaster } from "../hooks/useAudio";
+import { type BatteryStatus } from "../hooks/useBattery";
 import { formatClock, formatDate, useTime } from "../hooks/useTime";
-import { useWifi, type WifiConnection } from "../hooks/useWifi";
-import { PowerMenu } from "./PowerMenu";
-import { AudioModal } from "./ui/AudioModal";
+import { type WifiConnection } from "../hooks/useWifi";
 import { BatteryIcon } from "./ui/BatteryIcon";
-import { BatteryModal } from "./ui/BatteryModal";
 import { formatDuration } from "./ui/formatDuration";
 import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { WifiIcon } from "./ui/WifiIcon";
-import { WifiModal } from "./ui/WifiModal";
 
 export type View = "apps" | "moonlight" | "settings";
 
@@ -113,10 +108,6 @@ function Status({
 export function TopBar({
   view,
   onNavigate,
-  fullscreen,
-  onToggleFullscreen,
-  immersive,
-  onToggleImmersive,
   showMoonlight,
   showApps,
   showTime,
@@ -125,21 +116,20 @@ export function TopBar({
   showWifi,
   showBattery,
   showAudio,
-  wifiOpen,
-  setWifiOpen,
-  audioOpen,
-  setAudioOpen,
   batteryOpen,
-  setBatteryOpen,
+  onWifiClick,
+  onAudioClick,
+  onBatteryClick,
   displayOpen,
-  setDisplayOpen,
+  onDisplayClick,
+  powerOpen,
+  onPowerClick,
+  wifi,
+  audio,
+  battery,
 }: {
   view: View | null;
   onNavigate: (v: View) => void;
-  fullscreen: boolean;
-  onToggleFullscreen: () => void;
-  immersive: boolean;
-  onToggleImmersive: () => void;
   showMoonlight: boolean;
   showApps: boolean;
   showTime: boolean;
@@ -148,17 +138,17 @@ export function TopBar({
   showWifi: boolean;
   showBattery: boolean;
   showAudio: boolean;
-  // Modal open state — owned by the App level so the Preferences gear
-  // buttons in Settings can also open these (TopBar renders the modals
-  // because that's where the data hooks live).
-  wifiOpen: boolean;
-  setWifiOpen: (v: boolean) => void;
-  audioOpen: boolean;
-  setAudioOpen: (v: boolean) => void;
   batteryOpen: boolean;
-  setBatteryOpen: (v: boolean) => void;
+  onWifiClick: () => void;
+  onAudioClick: () => void;
+  onBatteryClick: () => void;
   displayOpen: boolean;
-  setDisplayOpen: (v: boolean) => void;
+  onDisplayClick: () => void;
+  powerOpen: boolean;
+  onPowerClick: () => void;
+  wifi: WifiConnection | null | undefined;
+  audio: AudioMaster | undefined;
+  battery: BatteryStatus | null;
 }) {
   const leftItems = items.filter((i) => i.nav === "left");
   const visibleLeft = leftItems.filter((i) => {
@@ -167,35 +157,6 @@ export function TopBar({
     return true;
   });
   const rightItems = items.filter((i) => i.nav === "right");
-  const [powerOpen, setPowerOpen] = useState(false);
-  // Rust intercepts Alt+F4 (and taskbar-Close) while in Immersive Mode
-  // and asks us to open the Power menu via the global trigger. Subscribe
-  // directly so every request reaches us even if the menu is already
-  // open (e.g. user alt-F4s again) — setPowerOpen(true) is idempotent.
-  const { subscribe: subscribePower } = usePowerMenuTrigger();
-  useEffect(() => subscribePower(() => setPowerOpen(true)), [subscribePower]);
-  const closePower = () => setPowerOpen(false);
-  // One subscription shared by the chip (Status) and the modal prop.
-  // `refreshWifi` is also called on modal open/close so the chip picks
-  // up any state change the user made in the modal right away.
-  const { current: wifi, refresh: refreshWifi } = useWifi();
-  useEffect(() => {
-    refreshWifi();
-  }, [wifiOpen, refreshWifi]);
-  // Master mixer level for the speaker chip. Refreshed on modal close
-  // (plus focus + a slow poll inside the hook) so the icon tracks
-  // volume-key / external-mixer changes.
-  const { master: audio, refresh: refreshAudio } = useAudioMaster();
-  useEffect(() => {
-    if (!audioOpen) refreshAudio();
-  }, [audioOpen, refreshAudio]);
-  // Battery: hook drives the chip and the modal. On modal close we
-  // force-refresh so the chip reflects the latest state (same pattern
-  // as WiFi — the hook's 5s poll is the steady-state refresh path).
-  const { status: battery, refresh: refreshBattery } = useBattery();
-  useEffect(() => {
-    if (!batteryOpen) refreshBattery();
-  }, [batteryOpen, refreshBattery]);
   const time = useTime();
 
   return (
@@ -253,10 +214,10 @@ export function TopBar({
       </div>
 
       <Status
-        onWifiClick={() => setWifiOpen(true)}
-        onAudioClick={() => setAudioOpen(true)}
-        onBatteryClick={() => setBatteryOpen(true)}
-        onDisplayClick={() => setDisplayOpen(true)}
+        onWifiClick={onWifiClick}
+        onAudioClick={onAudioClick}
+        onBatteryClick={onBatteryClick}
+        onDisplayClick={onDisplayClick}
         batteryOpen={batteryOpen}
         displayOpen={displayOpen}
         battery={battery}
@@ -283,20 +244,9 @@ export function TopBar({
           label="Power"
           icon={<Power size={24} weight="bold" />}
           active={powerOpen}
-          onClick={() => setPowerOpen((o) => !o)}
+          onClick={onPowerClick}
         />
       </div>
-      <PowerMenu
-        open={powerOpen}
-        onClose={closePower}
-        fullscreen={fullscreen}
-        onToggleFullscreen={onToggleFullscreen}
-        immersive={immersive}
-        onToggleImmersive={onToggleImmersive}
-      />
-      <WifiModal open={wifiOpen} onClose={() => setWifiOpen(false)} currentSsid={wifi?.ssid ?? null} radioOn={wifi?.radioOn ?? null} />
-      <AudioModal open={audioOpen} onClose={() => setAudioOpen(false)} onChanged={refreshAudio} />
-      <BatteryModal open={batteryOpen} onClose={() => setBatteryOpen(false)} />
     </header>
   );
 }
