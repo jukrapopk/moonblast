@@ -843,14 +843,38 @@ export function MoonlightView() {
           ) : undefined
         }
         tabs={
-          <Segmented
-            value={sub}
-            onChange={setSub}
-            options={[
-              { id: "machines", label: "Machines" },
-              { id: "settings", label: "Settings" },
-            ]}
-          />
+          <div
+            onKeyDown={(e) => {
+              // Down from the sub-tab Segmented would otherwise land
+              // on whatever the LRUD library deems nearest — usually
+              // an off-axis button several rows down (e.g. the
+              // Refresh-rate Segmented's "Detected" option, which is
+              // closer in pixel-space than the topmost Row's
+              // right-aligned Select). Force the focus to the marked
+              // first content row instead.
+              if (e.key !== "ArrowDown" && e.key !== "Down") return;
+              const target = document.querySelector<HTMLElement>(
+                "[data-first-content]",
+              );
+              if (!target) return;
+              const focusable = target.querySelector<HTMLElement>(
+                'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+              );
+              if (!focusable) return;
+              e.preventDefault();
+              e.stopPropagation();
+              focusable.focus();
+            }}
+          >
+            <Segmented
+              value={sub}
+              onChange={setSub}
+              options={[
+                { id: "machines", label: "Machines" },
+                { id: "settings", label: "Settings" },
+              ]}
+            />
+          </div>
         }
       >
         <AnimatePresence mode="wait">

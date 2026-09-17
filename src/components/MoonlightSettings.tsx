@@ -161,7 +161,16 @@ export function MoonlightSettings() {
       >
         <Section title="Video">
           <Row label="Aspect ratio">
-            <Select options={RATIOS} value={m.aspect_ratio} onChange={(v) => set("aspect_ratio", v)} />
+            {/* `data-first-content` marks the target for the Moonlight
+                sub-tab Segmented's Down override — pressing Down from
+                the "Settings" tab lands on this Row's control instead
+                of an off-axis Segmented button several rows down (see
+                MoonlightView.tsx). The attribute sits on the Row's
+                right-slot wrapper, and the override finds the first
+                focusable descendant. */}
+            <div data-first-content className="flex shrink-0 items-center gap-2">
+              <Select options={RATIOS} value={m.aspect_ratio} onChange={(v) => set("aspect_ratio", v)} />
+            </div>
           </Row>
           <Row
             label="Resolution"
