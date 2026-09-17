@@ -32,8 +32,8 @@
  */
 import type { Direction } from "./spatialNav";
 
-const HOLD_INITIAL_DELAY_MS = 400;
-const HOLD_REPEAT_MS = 500;
+const HOLD_INITIAL_DELAY_MS = 300;
+const HOLD_REPEAT_MS = 300;
 
 interface Hold {
   direction: Direction;
@@ -131,6 +131,10 @@ function tick(): void {
       continue;
     }
     if (t >= hold.nextFireAt) {
+      // TEMP DEBUG: trace each fire so we can see exactly which
+      // input device / hold entry is producing duplicates.
+      // eslint-disable-next-line no-console
+      console.log("[arrowAutoFire] emit", source, hold.direction, "at", t.toFixed(0));
       boundEmit?.(source, hold.direction);
       hold.nextFireAt = t + HOLD_REPEAT_MS;
     }

@@ -359,6 +359,8 @@ function dispatch(prev: State, next: State, now: number): State {
   const dir: Dir | null = next.dpad ?? next.stick ?? null;
   const prevDir: Dir | null = prev.dpad ?? prev.stick ?? null;
   if (dir !== null && dir !== prevDir) {
+    // eslint-disable-next-line no-console
+    console.log("[gamepadAdapter] leading edge sendKey", dir);
     sendKey(dir);
     // Register the hold with a unique source key so multiple
     // gamepads / sources don't collide. The leading-edge
