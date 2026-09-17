@@ -702,7 +702,7 @@ function ColorPicker({
             className={`relative h-7 w-7 rounded-full border-2 transition ${
               active
                 ? "scale-110 border-(--color-text)"
-                : "border-(--color-border) hover:border-(--color-muted)"
+                : "border-(--color-border) focus-visible:border-(--color-muted)"
             }`}
             style={{ background: swatchColor }}
           >
@@ -721,7 +721,7 @@ function ColorPicker({
         className={`h-7 w-7 overflow-hidden rounded-full border-2 transition ${
           accent === "custom"
             ? "scale-110 border-(--color-text)"
-            : "border-(--color-border) hover:border-(--color-muted)"
+            : "border-(--color-border) focus-visible:border-(--color-muted)"
         }`}
         style={{
           background: customAccent ?? "#6f78c8",
@@ -890,7 +890,7 @@ function PreferenceGroup({
           <button
             onClick={onIconClick}
             aria-label={`${title} settings`}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface-2) hover:text-(--color-text) focus:bg-(--color-surface-2) focus:text-(--color-text) focus:outline-none"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition focus:bg-(--color-surface-2) focus:text-(--color-text) focus:outline-none"
           >
             {icon}
           </button>

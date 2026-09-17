@@ -137,7 +137,7 @@ function PasswordForm({
             <button
               type="button"
               onClick={() => setShow((s) => !s)}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) hover:text-(--color-text)"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-(--color-muted) focus-visible:text-(--color-text)"
               aria-label={show ? "Hide password" : "Show password"}
               tabIndex={-1}
             >
@@ -295,7 +295,7 @@ function NetworkRow({
       data-network-row={net.ssid}
       disabled={anyBusy}
       aria-label={needsSignIn ? `Sign in to ${net.ssid}` : `Connect to ${net.ssid}`}
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none disabled:opacity-40"
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus:bg-(--color-surface) focus:outline-none disabled:opacity-40"
     >
       {rowBody}
     </button>

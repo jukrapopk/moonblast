@@ -146,10 +146,10 @@ function AppTile({
       <button
         onClick={onLaunch}
         aria-label={name}
-        className="relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 hover:bg-(--color-accent-soft) hover:shadow-[0_12px_32px_-12px_var(--color-overlay)] focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)]"
+        className="relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)]"
       >
         <div
-          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text) transition-transform group-hover:scale-[1.04] group-focus-visible:scale-[1.04]`}
+          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text) transition-transform group-focus-visible:scale-[1.04]`}
           style={icon ? undefined : { background: gradientFor(name) }}
         >
           {icon ? (
@@ -240,7 +240,7 @@ function AddAppModal({
         render={(a) => (
           <button
             onClick={() => pick(a)}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-(--color-text) transition-colors focus:bg-(--color-surface) focus:outline-none"
           >
             <span className="truncate font-medium">{a.name}</span>
             {a.source && (
@@ -378,7 +378,7 @@ function SteamGridModal({
               setSelected(null);
               setIcons([]);
             }}
-            className="text-xs text-(--color-muted) transition hover:text-(--color-text)"
+            className="text-xs text-(--color-muted) transition focus-visible:text-(--color-text)"
           >
             ← back to results
           </button>
@@ -392,7 +392,7 @@ function SteamGridModal({
                 <button
                   key={ic.id}
                   onClick={() => choose(ic)}
-                  className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface) transition hover:border-(--color-accent) focus:border-(--color-accent) focus:outline-none"
+                  className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface) transition focus:border-(--color-accent) focus:outline-none"
                 >
                   <img src={ic.url} alt="" loading="lazy" className="h-full w-full object-contain" />
                 </button>
@@ -409,7 +409,7 @@ function SteamGridModal({
               <button
                 key={t.id}
                 onClick={() => pickTitle(t)}
-                className="w-full rounded-lg px-3 py-2 text-left text-sm text-(--color-text) transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none"
+                className="w-full rounded-lg px-3 py-2 text-left text-sm text-(--color-text) transition-colors focus:bg-(--color-surface) focus:outline-none"
               >
                 {t.name}
               </button>
@@ -425,7 +425,7 @@ function SteamGridModal({
               onSetIcon(app.path, null);
               onClose();
             }}
-            className="text-sm text-(--color-danger) transition hover:underline"
+            className="text-sm text-(--color-danger) transition focus-visible:underline"
           >
             Clear icon
           </button>

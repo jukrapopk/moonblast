@@ -40,7 +40,7 @@ function PencilButton({ onClick, label }: { onClick: () => void; label: string }
     <button
       onClick={onClick}
       aria-label={label}
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--color-border) bg-(--color-surface) text-(--color-muted) transition hover:text-(--color-text)"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--color-border) bg-(--color-surface) text-(--color-muted) transition focus-visible:text-(--color-text)"
     >
       <PencilSimple size={15} weight="bold" />
     </button>

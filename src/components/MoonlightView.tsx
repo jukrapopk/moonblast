@@ -320,7 +320,7 @@ function HostCard({
                 <button
                   onClick={onRemoveSaved}
                   aria-label="Forget saved address"
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:text-(--color-danger) focus:text-(--color-danger) focus:outline-none"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition focus:text-(--color-danger) focus:outline-none"
                 >
                   <Trash size={16} weight="bold" />
                 </button>
@@ -492,7 +492,7 @@ function AppsModal({
             <button
               key={app}
               onClick={() => onPlay(app)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-base font-medium text-(--color-text) transition-colors hover:bg-(--color-surface) focus:bg-(--color-surface) focus:outline-none"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-base font-medium text-(--color-text) transition-colors focus:bg-(--color-surface) focus:outline-none"
             >
               <Play size={16} weight="bold" />
               {app}

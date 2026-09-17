@@ -92,7 +92,7 @@ export function FilterList<T>({
         <button
           onClick={() => setDesc((d) => !d)}
           aria-label={desc ? "Sort A→Z" : "Sort Z→A"}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-(--color-border) text-(--color-muted) transition hover:text-(--color-text)"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-(--color-border) text-(--color-muted) transition focus-visible:text-(--color-text)"
         >
           {desc ? <SortDescending size={18} weight="bold" /> : <SortAscending size={18} weight="bold" />}
         </button>
@@ -107,7 +107,7 @@ export function FilterList<T>({
               className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                 source === c.value
                   ? "bg-(--color-accent) text-white"
-                  : "border border-(--color-border) text-(--color-muted) hover:text-(--color-text)"
+                  : "border border-(--color-border) text-(--color-muted) focus-visible:text-(--color-text)"
               }`}
             >
               {c.label}

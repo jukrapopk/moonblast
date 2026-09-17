@@ -131,7 +131,7 @@ export function Modal({
                   // 2px focus ring outside; h-9 / w-9 matches the
                   // TopBarButton's circular touch target for visual
                   // consistency across the app.
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface) hover:text-(--color-text) focus-visible:bg-(--color-surface) focus-visible:text-(--color-text)"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition focus-visible:bg-(--color-surface) focus-visible:text-(--color-text)"
                 >
                   <X size={20} weight="bold" />
                 </button>

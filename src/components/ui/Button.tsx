@@ -23,14 +23,14 @@ const sizeClasses: Record<Size, string> = {
 };
 
 const variantClasses: Record<Variant, string> = {
-  primary: "bg-(--color-accent) text-white enabled:hover:brightness-110",
+  primary: "bg-(--color-accent) text-white enabled:focus-visible:brightness-110",
   "outline-accent":
-    "border border-(--color-accent) text-(--color-accent) enabled:hover:bg-(--color-accent-soft)",
+    "border border-(--color-accent) text-(--color-accent) enabled:focus-visible:bg-(--color-accent-soft)",
   outline:
-    "border border-(--color-border) text-(--color-muted) enabled:hover:text-(--color-text)",
-  ghost: "text-(--color-muted) enabled:hover:text-(--color-text)",
+    "border border-(--color-border) text-(--color-muted) enabled:focus-visible:text-(--color-text)",
+  ghost: "text-(--color-muted) enabled:focus-visible:text-(--color-text)",
   danger:
-    "border border-(--color-border) text-(--color-muted) enabled:hover:border-(--color-danger) enabled:hover:text-(--color-danger)",
+    "border border-(--color-border) text-(--color-muted) enabled:focus-visible:border-(--color-danger) enabled:focus-visible:text-(--color-danger)",
 };
 
 /**

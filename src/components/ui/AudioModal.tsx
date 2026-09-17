@@ -253,7 +253,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus:outline-none disabled:opacity-40 ${
                   d.is_default
                     ? "bg-(--color-accent-soft)"
-                    : "hover:bg-(--color-surface) focus:bg-(--color-surface)"
+                    : "focus:bg-(--color-surface)"
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-(--color-text)">

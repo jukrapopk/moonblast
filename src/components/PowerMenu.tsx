@@ -35,8 +35,8 @@ function MenuItem({
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-base font-medium transition-colors ${
         danger
-          ? "text-(--color-danger) hover:bg-(--color-danger)/10"
-          : "text-(--color-text) hover:bg-(--color-surface)"
+          ? "text-(--color-danger) focus-visible:bg-(--color-danger)/10"
+          : "text-(--color-text) focus-visible:bg-(--color-surface)"
       }`}
     >
       {icon && (

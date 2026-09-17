@@ -139,8 +139,8 @@ export function ContextMenu({ state, onClose }: CtxMenuProps) {
             it.disabled
               ? "cursor-default opacity-40"
               : it.danger
-                ? "text-(--color-danger) hover:bg-(--color-surface)"
-                : "text-(--color-text) hover:bg-(--color-surface)"
+                ? "text-(--color-danger) focus:bg-(--color-surface)"
+                : "text-(--color-text) focus:bg-(--color-surface)"
           }`}
         >
           {it.icon}

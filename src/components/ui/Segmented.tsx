@@ -34,10 +34,10 @@ export function Segmented<T extends string>({
         const base = "font-medium transition-colors";
         const style = tabs
           ? `rounded-full px-5 py-1.5 text-base ${base} ${
-              active ? "bg-(--color-accent) text-white" : "text-(--color-muted) hover:text-(--color-text)"
+              active ? "bg-(--color-accent) text-white" : "text-(--color-muted) focus-visible:text-(--color-text)"
             }`
           : `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${base} ${
-              active ? "bg-(--color-accent) text-white" : "text-(--color-muted) hover:text-(--color-text)"
+              active ? "bg-(--color-accent) text-white" : "text-(--color-muted) focus-visible:text-(--color-text)"
             }`;
         return (
           <button key={o.id} onClick={() => onChange(o.id)} className={style}>
