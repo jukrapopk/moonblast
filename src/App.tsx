@@ -346,7 +346,7 @@ export default function App() {
         displayOpen={displayOpen}
         setDisplayOpen={setDisplayOpen}
       />
-      <main className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <main data-lrud-scope-lock="vertical" className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <AnimatePresence mode="wait">
           {view === null && (
             <motion.div
