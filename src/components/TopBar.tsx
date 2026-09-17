@@ -334,11 +334,11 @@ function TopBarButton({
       title={label}
       aria-label={label}
       data-active-view={active && viewId ? viewId : undefined}
-      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${active
-          ? "bg-(--color-accent-soft) text-(--color-accent)"
+      className={`flex h-9 w-9 items-center justify-center rounded-full outline-none transition-colors ${active
+          ? "bg-(--color-accent-soft) text-(--color-accent) focus-visible:text-(--color-accent)"
           : danger
-            ? "text-(--color-danger)"
-            : "text-(--color-muted) hover:text-(--color-text)"
+            ? "text-(--color-danger) hover:text-(--color-danger) focus-visible:text-(--color-danger)"
+            : "text-(--color-muted) hover:text-(--color-text) focus-visible:text-(--color-text)"
         }`}
     >
       {icon}
