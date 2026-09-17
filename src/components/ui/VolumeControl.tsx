@@ -82,7 +82,7 @@ export function VolumeControl({
       aria-valuenow={visibleValue}
       aria-valuetext={muted ? "Muted" : `${visibleValue}%`}
       onKeyDown={handleKeyDown}
-      className={`group/volume flex flex-1 items-center gap-2 rounded-full pt-1 pb-0.5 pl-1 pr-2 outline-none transition focus-visible:shadow-[0_0_0_2px_var(--color-accent)] ${
+      className={`group/volume flex flex-1 items-center gap-2 rounded-full pt-1 pb-1 pl-1 pr-2 outline-none transition focus-visible:shadow-[0_0_0_2px_var(--color-accent)] ${
         disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer"
       }`}
     >
