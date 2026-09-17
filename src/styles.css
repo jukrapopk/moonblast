@@ -76,6 +76,22 @@ body,
    * is the standard Windows app behavior and avoids mid-frame flicker. */
 }
 
+/* Hide the OS cursor while the user is driving with the keyboard or
+ * gamepad. `hideCursor()` (src/input/cursorHider.ts) sets the
+ * `data-cursor-hidden` attribute on <body>; the first `mousemove`
+ * afterwards clears it. The `!important` is intentional — existing
+ * per-component `cursor-pointer` / `cursor-not-allowed` utilities
+ * (Buttons, Selects, Toggles, Inputs, Sliders) would otherwise win
+ * specificity battles and leave the cursor visible over
+ * interactive elements. When the attribute is gone (any mouse
+ * movement) the rule no longer matches and the per-component
+ * cursors resume their normal `cursor-pointer` / `cursor-default`
+ * roles. */
+body[data-cursor-hidden],
+body[data-cursor-hidden] * {
+  cursor: none !important;
+}
+
 /* Big Picture style: scale the whole rem-based UI up for larger, clearer type */
 html {
   font-size: 17px;

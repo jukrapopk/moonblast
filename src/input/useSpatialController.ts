@@ -38,6 +38,7 @@ import {
   startArrowHold,
   stopArrowHold,
 } from "./arrowAutoFire";
+import { hideCursor } from "./cursorHider";
 
 type KeyHandler = (e: KeyboardEvent) => void;
 
@@ -425,6 +426,13 @@ export function useSpatialController() {
       // 3. Arrow keys — spatial navigation.
       const dir = directionFromKey(e.key);
       if (dir) {
+        // Any arrow input from the controller is a "the user is
+        // driving with a controller" signal — hide the cursor so it
+        // doesn't visually compete with the focus ring. Idempotent;
+        // sticks while hidden. Both real keyboard arrows and the
+        // gamepad's synthesised keydowns funnel through here, so
+        // this single call covers both input sources.
+        hideCursor();
         // Respect a local React `onKeyDownCapture` / `onKeyDown`
         // handler that already redirected focus (e.g. Moonlight
         // Settings' sub-tab Down override captures ArrowDown to
