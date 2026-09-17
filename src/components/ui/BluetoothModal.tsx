@@ -100,13 +100,18 @@ function DeviceRow({
 
   if (paired) {
     // No visible action — Windows doesn't expose manual connect/disconnect
-    // for arbitrary paired devices either. Forget lives in the context menu.
+    // for arbitrary paired devices either. Forget lives in the context
+    // menu, reached here via right-click or the Shift+F10 / ContextMenu
+    // keyboard shortcut — both need the row to be focusable, so it still
+    // gets a tabIndex despite having no click action of its own.
     return (
       <div
+        tabIndex={0}
         onContextMenu={(e) => onMenu(e, device, paired)}
         data-context-menu
         data-bt-row={device.id}
-        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${
+        aria-label={`${device.name}, ${device.connected ? "connected" : "paired"}`}
+        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 outline-none focus-visible:bg-(--color-surface) ${
           device.connected ? "bg-(--color-accent-soft)" : ""
         } ${busy ? "opacity-40" : ""}`}
       >
