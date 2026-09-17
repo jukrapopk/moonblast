@@ -306,18 +306,24 @@ export function useSpatialController() {
         // sibling matches.
         const dirScope = findDirectionalScope(a, dir);
         const scope = dirScope ?? readScope();
-        // Up arrow with no modal and no vertical lock — run the library's
-        // normal Up search, but if it picks a topbar button, override
-        // with the active view's nav button (Esc semantics). The library
-        // picks by Euclidean distance and would otherwise land on the
-        // Apps button or a status chip from any page focusable whose
+        // Up arrow with no modal — run the library's normal Up search,
+        // but if it picks a topbar button, override with the active
+        // view's nav button (Esc semantics). The library picks by
+        // Euclidean distance and would otherwise land on the Apps
+        // button or a status chip from any page focusable whose
         // vertical line crosses them — but the user expects the
         // active view's button.
         //
-        // Mid-content Up is unaffected: the library finds the row above
-        // first, the override doesn't trigger (the row-above candidate
-        // isn't in the topbar), and focus moves one row up.
-        if (dir === "up" && !escapeStack.top() && !dirScope) {
+        // Mid-content Up is unaffected: the library finds the row
+        // above first, the override doesn't trigger (the row-above
+        // candidate isn't in the topbar), and focus moves one row up.
+        //
+        // When the page is scrolled to the top of <main> (vertical
+        // scope-lock applied), the library can't find a candidate
+        // above. Fall back to jumping to the active view's nav
+        // button — same destination, user gets the same "jump to
+        // nav" affordance from anywhere on the page.
+        if (dir === "up" && !escapeStack.top()) {
           e.preventDefault();
           const next = moveFocus(a, "up", scope);
           if (next) {
@@ -336,7 +342,13 @@ export function useSpatialController() {
             // Either the library picked something not in the topbar
             // (mid-content row-above), or the active-button lookup
             // failed — focus stays where the library put it.
+            return;
           }
+          // No candidate above — top of the vertical scope. Jump to
+          // the active view's nav button so the user always has an
+          // escape hatch from any page content.
+          const activeBtn = focusActiveViewButton();
+          if (activeBtn) return;
           return;
         }
         e.preventDefault();
