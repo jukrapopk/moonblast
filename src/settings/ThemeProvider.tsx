@@ -14,7 +14,7 @@ import type { Settings } from "./SettingsContext";
  *  tracks the Windows accent color (DWM colorization, including
  *  the OS's auto-picked variant on Win11 22H2+); `custom` falls
  *  back to settings.appearance.custom_accent. */
-export type AccentPreset = {
+type AccentPreset = {
   id: string;
   label: string;
   /** Color shown as the swatch chip in the picker row. Lifted
@@ -93,7 +93,7 @@ function presetApplied(p: AccentPreset, mode: "light" | "dark"): string {
  *  the Rust watcher). */
 const FALLBACK_ACCENT = "#0d1017"; // Neutral's dark-mode swatch
 
-export function resolveAccent(
+function resolveAccent(
   accentId: string,
   custom: string | null,
   osAccent: string | null,

@@ -10,7 +10,7 @@ export interface AudioDevice {
   is_default: boolean;
 }
 
-export interface AudioDeviceList {
+interface AudioDeviceList {
   devices: AudioDevice[];
   default_id: string;
 }

@@ -3,7 +3,7 @@ import { MagnifyingGlass, SortAscending, SortDescending } from "@phosphor-icons/
 import { Input } from "./Input";
 import { EmptyMessage } from "./EmptyMessage";
 
-export interface FilterListOptions<T> {
+interface FilterListOptions<T> {
   /** Stable identity key (e.g. path). */
   getKey: (i: T) => string;
   /** Display name — used for search and A↔Z sorting. */

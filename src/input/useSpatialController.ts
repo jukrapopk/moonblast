@@ -104,7 +104,7 @@ export function pushEscapeHandler(h: KeyHandler): () => void {
 }
 
 /** Same model for Enter / Space activation. */
-export function pushEnterHandler(h: KeyHandler): () => void {
+function pushEnterHandler(h: KeyHandler): () => void {
   return enterStack.push(h);
 }
 

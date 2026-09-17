@@ -437,6 +437,15 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     return () => cancelAnimationFrame(id);
   }, [busy, passwordTarget, open]);
 
+  // Re-scan the visible-network list and re-read the live connection so
+  // the modal reflects whatever just changed. Used after every mutating
+  // action (connect / disconnect / forget / connect-with-password).
+  async function refreshAfter() {
+    await scan();
+    const c = await fetchWifiCurrent();
+    setLiveSsid(c?.ssid ?? null);
+  }
+
   async function handleConnect(ssid: string) {
     await runAction(ssid, "connect", async () => {
       await wifiConnect(ssid);
@@ -444,10 +453,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // effect; poll the OS a few times to wait for the state to land
       // before refreshing the modal.
       await waitForState(ssid);
-      // Refresh the scan to update the `connected` flag.
-      await scan();
-      const c = await fetchWifiCurrent();
-      setLiveSsid(c?.ssid ?? null);
+      await refreshAfter();
     });
   }
 
@@ -457,9 +463,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // The disconnect command may also be async on the wlan service;
       // poll briefly so the modal reflects the real state.
       await waitForState(null);
-      await scan();
-      const c = await fetchWifiCurrent();
-      setLiveSsid(c?.ssid ?? null);
+      await refreshAfter();
     });
   }
 
@@ -469,9 +473,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // Profile deletion is synchronous — skip the state-poll, just
       // re-read the list so the `known` flag (and the connection, if
       // it was current) update.
-      await scan();
-      const c = await fetchWifiCurrent();
-      setLiveSsid(c?.ssid ?? null);
+      await refreshAfter();
     });
   }
 
@@ -486,9 +488,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // `runAction` captures failures into the error slot — staying on
       // the form lets the user correct the password.
       setPasswordTarget(null);
-      await scan();
-      const c = await fetchWifiCurrent();
-      setLiveSsid(c?.ssid ?? null);
+      await refreshAfter();
     });
   }
 

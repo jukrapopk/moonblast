@@ -11,6 +11,7 @@ import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
 import { Segmented } from "./ui/Segmented";
 import { Select, type SelectOptionInput } from "./ui/Select";
+import { Slider } from "./ui/Slider";
 import { Toggle } from "./ui/Toggle";
 
 const RATIOS = ["16:9", "16:10", "21:9", "32:9", "4:3", "5:4"];
@@ -186,14 +187,14 @@ export function MoonlightSettings() {
           </Row>
           <Row label="Bitrate" description={`${m.bitrate} Mbps`}>
             <div className="flex shrink-0 items-center gap-3">
-              <input
-                type="range"
+              <Slider
+                label="Bitrate"
+                value={Math.min(100, Math.max(1, m.bitrate))}
+                onChange={(v) => set("bitrate", v)}
                 min={1}
                 max={100}
                 step={1}
-                value={Math.min(100, Math.max(1, m.bitrate))}
-                onChange={(e) => set("bitrate", Number(e.currentTarget.value))}
-                className="w-44 accent-(--color-accent)"
+                className="w-44"
               />
               <span className="w-9 text-right text-sm tabular-nums text-(--color-muted)">{m.bitrate}</span>
               <PencilButton onClick={() => setBitrateOpen(true)} label="Custom bitrate" />

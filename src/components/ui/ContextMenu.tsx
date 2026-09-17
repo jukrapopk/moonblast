@@ -9,7 +9,7 @@ import {
 import { useFocusTrap } from "../../input/useSpatialController";
 import { focusInitial } from "../../input/spatialNav";
 
-export interface CtxAction {
+interface CtxAction {
   label: string;
   icon?: ReactNode;
   danger?: boolean;
@@ -17,7 +17,7 @@ export interface CtxAction {
   onClick: () => void;
 }
 
-export interface MenuState {
+interface MenuState {
   x: number;
   y: number;
   items: CtxAction[];

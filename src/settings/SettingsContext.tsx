@@ -63,7 +63,7 @@ export interface Settings {
   app_shortcuts: { name: string; path: string; source: string; kind: string; display_name: string | null; custom_icon: string | null; use_desktop_icon: boolean; steamgrid_icon: string | null; auto_launch: boolean }[];
 }
 
-export const DEFAULT_SETTINGS: Settings = {
+const DEFAULT_SETTINGS: Settings = {
   version: 1,
   general: { last_view: "apps" },
   integrations: {

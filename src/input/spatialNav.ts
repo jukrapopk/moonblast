@@ -67,27 +67,6 @@ export function directionFromKey(key: string): Direction | null {
 }
 
 /**
- * Return the first focusable element inside `scope` (or the document) and
- * focus it. Returns the element or `null` if nothing was found.
- *
- * The library exposes this path internally via `_getNextFocus(null, …)` —
- * we just call that with no direction key so it returns the first match.
- */
-export function focusFirst(scope?: HTMLElement | null): HTMLElement | null {
-  const first = _getNextFocus(null, 0, scope ?? undefined);
-  if (first) first.focus();
-  return first;
-}
-
-/**
- * Read-only: return the first focusable inside `scope` without focusing it.
- * Useful for tests / pre-flight checks.
- */
-export function firstFocusable(scope?: HTMLElement | null): HTMLElement | null {
-  return _getNextFocus(null, 0, scope ?? undefined);
-}
-
-/**
  * Focus the first focusable inside `scope`, optionally narrowed by a CSS
  * selector. Used by modal autoFocus / view mount — modal body may have
  * multiple inputs and we want the first visible one.

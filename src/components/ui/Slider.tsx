@@ -10,18 +10,26 @@ interface SliderProps {
   /** Step granularity. Defaults to 1 (every integer). */
   step?: number;
   disabled?: boolean;
+  /**
+   * Wrapper class passthrough so callers can size the slider (e.g.
+   * `w-44`) without prop drilling. Defaults to `w-full`.
+   */
+  className?: string;
 }
 
 /**
- * Shared volume-style slider. Native range input tinted with the accent
- * token — arrows/drag work with keyboard and gamepad focus out of the box.
+ * Shared chrome-free range slider. Native `<input type="range">` with
+ * the accent-color tinted track and a focus ring on a rounded wrapper.
  *
- * Focus ring lives on the rounded wrapper, not on the <input> itself.
  * Range inputs are replaced elements: their outline ignores
  * border-radius and wraps the full rectangular element, so we draw
- * the ring on the wrapper via `:has(:focus-visible)` instead. The
- * inner <input> gets `outline: none` so the wrapper's ring is the
+ * the ring on the rounded wrapper via `:focus-within` instead. The
+ * inner `<input>` gets `outline: none` so the wrapper's ring is the
  * only one rendered.
+ *
+ * Use this when the slider is the sole focusable control on its row.
+ * For combined controls (e.g. mute + slider), wrap in your own
+ * focusable element and use a raw `<input type="range">` underneath.
  */
 export function Slider({
   value,
@@ -31,14 +39,13 @@ export function Slider({
   max = 100,
   step = 1,
   disabled,
+  className = "w-full",
 }: SliderProps) {
   return (
     <div
-      className={`rounded-full pt-1 pb-0.5 px-2 transition ${
-        disabled
-          ? "cursor-not-allowed opacity-40"
-          : "focus-within:shadow-[0_0_0_2px_var(--color-accent)]"
-      }`}
+      className={`rounded-full transition focus-within:shadow-[0_0_0_2px_var(--color-accent)] ${
+        disabled ? "cursor-not-allowed opacity-40" : ""
+      } ${className}`}
     >
       <input
         type="range"
@@ -49,7 +56,7 @@ export function Slider({
         aria-label={label}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
-        className="w-full cursor-pointer !outline-none disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:outline-none"
+        className="w-full cursor-pointer appearance-none bg-transparent !outline-none focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         style={{ accentColor: "var(--color-accent)" }}
       />
     </div>
