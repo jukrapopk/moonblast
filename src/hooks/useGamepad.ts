@@ -82,11 +82,20 @@ export function useGamepad() {
             if (kind === "enter") {
               // Route through the registered enter-stack so modal
               // primary actions (submit / pick) win. If nothing is on
-              // the stack, fall through to a synthetic keydown so
-              // native <button> click activation still fires.
+              // the stack, manually click the focused element —
+              // synthesised `KeyboardEvent`s don't trigger the
+              // browser's native button activation (only trusted
+              // keydowns do), so we have to drive it ourselves.
               const handler = peekEnter();
               if (handler) handler(new KeyboardEvent("keydown", { key: ENTER_KEY }));
-              else dispatchKey(ENTER_KEY);
+              else {
+                const a = document.activeElement;
+                if (a instanceof HTMLElement && typeof a.click === "function") {
+                  a.click();
+                } else {
+                  dispatchKey(ENTER_KEY);
+                }
+              }
             } else if (kind === "escape") {
               const handler = peekEscape();
               if (handler) handler(new KeyboardEvent("keydown", { key: ESCAPE_KEY }));
