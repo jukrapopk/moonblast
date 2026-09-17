@@ -59,7 +59,6 @@ export function Prompt({
   return (
     <Modal open={open} onClose={onClose} title={title} subtitle={subtitle} width={width}>
       <Input
-        autoFocus
         value={val}
         onChange={(e) => setVal(e.currentTarget.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}

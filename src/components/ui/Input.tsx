@@ -64,6 +64,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       <input
         ref={ref}
         {...props}
+        // Default to non-focusable so spatial nav + Tab skip text
+        // inputs — Left/Right inside a text field always means
+        // caret movement (universal input convention), and Tab
+        // should walk the buttons / links / rows that surround
+        // the field rather than drop the user into a typing trap.
+        // Mouse clicks still focus the field (browsers allow focus
+        // on tabIndex={-1} elements when clicked), so the existing
+        // click-to-type behaviour is preserved. Callers that need
+        // keyboard focus can pass `tabIndex={0}` (or any non-`-1`
+        // value) explicitly.
+        tabIndex={-1}
         // Marker so App-level Back/Refresh fallback steps out of the
         // way for text-edit menus (Undo / Redo / Cut / Copy / Paste /
         // Select All).

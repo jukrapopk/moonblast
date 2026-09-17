@@ -737,6 +737,7 @@ function ColorPicker({
             type="color"
             value={customAccent ?? "#6f78c8"}
             onChange={(e) => onSetCustomAccent(e.currentTarget.value)}
+            tabIndex={-1}
             className="h-7 w-10 cursor-pointer rounded border border-(--color-border) bg-transparent"
             aria-label="Custom color"
           />
@@ -751,6 +752,7 @@ function ColorPicker({
             }}
             placeholder="#6f78c8"
             maxLength={7}
+            tabIndex={-1}
             className="h-7 w-24 rounded border border-(--color-border) bg-(--color-surface-2) px-2 font-mono text-xs text-(--color-text) outline-none focus:border-(--color-accent)"
           />
         </div>

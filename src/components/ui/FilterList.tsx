@@ -85,7 +85,6 @@ export function FilterList<T>({
             value={q}
             onChange={(e) => setQ(e.currentTarget.value)}
             placeholder={searchPlaceholder}
-            autoFocus
           />
         </div>
         {headerAction}

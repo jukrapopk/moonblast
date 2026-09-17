@@ -410,7 +410,7 @@ function AddMachineModal({
       onClose={onClose}
       title="Add machine"
       subtitle="Save a custom address — useful for Tailscale or other remote networks."
-      initialFocus="input[placeholder*='192.168']"
+      initialFocus="button"
     >
       <div className="space-y-3">
         <Input

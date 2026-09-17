@@ -209,7 +209,7 @@ function AddAppModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one. Some apps won't launch in Immersive Mode." width="max-w-lg" initialFocus="input">
+    <Modal open={open} onClose={onClose} title="Add app" subtitle="Pick an installed app or browse to one. Some apps won't launch in Immersive Mode." width="max-w-lg">
       <FilterList
         items={installed}
         loading={loading}
@@ -348,7 +348,7 @@ function SteamGridModal({
       title="SteamGridDB icon"
       subtitle={app ? `for ${app.name}` : ""}
       width="max-w-lg"
-      initialFocus="input"
+      initialFocus="button"
     >
       <div className="flex items-center gap-2">
         <div className="flex-1">
@@ -647,7 +647,6 @@ export function AppsView() {
              *  exactly like before. */}
             <div className="w-56">
               <Input
-                tabIndex={-1}
                 icon={<MagnifyingGlass size={16} weight="bold" />}
                 value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
