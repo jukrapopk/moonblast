@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -50,12 +51,18 @@ export function Modal({
   width = "max-w-md",
   initialFocus,
 }: ModalProps) {
-  // Hold the live panel in a ref, not state. The trap (Tab wrap, scope
-  // set/clear) lives in `useFocusTrap` and reads `panelEl`; if we used
-  // state we'd re-render every time the ref callback fires (twice on
-  // every AnimatePresence churn — node, then null). The ref form lets
-  // the trap see the live node without churning React's tree.
+  // Two parallel handles on the live panel:
+  //   - `panelElRef` is the ref the AnimatePresence ref callback
+  //     writes to, kept live between renders and queried by the
+  //     MutationObserver / focusin sanitizer (which fire
+  //     asynchronously and shouldn't depend on a stale closure).
+  //   - `panelEl` is state that re-renders this component when the
+  //     ref callback fires, so `useFocusTrap`'s effect (which reads
+  //     `panel` from its render-time closure) actually runs with the
+  //     live node — a ref alone never triggers re-renders, which
+  //     would leave the escape handler / scope / Tab wrap un-installed.
   const panelElRef = useRef<HTMLDivElement | null>(null);
+  const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
 
   // Stash onClose in a ref so callers passing inline callbacks don't
   // churn the focus-trap effect on every parent render.
@@ -68,13 +75,18 @@ export function Modal({
   // Focus trap owns Escape + Enter stack, scope, and Tab wrap. It does
   // NOT schedule any autoFocus — that's owned by the open/close effect
   // below so there is one and only one focus scheduler per lifecycle.
-  useFocusTrap(panelElRef.current, {
+  useFocusTrap(panelEl, {
     onEscape: () => onCloseRef.current(),
   });
 
-  // Bridge the ref callback to the ref. No state, no re-render.
+  // Bridge the ref callback to BOTH the ref and the state. The state
+  // write is what makes `useFocusTrap` re-run with the live node; the
+  // ref write is what the observer / sanitizer read off the live DOM
+  // without depending on a captured closure. Keeping both in sync is
+  // safe because they never diverge for more than one frame.
   const setRefs = useCallback((node: HTMLDivElement | null) => {
     panelElRef.current = node;
+    setPanelEl(node);
   }, []);
 
   // The whole open/close lifecycle. A single effect, keyed on `open`,
