@@ -129,22 +129,3 @@ html {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
-
-/* LRUD mode (user is navigating with arrows / Tab / Enter — set by
- * `useLrudMode`). While the user is on the keyboard:
- *   - The cursor is hidden everywhere (`cursor: none`).
- *   - Pointer events are disabled so hover styles don't fire and
- *     stray clicks don't activate anything.
- *
- * `pointer-events: none` does NOT affect keyboard focus — focus is
- * managed by the spatial controller regardless of pointer state, so
- * Tab/arrows continue to work normally.
- *
- * Mouse movement or click leaves LRUD mode (removes `data-lrud`)
- * and everything re-enables. */
-@layer utilities {
-  html[data-lrud] * {
-    cursor: none;
-    pointer-events: none;
-  }
-}

@@ -13,7 +13,6 @@ import { useSettings, useSettingsField } from "./settings/SettingsContext";
 import { useAudioMaster } from "./hooks/useAudio";
 import { useBattery } from "./hooks/useBattery";
 import { useFocusOnHover } from "./hooks/useFocusOnHover";
-import { useLrudMode } from "./hooks/useLrudMode";
 import { useSpatialController } from "./input/useSpatialController";
 import { openPowerMenu, usePowerMenuTrigger } from "./hooks/usePowerMenuTrigger";
 import { useWifi } from "./hooks/useWifi";
@@ -47,7 +46,6 @@ function writeSessionView(v: View) {
 }
 
 export default function App() {
-  useLrudMode();
   useFocusOnHover();
   const { settings, ready, update } = useSettings();
 
