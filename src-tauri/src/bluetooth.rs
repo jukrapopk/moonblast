@@ -36,7 +36,10 @@ use windows::core::{Error as WinError, Ref, HSTRING};
 use windows::Devices::Bluetooth::{
     BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice, BluetoothMajorClass,
 };
-use windows::Devices::Enumeration::{DeviceInformation, DeviceInformationUpdate, DeviceWatcher};
+use windows::Devices::Enumeration::{
+    DeviceInformation, DeviceInformationCustomPairing, DeviceInformationUpdate,
+    DevicePairingKinds, DevicePairingRequestedEventArgs, DeviceWatcher,
+};
 use windows::Devices::Radios::{Radio, RadioAccessStatus, RadioKind, RadioState};
 use windows::Foundation::TypedEventHandler;
 
@@ -341,10 +344,20 @@ pub fn scan(seconds: u64) -> Vec<BluetoothDeviceEntry> {
     .unwrap_or_default()
 }
 
-/// Pair with a discovered device by id. Uses the default (non-custom)
-/// pairing flow — see the module doc comment for why. Returns a
-/// human-readable error on failure, including the "needs a PIN" case so
-/// the UI can suggest falling back to Windows' Bluetooth settings.
+/// Pair with a discovered device by id.
+///
+/// A bare `DeviceInformationPairing::PairAsync()` (no custom handler)
+/// reliably fails with `Failed` even for "Just Works" devices that need
+/// no user interaction at all — per Microsoft's own pairing-ceremony
+/// docs, the protocol stack won't complete pairing unless *some* pairing
+/// handler is registered, even one that just accepts immediately. So we
+/// register a minimal custom handler and only declare support for
+/// `ConfirmOnly` (the ceremony with nothing to show/type — covers the
+/// overwhelming majority of modern peripherals): the handler
+/// auto-accepts it, and `PairAsync` is called with only that kind, so
+/// Windows fails the negotiation itself (rather than us guessing from an
+/// opaque status) for devices that need a PIN or numeric-comparison
+/// prompt. That's a deliberate scope cut — see the module doc comment.
 pub fn pair(id: &str) -> Result<(), String> {
     ensure_winrt();
     let hid = HSTRING::from(id);
@@ -359,24 +372,38 @@ pub fn pair(id: &str) -> Result<(), String> {
     if !pairing.CanPair().unwrap_or(false) {
         return Err("This device can't be paired from here".to_string());
     }
-    let result = pairing
-        .PairAsync()
+    let custom = pairing.Custom().map_err(win_err)?;
+    let token = custom
+        .PairingRequested(&TypedEventHandler::new(
+            |_sender: Ref<'_, DeviceInformationCustomPairing>,
+             args: Ref<'_, DevicePairingRequestedEventArgs>| {
+                if let Some(args) = args.as_ref() {
+                    let is_confirm_only = args
+                        .PairingKind()
+                        .map(|k| k == DevicePairingKinds::ConfirmOnly)
+                        .unwrap_or(false);
+                    if is_confirm_only {
+                        let _ = args.Accept();
+                    }
+                    // Any other kind: don't accept — PairAsync below only
+                    // declared ConfirmOnly support, so leaving this
+                    // un-accepted surfaces as a normal pairing failure.
+                }
+                Ok(())
+            },
+        ))
+        .map_err(win_err)?;
+    let result = custom
+        .PairAsync(DevicePairingKinds::ConfirmOnly)
         .map_err(win_err)?
         .get()
         .map_err(win_err)?;
+    let _ = custom.RemovePairingRequested(token);
     let status = result.Status().map_err(win_err)?;
-    // `DevicePairingResultStatus::Paired` is the only success value;
-    // everything else (including the PIN/numeric-comparison cases we
-    // deliberately don't drive) is surfaced as an error.
     use windows::Devices::Enumeration::DevicePairingResultStatus as S;
     if status == S::Paired || status == S::AlreadyPaired {
         Ok(())
-    } else if status == S::ConnectionRejected
-        || status == S::AuthenticationFailure
-        || status == S::RejectedByHandler
-    {
-        Err("This device needs a PIN or confirmation — pair it from Windows Bluetooth settings instead".to_string())
     } else {
-        Err(format!("Pairing failed ({status:?})"))
+        Err("This device needs a PIN or confirmation — pair it from Windows Bluetooth settings instead".to_string())
     }
 }
