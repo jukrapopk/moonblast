@@ -1300,11 +1300,23 @@ fn is_image_bytes(b: &[u8]) -> bool {
 fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
 
+    // Resolution + FPS both fall back to the detected display when set
+    // to "auto". Read once and destructure so we don't call
+    // `EnumDisplaySettingsW` twice when both prefs are "auto" (the
+    // default). Cheap per call but pointless double work.
+    let display = if prefs.resolution.eq_ignore_ascii_case("auto")
+        || prefs.refresh_rate.eq_ignore_ascii_case("auto")
+    {
+        client_display_raw()
+    } else {
+        None
+    };
+
     // Resolution: normalize legacy "1920×1080" unicode x; "auto" = detected.
     let resolution = if prefs.resolution.trim().is_empty()
         || prefs.resolution.eq_ignore_ascii_case("auto")
     {
-        client_display_raw()
+        display
             .map(|(w, h, _)| format!("{w}x{h}"))
             .unwrap_or_default()
     } else {
@@ -1319,7 +1331,7 @@ fn moonlight_flags(prefs: &settings::MoonlightStreaming) -> Vec<String> {
     let fps = if prefs.refresh_rate.trim().is_empty()
         || prefs.refresh_rate.eq_ignore_ascii_case("auto")
     {
-        client_display_raw().and_then(|(_, _, f)| f)
+        display.and_then(|(_, _, f)| f)
     } else {
         parse_fps(&prefs.refresh_rate)
     };
