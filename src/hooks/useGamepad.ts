@@ -4,15 +4,11 @@
  * function the keyboard listener uses — so gamepad and keyboard
  * are indistinguishable in behaviour: same lost-focus recovery,
  * same text-input passthrough, same scope locks, same Up-arrow
- * "jump to nav" override. Face buttons (A/B) and shoulders
- * (LB/RB) are still gamepad-specific actions (enter, escape, view
- * cycle) and don't go through the directional path.
+ * "jump to nav" override. Face buttons (A/B) handle activate /
+ * cancel; no other gamepad buttons are mapped — view cycling
+ * and other navigation flows go through the directional pad.
  *
  * Mount once at the app root, alongside `useSpatialController`.
- *
- * View cycling: LB / RB dispatch a `moonblast:cycle-view` CustomEvent
- * that App.tsx listens for. Keyboard Tab deliberately no longer cycles
- * views — it follows native browser focus traversal instead.
  */
 import { useEffect } from "react";
 import { dispatchDirection } from "../input/useSpatialController";
@@ -66,12 +62,14 @@ export function useGamepad() {
         // moves the mouse, so this stays self-correcting without
         // needing a separate "exit on gamepad idle" timer.
         enterLrudMode();
-        // Face + shoulder buttons.
-        const faces: [number, "enter" | "escape" | "tab-prev" | "tab-next"][] = [
+        // Face buttons only — A activates, B cancels. The
+        // shoulders (LB/RB) used to cycle top-level views, but
+        // that flow is gone: view switching now happens through
+        // the directional pad via the TopBar nav buttons, the
+        // same path keyboard users take.
+        const faces: [number, "enter" | "escape"][] = [
           [0, "enter"],
           [1, "escape"],
-          [4, "tab-prev"], // LB
-          [5, "tab-next"], // RB
         ];
         for (const [idx, kind] of faces) {
           const btn = pad.buttons[idx];
@@ -100,17 +98,6 @@ export function useGamepad() {
               const handler = peekEscape();
               if (handler) handler(new KeyboardEvent("keydown", { key: ESCAPE_KEY }));
               else dispatchKey(ESCAPE_KEY);
-            } else if (kind === "tab-prev" || kind === "tab-next") {
-              // LB / RB cycle the top-level views. Keyboard Tab no longer
-              // does this — we want native Tab to traverse focusables
-              // (form controls, modal buttons, etc.) instead. Dispatch
-              // a custom event so App.tsx can swap views without the
-              // spatial controller needing to know about view state.
-              window.dispatchEvent(
-                new CustomEvent("moonblast:cycle-view", {
-                  detail: { dir: kind === "tab-next" ? 1 : -1 },
-                }),
-              );
             }
           } else if (!btn.pressed) {
             held.delete(id);

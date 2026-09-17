@@ -47,8 +47,6 @@ function writeSessionView(v: View) {
   }
 }
 
-const VIEW_ORDER: View[] = ["apps", "moonlight", "settings"];
-
 export default function App() {
   useLrudMode();
   useFocusOnHover();
@@ -126,21 +124,6 @@ export default function App() {
   // document order.
   useSpatialController();
   useGamepad();
-
-  // View cycling is the gamepad shoulders' job now. Keyboard Tab has
-  // no special meaning here. The custom event comes from `useGamepad`'s
-  // LB/RB handlers.
-  useEffect(() => {
-    function onCycle(e: Event) {
-      const dir = (e as CustomEvent<{ dir: 1 | -1 }>).detail.dir;
-      if (view === null) return;
-      const i = VIEW_ORDER.indexOf(view);
-      const next = (i + dir + VIEW_ORDER.length) % VIEW_ORDER.length;
-      setView(VIEW_ORDER[next]);
-    }
-    window.addEventListener("moonblast:cycle-view", onCycle);
-    return () => window.removeEventListener("moonblast:cycle-view", onCycle);
-  }, [view]);
 
   // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
   // asks the frontend to open the Power menu via this event. The
