@@ -283,8 +283,15 @@ function processDirection(dir: Direction, preventDefault: () => void): void {
     return;
   }
   if (a instanceof HTMLTextAreaElement) return;
-  // 3. Native <select>: Up/Down escape to the next focusable.
-  if (a instanceof HTMLSelectElement) return;
+  // 3. Native <select>: Left/Right are reserved for the OS-native
+  //    picker (open/close dropdown, navigate options) — let those
+  //    through. Up/Down escape to the next focusable via spatial
+  //    nav, matching the slider pattern (see Select.tsx for the
+  //    matching `preventDefault` that blocks the dropdown opening
+  //    when Up/Down is pressed for spatial nav).
+  if (a instanceof HTMLSelectElement) {
+    if (dir === "left" || dir === "right") return;
+  }
   // 4. Native range input: Left/Right step the value, Up/Down escape.
   if (a instanceof HTMLInputElement && a.type === "range") {
     if (dir === "left" || dir === "right") return;
