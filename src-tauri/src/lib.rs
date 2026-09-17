@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 mod cmd;
+mod cursor;
 mod display;
 mod hdr;
 mod logging;
@@ -2876,6 +2877,7 @@ pub fn run() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            cursor::set_cursor_visible,
             settings::get_settings,
             settings::update_settings,
             toggle_fullscreen,
