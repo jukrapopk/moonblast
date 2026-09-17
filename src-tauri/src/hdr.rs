@@ -38,6 +38,8 @@ use windows::Win32::Devices::Display::{
     DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE,
     QDC_ONLY_ACTIVE_PATHS,
 };
+use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+use winreg::RegKey;
 
 use crate::moonblast_log;
 
@@ -125,16 +127,28 @@ pub fn hdr_status_for(adapter_low: u32, adapter_high: i32, target_id: u32) -> Hd
         // Prefer the cached last-set state if `set_hdr` has been called
         // at least once in this process — the driver's `advancedColorEnabled`
         // bit is unreliable on multi-monitor NVIDIA setups (returns 1 even
-        // when HDR is visually off). Fall back to the driver bit on the
-        // first read of a fresh process.
+        // when HDR is visually off). On the very first read of a fresh
+        // process, also don't trust the driver bit alone: read the
+        // OS-level state from the per-display `EnableHDR` registry
+        // value that Windows HDR Settings writes. If that's also
+        // absent (very fresh install, no display has ever opened the
+        // HDR Settings page), default to `false` rather than the
+        // driver bit — showing "off" is the safer default; the
+        // driver bit has been seen as `true` on systems that visually
+        // have HDR off.
         let enabled = if LAST_SET_INITIALIZED.load(Ordering::Acquire) {
             LAST_SET_ENABLED.load(Ordering::Acquire)
         } else {
-            driver_enabled
+            match read_os_hdr_state_from_registry() {
+                Some(reg) => reg,
+                None => false,
+            }
         };
         moonblast_log!(
-            "hdr_status: bits=0x{:x} supported={supported} driver_enabled={driver_enabled} cached_enabled={enabled} forceDisabled={force_disabled} locked={locked}",
-            bits
+            "hdr_status: bits=0x{:x} supported={supported} driver_enabled={driver_enabled} cached_enabled={} reg_enabled={:?} enabled={enabled} forceDisabled={force_disabled} locked={locked}",
+            bits,
+            LAST_SET_ENABLED.load(Ordering::Acquire),
+            read_os_hdr_state_from_registry(),
         );
         HdrStatus { supported, enabled, locked }
     }
@@ -150,6 +164,59 @@ pub fn hdr_status() -> HdrStatus {
         return HdrStatus::default();
     };
     hdr_status_for(adapter_id.LowPart, adapter_id.HighPart, target_id)
+}
+
+/// Read the user-facing HDR state from the Windows registry.
+///
+/// On multi-monitor NVIDIA setups the `advancedColorEnabled` bit of
+/// the DisplayConfig packet is unreliable — it returns `1` regardless
+/// of whether HDR is actually on. The Settings → System → Display
+/// "Use HDR" toggle, however, always writes a per-display `EnableHDR`
+/// DWORD under
+/// `HKCU\Software\Microsoft\Windows\CurrentVersion\VideoSettings\<subkey>`.
+/// That subkey is the OS-level truth: read it and we know what the
+/// user sees in Windows Settings, which is also what they expect
+/// Moonblast to show.
+///
+/// Returns:
+///   - `Some(true)` if any subkey has `EnableHDR = 1` (most setups
+///     have a single HDR display; if multiple disagree we take the
+///     "on" reading — the user just clicked it on somewhere).
+///   - `Some(false)` if at least one subkey has `EnableHDR = 0` and
+///     none are `1`.
+///   - `None` if no `EnableHDR` values exist (older drivers / first
+///     boot before Settings has ever been opened for any display —
+///     caller should fall back to the driver bit or default).
+fn read_os_hdr_state_from_registry() -> Option<bool> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(root) = hkcu.open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\VideoSettings",
+        KEY_READ,
+    ) else {
+        return None;
+    };
+    let subkeys: Vec<String> = root.enum_keys().filter_map(|k| k.ok()).collect();
+    if subkeys.is_empty() {
+        return None;
+    }
+    let mut saw_any = false;
+    let mut any_on = false;
+    for name in &subkeys {
+        let Ok(sub) = root.open_subkey(name) else {
+            continue;
+        };
+        if let Ok(v) = sub.get_value::<u32, _>("EnableHDR") {
+            saw_any = true;
+            if v != 0 {
+                any_on = true;
+            }
+        }
+    }
+    if !saw_any {
+        None
+    } else {
+        Some(any_on)
+    }
 }
 
 pub fn set_hdr_for(
