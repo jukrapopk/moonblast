@@ -43,7 +43,7 @@ export function Slider({
 }: SliderProps) {
   return (
     <div
-      className={`rounded-full transition focus-within:shadow-[0_0_0_2px_var(--color-accent)] ${
+      className={`rounded-full transition focus-within:shadow-[0_0_0_2px_var(--color-accent)] pt-1 pb-0 pl-2 pr-2 ${
         disabled ? "cursor-not-allowed opacity-40" : ""
       } ${className}`}
     >
@@ -56,7 +56,7 @@ export function Slider({
         aria-label={label}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
-        className="w-full cursor-pointer appearance-none bg-transparent !outline-none focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        className="w-full cursor-pointer !outline-none focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         style={{ accentColor: "var(--color-accent)" }}
       />
     </div>
