@@ -405,6 +405,41 @@ export function useFocusTrap(
     const prevScope = readScope();
     setSpatialScope(panel);
 
+    // Tab / Shift+Tab trap — arrows are already trapped via
+    // `setSpatialScope`. While a modal panel is mounted, browser-native
+    // Tab traversal would walk out of the panel (it's just a <div> in
+    // the page DOM, not a real dialog). Wrap Tab around the panel's
+    // first/last focusable so focus stays inside.
+    const PANEL_FOCUSABLES =
+      'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    function onTabKey(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      const all = Array.from(panel!.querySelectorAll<HTMLElement>(PANEL_FOCUSABLES));
+      const focusables = all.filter(
+        (el) => el.offsetParent !== null || el === document.activeElement,
+      );
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const inside = active instanceof Node && panel!.contains(active);
+      if (e.shiftKey) {
+        if (!inside || active === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (!inside || active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", onTabKey, true);
+
     if (autoFocus) {
       // Defer one frame so the panel's framer-motion enter animation
       // hasn't stolen focus mid-transition.
@@ -420,6 +455,7 @@ export function useFocusTrap(
       });
       return () => {
         cancelAnimationFrame(id);
+        window.removeEventListener("keydown", onTabKey, true);
         popEscape();
         popEnter?.();
         setSpatialScope(prevScope);
@@ -427,6 +463,7 @@ export function useFocusTrap(
     }
 
     return () => {
+      window.removeEventListener("keydown", onTabKey, true);
       popEscape();
       popEnter?.();
       setSpatialScope(prevScope);
