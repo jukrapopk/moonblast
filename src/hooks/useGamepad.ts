@@ -1,10 +1,12 @@
 /**
- * Gamepad → spatial navigation bridge. The gamepad is a pure directional
- * input device; instead of synthesising `KeyboardEvent`s (which used to
- * be the only path because the keyboard handler was the sole consumer),
- * we drive the spatial nav API directly. That removes the React keydown
- * round-trip and lets the same arrow go through whatever spatial scope
- * is active — including modal focus traps.
+ * Gamepad → spatial navigation bridge. The gamepad's D-pad and
+ * left stick route through `dispatchDirection` — the same shared
+ * function the keyboard listener uses — so gamepad and keyboard
+ * are indistinguishable in behaviour: same lost-focus recovery,
+ * same text-input passthrough, same scope locks, same Up-arrow
+ * "jump to nav" override. Face buttons (A/B) and shoulders
+ * (LB/RB) are still gamepad-specific actions (enter, escape, view
+ * cycle) and don't go through the directional path.
  *
  * Mount once at the app root, alongside `useSpatialController`.
  *
@@ -13,8 +15,7 @@
  * views — it follows native browser focus traversal instead.
  */
 import { useEffect } from "react";
-import { moveFocus } from "../input/spatialNav";
-import { getSpatialScope } from "../input/useSpatialController";
+import { dispatchDirection } from "../input/useSpatialController";
 import { useSpatialControllerInternals } from "../input/controllerInternals";
 
 const ENTER_KEY = "Enter";
@@ -99,8 +100,11 @@ export function useGamepad() {
           }
         }
 
-        // D-pad. Direct spatial — goes through whatever scope is active
-        // (so it respects modal traps automatically).
+        // D-pad. Routes through the same `dispatchDirection` helper
+        // the keyboard listener uses, so D-pad / left-stick are
+        // indistinguishable from arrow keys — same lost-focus
+        // recovery, same text-input passthrough, same scope locks,
+        // same Up-arrow "jump to nav" override.
         const dpad: [number, "up" | "down" | "left" | "right"][] = [
           [12, "up"],
           [13, "down"],
@@ -113,13 +117,13 @@ export function useGamepad() {
           const id = `dpad-${idx}`;
           if (btn.pressed && !held.has(id)) {
             held.add(id);
-            moveFocus(document.activeElement, dir, getSpatialScope());
+            dispatchDirection(dir);
           } else if (!btn.pressed) {
             held.delete(id);
           }
         }
 
-        // Left stick analog — same spatial path.
+        // Left stick analog — same path as D-pad.
         const ax = pad.axes[0] ?? 0;
         const ay = pad.axes[1] ?? 0;
         const dx = axisDir(ax);
@@ -133,11 +137,7 @@ export function useGamepad() {
           const id = `axis-${dir}`;
           if (v && !held.has(id)) {
             held.add(id);
-            moveFocus(
-              document.activeElement,
-              dir as "up" | "down" | "left" | "right",
-              getSpatialScope(),
-            );
+            dispatchDirection(dir as "up" | "down" | "left" | "right");
           } else if (!v) {
             held.delete(id);
           }

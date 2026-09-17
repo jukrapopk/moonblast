@@ -20,15 +20,20 @@
  *
  * Design notes
  * ------------
- *  - Single global listener: the spatial library is a pure DOM function
- *    that needs `document.activeElement`, so we route ALL keys through one
- *    place. Gamepad synthesises `KeyboardEvent`s which reach the same
- *    listener, so gamepad + keyboard share a single code path.
+ *  - Single global keyboard listener. The gamepad poller routes its
+ *    D-pad / left-stick presses through the same `processDirection`
+ *    function via `dispatchDirection`, so gamepad + keyboard share an
+ *    identical directional code path (lost-focus recovery, scope locks,
+ *    Up-override, etc.).
  *  - LIFO escape/enter stacks: each Modal / ContextMenu pushes a handler
  *    on open and pops it on close. The top of the stack wins.
- *  - `scopeRef` lets views / modals constrain spatial movement so arrows
- *    can't escape a modal panel. `setSpatialScope(el)` is called by the
- *    container that wants focus to be trapped within it.
+ *  - `spatialScope` lets views / modals constrain spatial movement so
+ *    arrows can't escape a modal panel. `setSpatialScope(el)` is called
+ *    by the container that wants focus to be trapped within it.
+ *  - `lastFocusedRef` tracks the last element the user focused (via
+ *    focusin / mousedown) so an arrow press after focus has been lost
+ *    (e.g. clicked outside any focusable) restores focus rather than
+ *    teleporting to the active view's nav button.
  */
 import { useEffect, useRef } from "react";
 import { directionFromKey, focusInitial, moveFocus, type Direction } from "./spatialNav";
@@ -89,6 +94,16 @@ const enterStack: EnterStack = (() => {
 
 const spatialScope: ScopeRef = { current: null };
 
+/**
+ * Tracks the last element that received focus via keyboard or mouse
+ * click. Module-level singleton — same rationale as the escape/enter
+ * stacks and the spatial scope: the input pipeline is global, so the
+ * focus history is too. Used by `processDirection` to re-establish
+ * focus when arrows fire while focus is lost (e.g. clicked outside
+ * any focusable).
+ */
+const lastFocusedRef: { current: HTMLElement | null } = { current: null };
+
 // Wire peek accessors for the gamepad bridge. Runs once at module load.
 useSpatialControllerInternals.registerPeeks(
   () => enterStack.top(),
@@ -113,9 +128,8 @@ export function setSpatialScope(el: HTMLElement | null): void {
   spatialScope.current = el;
 }
 
-/** Read the current scope — used by the gamepad bridge so D-pad arrows
- *  respect whatever modal / focus trap is active without going through
- *  the spatial controller's keydown listener. */
+/** Read the current scope — exposed for components / tests that need to
+ *  query which container arrows are trapped inside. */
 export function getSpatialScope(): HTMLElement | null {
   return spatialScope.current;
 }
@@ -123,15 +137,26 @@ export function getSpatialScope(): HTMLElement | null {
 const readScope = () => spatialScope.current;
 
 /**
- * Mount the global keyboard + gamepad listener. Should be called once,
- * at the app root. Returns nothing — the controller installs/teardown
- * happens in `useEffect`.
- *
- * Tab is intentionally not intercepted here — the browser's native
- * focus traversal handles form controls / native buttons / links in
- * document order. View cycling is the gamepad shoulders' job (see
- * `useGamepad`).
+ * Track every focus change / click so `processDirection` can
+ * re-establish focus when arrows fire while focus has been lost.
+ * Called once from `useSpatialController`'s effect — module-level
+ * so the focus history outlives any single mount of the controller.
  */
+function trackFocusForRecovery(): () => void {
+  function rememberFocus() {
+    const el = document.activeElement;
+    if (el && el !== document.body && el instanceof HTMLElement) {
+      lastFocusedRef.current = el;
+    }
+  }
+  document.addEventListener("focusin", rememberFocus, true);
+  document.addEventListener("mousedown", rememberFocus, true);
+  return () => {
+    document.removeEventListener("focusin", rememberFocus, true);
+    document.removeEventListener("mousedown", rememberFocus, true);
+  };
+}
+
 /**
  * Walk up from `el` looking for an ancestor with
  * `data-lrud-scope-lock="horizontal|vertical|all"`. If found and `dir`
@@ -192,22 +217,114 @@ function focusActiveViewButton(): HTMLElement | null {
   return btn;
 }
 
+/**
+ * Shared directional-navigation entry point. Both the keyboard
+ * listener (Arrow keys) and the gamepad poller (D-pad / left stick)
+ * call this with the same arguments and get identical behaviour:
+ *
+ *   1. Lost-focus recovery: if nothing is focused, jump back to the
+ *      last element the user touched (or the active view's nav
+ *      button as a final fallback) and stop. The user can press the
+ *      same arrow again to actually move.
+ *   2. Text-input passthrough: arrow keys inside `<input>` (text /
+ *      search / email / url / password / number) and `<textarea>`
+ *      are caret movement, not focus jumps — let the browser handle
+ *      them.
+ *   3. `<select>` passthrough for Up/Down: native open/cycle wins,
+ *      Left/Right still move focus spatially.
+ *   4. `<input type="range">` Left/Right step the value; Up/Down
+ *      escape so the user can leave without first clearing.
+ *   5. Directional scope lock: `data-lrud-scope-lock="horizontal"`
+ *      on the TopBar pins Left/Right inside the header (so cycling
+ *      L→R stays in the nav, Up/Down escape into the page), etc.
+ *   6. Up-arrow "jump to nav": if no modal is open and the library's
+ *      normal search lands on a TopBar button (Euclidean distance
+ *      would otherwise pick the wrong nav chip), redirect to the
+ *      active view's nav button. Mid-content Up is unaffected.
+ *   7. When no candidate exists above (top of scroll area) and no
+ *      modal is open, also fall back to the active view's nav
+ *      button — symmetric "jump to nav" from anywhere on the page.
+ *
+ * `preventDefault` is called after we decide the press is ours to
+ * consume (so a text-input caret move still fires the browser's
+ * native behaviour). Both keyboard and gamepad pass the same
+ * `preventDefault` callback shape — the controller's keyboard path
+ * uses `e.preventDefault()` directly, the gamepad path uses a
+ * no-op (gamepad events don't have a native default to suppress).
+ */
+function processDirection(dir: Direction, preventDefault: () => void): void {
+  // 1. Lost-focus recovery.
+  if (!document.activeElement || document.activeElement === document.body) {
+    preventDefault();
+    const last = lastFocusedRef.current;
+    if (
+      last &&
+      last.isConnected &&
+      !last.hasAttribute("disabled") &&
+      !(last instanceof HTMLInputElement && last.disabled)
+    ) {
+      last.focus();
+    } else {
+      focusActiveViewButton();
+    }
+    return;
+  }
+  // 2. Text-input caret passthrough.
+  const a = document.activeElement;
+  if (
+    a instanceof HTMLInputElement &&
+    (a.type === "text" ||
+      a.type === "search" ||
+      a.type === "email" ||
+      a.type === "url" ||
+      a.type === "password" ||
+      a.type === "number")
+  ) {
+    return;
+  }
+  if (a instanceof HTMLTextAreaElement) return;
+  // 3. Native <select>: Up/Down escape to the next focusable.
+  if (a instanceof HTMLSelectElement) return;
+  // 4. Native range input: Left/Right step the value, Up/Down escape.
+  if (a instanceof HTMLInputElement && a.type === "range") {
+    if (dir === "left" || dir === "right") return;
+  }
+  // 5. Directional scope lock.
+  const dirScope = findDirectionalScope(a, dir);
+  const scope = dirScope ?? readScope();
+  // 6. Up-arrow "jump to nav" + 7. top-of-scroll fallback.
+  if (dir === "up" && !escapeStack.top()) {
+    preventDefault();
+    const next = moveFocus(a, "up", scope);
+    if (next) {
+      const topbar = document.querySelector("header.lrud-container");
+      if (topbar?.contains(next)) {
+        const activeBtn = focusActiveViewButton();
+        if (activeBtn) return;
+      }
+      return;
+    }
+    const activeBtn = focusActiveViewButton();
+    if (activeBtn) return;
+    return;
+  }
+  preventDefault();
+  moveFocus(a, dir, scope);
+}
+
+/**
+ * Export the shared directional handler so the gamepad poller
+ * (`useGamepad`) can route D-pad / left-stick presses through the
+ * exact same code path as keyboard arrows. The keyboard listener in
+ * `useSpatialController` also calls this internally.
+ */
+export function dispatchDirection(dir: Direction): void {
+  processDirection(dir, () => {});
+}
+
 export function useSpatialController() {
   useEffect(() => {
-    // Tracks the last element that received focus via keyboard or
-    // mouse click. Used to re-establish focus when arrows are pressed
-    // while focus has been lost (clicked outside any focusable) — the
-    // user lands back where they were instead of being teleported to
-    // the active view's nav button.
-    const lastFocusedRef: { current: HTMLElement | null } = { current: null };
-    function rememberFocus() {
-      const el = document.activeElement;
-      if (el && el !== document.body && el instanceof HTMLElement) {
-        lastFocusedRef.current = el;
-      }
-    }
-    document.addEventListener("focusin", rememberFocus, true);
-    document.addEventListener("mousedown", rememberFocus, true);
+    const stopTracking = trackFocusForRecovery();
     function onKey(e: KeyboardEvent) {
       // 0. Context-menu shortcut. Two equivalent triggers:
       //    - The dedicated ContextMenu key on Windows keyboards
@@ -281,129 +398,18 @@ export function useSpatialController() {
         return;
       }
 
-      // 3. Arrow keys — spatial navigation.
+      // 3. Arrow keys — share the directional path with the gamepad
+      //    poller so D-pad / left-stick behave identically.
       const dir = directionFromKey(e.key);
       if (dir) {
-        // Focus has been lost (clicked outside any focusable, or the
-        // user just opened the app and never focused anything yet).
-        // The LRUD library needs a `current` element to compute
-        // direction from — passing `<body>` returns null because body
-        // has no useful position. Re-establish focus on the last
-        // element the user interacted with (tracked via focusin /
-        // mousedown listeners), falling back to the active view's
-        // nav button if we have nothing else. Keyboard input
-        // shouldn't require mouse.
-        if (
-          !document.activeElement ||
-          document.activeElement === document.body
-        ) {
-          e.preventDefault();
-          // Skip the stored element if it's no longer in the DOM or
-          // has become disabled since it was focused.
-          const last = lastFocusedRef.current;
-          if (
-            last &&
-            last.isConnected &&
-            !last.hasAttribute("disabled") &&
-            !(last instanceof HTMLInputElement && last.disabled)
-          ) {
-            last.focus();
-          } else {
-            focusActiveViewButton();
-          }
-          return;
-        }
-        // When focus is in a text input (search, rename, password), arrow
-        // keys are text navigation, not focus movement. Same for
-        // <textarea>. Suppress before calling the spatial library so it
-        // doesn't yank focus out of the field.
-        const a = document.activeElement;
-        if (
-          a instanceof HTMLInputElement &&
-          (a.type === "text" ||
-            a.type === "search" ||
-            a.type === "email" ||
-            a.type === "url" ||
-            a.type === "password" ||
-            a.type === "number")
-        ) {
-          return;
-        }
-        if (a instanceof HTMLTextAreaElement) return;
-        // Native <select>: let Up/Down escape to the next/prev
-        // focusable via spatial nav, matching the slider pattern.
-        // The native picker still opens on mouse click; keyboard
-        // cycling of options while the dropdown is open is lost, but
-        // users rarely need that — Up/Down to escape is the much
-        // more common need.
-        // Native range input: Left/Right step the value, but Up/Down
-        // should escape the slider so the user can move focus out
-        // without first clearing the slider. Suppress only the
-        // value-stepping axes.
-        if (a instanceof HTMLInputElement && a.type === "range") {
-          if (dir === "left" || dir === "right") return;
-        }
-        // Directional scope lock: if a `data-lrud-scope-lock` ancestor
-        // applies to this direction, use it as the library's scope so the
-        // fallback search stays inside the locked container even when no
-        // sibling matches.
-        const dirScope = findDirectionalScope(a, dir);
-        const scope = dirScope ?? readScope();
-        // Up arrow with no modal — run the library's normal Up search,
-        // but if it picks a topbar button, override with the active
-        // view's nav button (Esc semantics). The library picks by
-        // Euclidean distance and would otherwise land on the Apps
-        // button or a status chip from any page focusable whose
-        // vertical line crosses them — but the user expects the
-        // active view's button.
-        //
-        // Mid-content Up is unaffected: the library finds the row
-        // above first, the override doesn't trigger (the row-above
-        // candidate isn't in the topbar), and focus moves one row up.
-        //
-        // When the page is scrolled to the top of <main> (vertical
-        // scope-lock applied), the library can't find a candidate
-        // above. Fall back to jumping to the active view's nav
-        // button — same destination, user gets the same "jump to
-        // nav" affordance from anywhere on the page.
-        if (dir === "up" && !escapeStack.top()) {
-          e.preventDefault();
-          const next = moveFocus(a, "up", scope);
-          if (next) {
-            // Target the topbar header specifically — `document.querySelector("header")`
-            // matches TitleBar (the window-chrome header) first in DOM
-            // order, but only TopBar's header carries the `lrud-container`
-            // class. Without the class qualifier, `contains()` would
-            // return false and the override would never fire.
-            const topbar = document.querySelector("header.lrud-container");
-            if (topbar?.contains(next)) {
-              // Library picked a topbar button — replace with the
-              // active view's nav button.
-              const activeBtn = focusActiveViewButton();
-              if (activeBtn) return;
-            }
-            // Either the library picked something not in the topbar
-            // (mid-content row-above), or the active-button lookup
-            // failed — focus stays where the library put it.
-            return;
-          }
-          // No candidate above — top of the vertical scope. Jump to
-          // the active view's nav button so the user always has an
-          // escape hatch from any page content.
-          const activeBtn = focusActiveViewButton();
-          if (activeBtn) return;
-          return;
-        }
-        e.preventDefault();
-        moveFocus(a, dir, scope);
+        processDirection(dir, () => e.preventDefault());
       }
     }
 
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.removeEventListener("focusin", rememberFocus, true);
-      document.removeEventListener("mousedown", rememberFocus, true);
+      stopTracking();
     };
   }, []);
 }
