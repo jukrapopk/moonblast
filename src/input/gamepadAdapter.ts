@@ -59,19 +59,17 @@ const RIGHT_STICK_Y = 3;
 /**
  * Continuous-scroll tuning. The right stick emits a scroll tick
  * every `SCROLL_INTERVAL_MS` while held outside the dead-zone, with
- * magnitude proportional to deflection. Older revisions used a
- * single edge-detected tick per push (felt like a button) — keeping
- * that constant around in case we want to revert; the value is now
- * unused but serves as historical context.
+ * magnitude proportional to deflection.
  *
  * `SCROLL_PIXELS_PER_UNIT` is the per-tick delta at full tilt; the
  * actual scroll speed is `deflection × SCROLL_PIXELS_PER_UNIT ×
- * (1000 / SCROLL_INTERVAL_MS)` px/sec. At our defaults (12 px ×
- * 33Hz), full tilt = ~400 px/sec, which matches a moderate mouse-
- * wheel flick without runaway scroll.
+ * (1000 / SCROLL_INTERVAL_MS)` px/sec. At our defaults (10 px ×
+ * 33Hz), full tilt = ~330 px/sec, which matches a moderate
+ * mouse-wheel flick without runaway scroll. Was 12 px (~400 px/sec)
+ * before the slow-down tuning.
  */
 const SCROLL_INTERVAL_MS = 30;
-const SCROLL_PIXELS_PER_UNIT = 12;
+const SCROLL_PIXELS_PER_UNIT = 10;
 
 /* ---------------------------------------------------------------------------
  *  Direction helper.
