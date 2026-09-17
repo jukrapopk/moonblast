@@ -188,41 +188,52 @@ function sendContextMenu(): void {
 }
 
 /**
- * Dispatch a synthetic wheel event for the right stick. `dx` and
- * `dy` are pixel deltas (positive = down / right). Bubbles up to
- * `window`, so any scrollable container the wheel event passes
- * through scrolls naturally — including inside modals, the Select
- * dropdown's overflow list, and the App's main scroll area.
+ * Scroll the nearest scrollable ancestor of `start` (or the document
+ * scrolling element when no ancestor is scrollable). Mirrors the
+ * browser's response to a real wheel event, but applied directly via
+ * `scrollBy()` so the `isTrusted` gate doesn't drop our non-trusted
+ * synthesised `WheelEvent`s — Chromium only auto-scrolls on trusted
+ * events, but `scrollBy` is a public DOM API that always works.
  *
- * Non-trusted wheel events are still dispatched as `bubbles: true`,
- * `cancelable: true`; modern Chromium honours them for scrolling
- * unless something in the page explicitly blocks them via
- * `preventDefault()`. The current `useSpatialController` doesn't
- * touch wheel, so this is a no-conflict path.
+ * Walks up from `start` looking for a node whose computed style makes
+ * it scrollable along the requested axis. If none is found, falls
+ * back to `document.scrollingElement` (the document `<html>` by
+ * default, or the body's overflow container if anything else has
+ * taken over).
  */
-function sendWheel(dx: number, dy: number): void {
-  if (typeof window === "undefined") return;
+function scrollByNear(start: Element | null, dx: number, dy: number): void {
+  if (typeof document === "undefined") return;
   if (dx === 0 && dy === 0) return;
-  const ev = new WheelEvent("wheel", {
-    bubbles: true,
-    cancelable: true,
-    deltaX: dx,
-    deltaY: dy,
-    deltaZ: 0,
-    deltaMode: 0, // 0 = DOM_DELTA_PIXEL
-    clientX: 0,
-    clientY: 0,
-  });
-  // Dispatch on the focused element (mirror keydown rationale: React
-  // synthetic listeners fire only when the target is inside the React
-  // tree). Falls back to `window` when nothing is focused so an idle
-  // gamepad can still scroll a page that has no focused control.
-  const target = document.activeElement;
-  if (target && target instanceof Element && target !== document.body) {
-    target.dispatchEvent(ev);
-  } else {
-    window.dispatchEvent(ev);
+  const target = pickScrollTarget(start);
+  if (target) target.scrollBy({ top: dy, left: dx, behavior: "auto" });
+}
+
+function pickScrollTarget(start: Element | null): Element | null {
+  let cur: Element | null = start;
+  while (cur && cur !== document.documentElement) {
+    if (isScrollable(cur, "y") || isScrollable(cur, "x")) return cur;
+    cur = cur.parentElement;
   }
+  // No scrollable ancestor found. Use the document's scrolling
+  // element so background scrolling on Apps / Settings pages works
+  // even when focus is on a non-scrolling chip.
+  return document.scrollingElement ?? document.documentElement;
+}
+
+function isScrollable(el: Element, axis: "x" | "y"): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const style = typeof getComputedStyle === "function"
+    ? getComputedStyle(el)
+    : null;
+  if (!style) return false;
+  const overflow = axis === "y" ? style.overflowY : style.overflowX;
+  if (overflow === "auto" || overflow === "scroll" || overflow === "overlay") {
+    const size = axis === "y"
+      ? el.scrollHeight - el.clientHeight
+      : el.scrollWidth - el.clientWidth;
+    return size > 0;
+  }
+  return false;
 }
 
 /* ---------------------------------------------------------------------------
@@ -339,21 +350,20 @@ function dispatch(prev: State, next: State): State {
   // directions). Holding the stick at full tilt does not auto-repeat
   // — that would feel like runaway scroll; users release + re-push
   // for each tick. Edge cases:
-  //   - prevAxis=null, nextAxis="x"  → push-out, fire wheel.
-  //   - prevAxis=null, nextAxis="y"  → push-out, fire wheel.
-  //   - prevAxis="x", nextAxis="y"  → swap, fire wheel on y axis.
+  //   - prevAxis=null, nextAxis="x"  → push-out, fire scroll.
+  //   - prevAxis=null, nextAxis="y"  → push-out, fire scroll.
+  //   - prevAxis="x", nextAxis="y"  → swap, fire scroll on y axis.
   //   - prevAxis="x", nextAxis="x"  → held tilt, no fire (repeat
   //     would surprise the user).
   //   - prevAxis="x", nextAxis=null → release, no fire. Resets the
   //     axis so the next push fires.
-  if (next.rightAxis !== prev.rightAxis) {
-    if (next.rightAxis !== null) {
-      const delta = next.rightDelta;
-      sendWheel(
-        next.rightAxis === "x" ? delta : 0,
-        next.rightAxis === "y" ? delta : 0,
-      );
-    }
+  if (next.rightAxis !== prev.rightAxis && next.rightAxis !== null) {
+    const start = document.activeElement instanceof Element
+      ? document.activeElement
+      : null;
+    const dx = next.rightAxis === "x" ? next.rightDelta : 0;
+    const dy = next.rightAxis === "y" ? next.rightDelta : 0;
+    scrollByNear(start, dx, dy);
   }
 
   return next;
