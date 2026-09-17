@@ -20,7 +20,7 @@
  *   D-pad / left stick          → ArrowUp / ArrowDown / ArrowLeft / ArrowRight
  *   A (button 0, south)         → Enter
  *   B (button 1, east)          → Escape
- *   Y (button 3, north)         → contextmenu (synthesised on focused element)
+ *   X (button 2, west)          → contextmenu (synthesised on focused element)
  *
  * Edge-detected buttons, so an idle controller never repeats. rAF
  * pauses naturally on `document.hidden` — no manual tick scheduling.
@@ -42,7 +42,9 @@ import { useSpatialControllerInternals } from "./controllerInternals";
 
 const PRIMARY_BUTTON = 0; // A on Xbox, × on PlayStation, B on Switch (south)
 const CANCEL_BUTTON = 1;  // B on Xbox, ○ on PlayStation, A on Switch (east)
-const MENU_BUTTON = 3;    // Y on Xbox, △ on PlayStation, Y on Switch (north)
+// Context-menu gesture was Y (button 3); user requested X (button 2)
+// which is `west` on a standard mapping. Adjust here only.
+const MENU_BUTTON = 2;    // X on Xbox, □ on PlayStation, Y on Switch (west)
 
 const STICK_DEAD_ZONE = 0.5;
 
@@ -170,6 +172,12 @@ interface State {
 function empty(): State {
   return { primary: false, cancel: false, menu: false, stick: null, dpad: null };
 }
+
+// Backwards compat: old code referenced `MENU_BUTTON = 3` and labelled
+// it "Y on Xbox". The user wants the menu gesture on **X** (button
+// 2), not Y. Keeping the constant internal so this stays a one-line
+// swap if the mapping needs to change again.
+
 
 function read(navigator: Navigator): State {
   const pads = navigator.getGamepads?.() ?? [];
