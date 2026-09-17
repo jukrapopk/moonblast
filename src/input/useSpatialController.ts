@@ -194,6 +194,20 @@ function focusActiveViewButton(): HTMLElement | null {
 
 export function useSpatialController() {
   useEffect(() => {
+    // Tracks the last element that received focus via keyboard or
+    // mouse click. Used to re-establish focus when arrows are pressed
+    // while focus has been lost (clicked outside any focusable) — the
+    // user lands back where they were instead of being teleported to
+    // the active view's nav button.
+    const lastFocusedRef: { current: HTMLElement | null } = { current: null };
+    function rememberFocus() {
+      const el = document.activeElement;
+      if (el && el !== document.body && el instanceof HTMLElement) {
+        lastFocusedRef.current = el;
+      }
+    }
+    document.addEventListener("focusin", rememberFocus, true);
+    document.addEventListener("mousedown", rememberFocus, true);
     function onKey(e: KeyboardEvent) {
       // 0. Context-menu shortcut. Two equivalent triggers:
       //    - The dedicated ContextMenu key on Windows keyboards
@@ -270,6 +284,35 @@ export function useSpatialController() {
       // 3. Arrow keys — spatial navigation.
       const dir = directionFromKey(e.key);
       if (dir) {
+        // Focus has been lost (clicked outside any focusable, or the
+        // user just opened the app and never focused anything yet).
+        // The LRUD library needs a `current` element to compute
+        // direction from — passing `<body>` returns null because body
+        // has no useful position. Re-establish focus on the last
+        // element the user interacted with (tracked via focusin /
+        // mousedown listeners), falling back to the active view's
+        // nav button if we have nothing else. Keyboard input
+        // shouldn't require mouse.
+        if (
+          !document.activeElement ||
+          document.activeElement === document.body
+        ) {
+          e.preventDefault();
+          // Skip the stored element if it's no longer in the DOM or
+          // has become disabled since it was focused.
+          const last = lastFocusedRef.current;
+          if (
+            last &&
+            last.isConnected &&
+            !last.hasAttribute("disabled") &&
+            !(last instanceof HTMLInputElement && last.disabled)
+          ) {
+            last.focus();
+          } else {
+            focusActiveViewButton();
+          }
+          return;
+        }
         // When focus is in a text input (search, rename, password), arrow
         // keys are text navigation, not focus movement. Same for
         // <textarea>. Suppress before calling the spatial library so it
@@ -357,7 +400,11 @@ export function useSpatialController() {
     }
 
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", rememberFocus, true);
+      document.removeEventListener("mousedown", rememberFocus, true);
+    };
   }, []);
 }
 
