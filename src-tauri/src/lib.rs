@@ -2455,14 +2455,23 @@ fn wifi_current() -> Option<wifi::WifiConnection> {
 #[tauri::command]
 async fn wifi_scan() -> Vec<wifi::WifiNetwork> {
     // The scan does a synchronous WlanScan + a 2.5s sleep to let the
-    // driver populate the visible-network cache, then a netsh read.
-    // Running it on a blocking task means other Tauri commands (like
-    // the chip's wifi_current poll) don't queue up behind it.
-    tauri::async_runtime::spawn_blocking(wifi::scan_and_list)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default()
+    // driver populate the visible-network cache, then several netsh
+    // reads. Running it on a blocking task means other Tauri commands
+    // (like the chip's wifi_current poll) don't queue up behind it.
+    //
+    // Bound the whole call to 6s — the 2.5s sleep + ~1.5s for the
+    // netsh calls under normal load + headroom. A hung netsh
+    // (driver lockup) or wedged wlan service would otherwise pin
+    // this worker forever and starve other IPC.
+    tauri::async_runtime::spawn_blocking(|| {
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_secs(6);
+        wifi::scan_and_list(deadline)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default()
 }
 
 /// Connect to a WiFi network by SSID. Returns `Ok(())` on success, or an
@@ -2544,11 +2553,20 @@ async fn bluetooth_forget(id: String) -> Result<(), String> {
 /// Discover nearby devices Windows hasn't paired with yet. Runs a
 /// `DeviceWatcher` for a fixed window (classic inquiry is slow), same
 /// external shape as `wifi_scan` (trigger, wait, return the list).
+///
+/// Bounded to 10s — the 8s inquiry window + ~1.5s for the per-device
+/// `FromIdAsync` lookups that follow + headroom. A wedged WinRT call
+/// on a wedged Bluetooth stack would otherwise pin this worker
+/// forever and starve other IPC.
 #[tauri::command]
 async fn bluetooth_scan() -> Vec<bluetooth::BluetoothDeviceEntry> {
-    tauri::async_runtime::spawn_blocking(|| bluetooth::scan(8))
-        .await
-        .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(|| {
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_secs(10);
+        bluetooth::scan(8, deadline)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Pair with a discovered device by id.

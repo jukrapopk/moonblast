@@ -96,3 +96,29 @@ pub fn spawn_detached<P: AsRef<OsStr>>(program: P, args: &[&str]) -> std::io::Re
 pub fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
+
+/// Sleep for at most `max_ms` milliseconds, but return early (with
+/// `false`) if `deadline` passes. Returns `true` once the full
+/// `max_ms` have elapsed. Polled every 50ms — the granularity is
+/// fine because the caller is checking the deadline anyway. Used by
+/// the wifi + bluetooth scan paths to replace a raw `thread::sleep`
+/// that could outlive the surrounding bounded wait.
+pub fn bounded_sleep_until(deadline: std::time::Instant, max_ms: u64) -> bool {
+    let step = std::time::Duration::from_millis(50);
+    let total = std::time::Duration::from_millis(max_ms);
+    let start = std::time::Instant::now();
+    while start.elapsed() < total {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(step.min(total - start.elapsed()));
+    }
+    true
+}
+
+/// True if `deadline` has passed. Check before / after each blocking
+/// step so the wifi / bluetooth scan paths can bail when their
+/// budget runs out instead of waiting on a wedged netsh / WinRT API.
+pub fn deadline_reached(deadline: std::time::Instant) -> bool {
+    std::time::Instant::now() >= deadline
+}

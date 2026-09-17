@@ -233,7 +233,13 @@ pub fn forget(id: &str) -> Result<(), String> {
 /// triggers a fresh classic inquiry + LE advertisement scan, same as
 /// Windows' own "Add device" flyout. Runs for a fixed window (classic
 /// inquiry is slow to populate) then stops and returns whatever it found.
-pub fn scan(seconds: u64) -> Vec<BluetoothDeviceEntry> {
+///
+/// `deadline` bounds the *entire* call — the inquiry window AND the
+/// per-device `FromIdAsync(...).get()` lookups that follow. Returns
+/// whatever was found so far when the budget expires. Without this
+/// bound, a wedged WinRT call on a wedged Bluetooth stack would
+/// pin the calling `spawn_blocking` worker indefinitely.
+pub fn scan(seconds: u64, deadline: std::time::Instant) -> Vec<BluetoothDeviceEntry> {
     radio::ensure_winrt();
     (|| -> windows::core::Result<Vec<BluetoothDeviceEntry>> {
         use std::sync::{Arc, Mutex};
@@ -271,12 +277,20 @@ pub fn scan(seconds: u64) -> Vec<BluetoothDeviceEntry> {
         ))?;
 
         watcher.Start()?;
-        std::thread::sleep(std::time::Duration::from_secs(seconds));
+        // Bounded inquiry window — bail early if the surrounding deadline
+        // passes, so the watcher can't pin the worker past the budget.
+        let _ = crate::cmd::bounded_sleep_until(deadline, seconds * 1000);
         let _ = watcher.Stop();
 
         let infos = found.lock().unwrap().clone();
         let mut out = Vec::with_capacity(infos.len());
         for info in infos {
+            // Bail on deadline so a wedged `describe_device` (which calls
+            // WinRT `FromIdAsync(...).get()`) can't pin the worker. Whatever
+            // we've collected so far is returned.
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
             let id = info.Id()?;
             let name = info.Name().map(|n| n.to_string()).unwrap_or_default();
             if name.trim().is_empty() {

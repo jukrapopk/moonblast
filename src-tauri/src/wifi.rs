@@ -28,6 +28,7 @@ use std::os::windows::process::CommandExt;
 use std::process::{Command, Output};
 use std::ptr;
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WiFi::{
     WlanCloseHandle, WlanEnumInterfaces, WlanOpenHandle, WlanScan, WLAN_INTERFACE_INFO_LIST,
@@ -202,7 +203,13 @@ fn trigger_scan() {
 
 /// alongside the scan so the chip and the modal agree on connection state.
 /// Each entry is deduplicated by SSID, keeping the strongest BSSID.
-pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
+///
+/// `deadline` bounds the whole call — the wake-for-scan sleep, every
+/// `netsh` invocation, and the per-BSSID parse — so a hung netsh
+/// session or wedged wlan driver can't pin the calling `spawn_blocking`
+/// worker past the budget. Returns `None` on deadline expiry (caller
+/// treats that the same as "scan failed" and renders an empty list).
+pub fn scan_and_list(deadline: Instant) -> Option<Vec<WifiNetwork>> {
     // `netsh wlan show networks` only returns whatever the wlan service
     // already has in its cache — it doesn't trigger a scan itself. The
     // wlan service, in turn, only refreshes the cache opportunistically
@@ -214,16 +221,21 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
     // via `netsh` (which always works in this process, unlike the
     // read-side wlanapi opcodes).
     trigger_scan();
-    std::thread::sleep(std::time::Duration::from_millis(2500));
-    let text = netsh_text(&["wlan", "show", "networks", "mode=bssid"])?;
+    if !crate::cmd::bounded_sleep_until(deadline, 2500) {
+        return None;
+    }
+    if crate::cmd::deadline_reached(deadline) {
+        return None;
+    }
+    let text = netsh_text_bounded(&["wlan", "show", "networks", "mode=bssid"], deadline)?;
     let mut networks: Vec<WifiNetwork> = Vec::new();
     let mut current_ssid: Option<String> = None;
-    if let Some(c) = netsh_current_connection() {
+    if let Some(c) = netsh_current_connection_bounded(deadline) {
         current_ssid = Some(c.ssid);
     }
     // Saved-profile set: any SSID in `netsh wlan show profiles` is "known"
     // to Windows. Cheap to read in the same hot path.
-    let known_ssids = netsh_known_ssids();
+    let known_ssids = netsh_known_ssids(Some(deadline));
 
     let mut current_ssid_buf: Option<String> = None;
     let mut current_auth: Option<String> = None;
@@ -346,10 +358,22 @@ pub fn scan_and_list() -> Option<Vec<WifiNetwork>> {
 
 /// Query the user's saved WiFi profiles (a profile is created the first
 /// time you connect to a network, so this is the "known" set).
-fn netsh_known_ssids() -> std::collections::HashSet<String> {
+///
+/// `deadline` bounds the underlying netsh call — `None` means no
+/// budget (callers that don't need bounded behavior use `None`). The
+/// bounded variant is used by the scan path so a hung `netsh wlan
+/// show profiles` returns an empty set instead of pinning the worker.
+fn netsh_known_ssids(deadline: Option<Instant>) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
-    let Some(text) = netsh_text(&["wlan", "show", "profiles"]) else {
-        return out;
+    let text = match deadline {
+        Some(d) => match netsh_text_bounded(&["wlan", "show", "profiles"], d) {
+            Some(t) => t,
+            None => return out,
+        },
+        None => match netsh_text(&["wlan", "show", "profiles"]) {
+            Some(t) => t,
+            None => return out,
+        },
     };
     for line in text.lines() {
         let trimmed = line.trim();
@@ -440,6 +464,44 @@ fn netsh_text(args: &[&str]) -> Option<String> {
     Some(decode_netsh(&out.stdout))
 }
 
+/// Bounded variant of `netsh` — spawns the child, polls every 50ms,
+/// kills it if `deadline` passes, and returns whatever the child
+/// produced. Returns `Err(TimedOut)` (with no output) if the deadline
+/// was hit. Used by the scan path where a hung netsh would otherwise
+/// pin the calling `spawn_blocking` worker past the budget.
+fn netsh_bounded(args: &[&str], deadline: Instant) -> Result<Output, std::io::Error> {
+    let mut child = Command::new("netsh")
+        .args(args)
+        .creation_flags(0x0800_0000)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null())
+        .spawn()?;
+    loop {
+        match child.try_wait()? {
+            Some(_) => return child.wait_with_output(),
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "netsh timed out",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+fn netsh_text_bounded(args: &[&str], deadline: Instant) -> Option<String> {
+    let out = netsh_bounded(args, deadline).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(decode_netsh(&out.stdout))
+}
+
 /// `netsh` doesn't emit a BOM but is still UTF-16LE (which it does on
 /// some Windows builds).
 fn decode_netsh(bytes: &[u8]) -> String {
@@ -469,7 +531,21 @@ fn decode_netsh(bytes: &[u8]) -> String {
 }
 
 fn netsh_current_connection() -> Option<WifiConnection> {
-    let output = netsh(&["wlan", "show", "interfaces"])?;
+    netsh_current_connection_deadline(None)
+}
+
+/// Bounded variant — respects `deadline` for the underlying netsh
+/// call. Used by the scan path so a single hung netsh can't pin
+/// the worker past the budget.
+fn netsh_current_connection_bounded(deadline: Instant) -> Option<WifiConnection> {
+    netsh_current_connection_deadline(Some(deadline))
+}
+
+fn netsh_current_connection_deadline(deadline: Option<Instant>) -> Option<WifiConnection> {
+    let output = match deadline {
+        Some(d) => netsh_bounded(&["wlan", "show", "interfaces"], d).ok()?,
+        None => netsh(&["wlan", "show", "interfaces"])?,
+    };
     if !output.status.success() {
         return None;
     }

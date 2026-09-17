@@ -215,7 +215,13 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
     await runAction(id, "pair", async () => {
       await bluetoothPair(id);
       await refreshPaired();
-      await scan();
+      // Skip the post-pair discovery scan — the user just paired one
+      // device; the rest of the unpaired list doesn't change. The
+      // 8-second `bluetooth_scan` would block the modal in the
+      // "Pairing" spinner for no visible benefit. Fire-and-forget a
+      // refresh so the list eventually catches up (e.g. after a
+      // timeout-bounded scan returns something).
+      void scan();
     });
   }
 
