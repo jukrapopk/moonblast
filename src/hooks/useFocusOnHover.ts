@@ -30,8 +30,12 @@ import { useEffect } from "react";
 export function useFocusOnHover() {
   useEffect(() => {
     function onMouseEnter(e: Event) {
-      const t = e.target as HTMLElement | null;
-      if (!t) return;
+      // Narrow to Element first — `closest` lives on Element.prototype,
+      // and the spec lets `e.target` be a non-Element in edge cases
+      // (e.g. dispatch from `Document` or `Window`). Bail before
+      // touching methods that don't exist on those.
+      if (!(e.target instanceof Element)) return;
+      const t = e.target as HTMLElement;
       // Don't yank focus out of text inputs / textareas /
       // contenteditable regions — they need arrows for caret
       // movement, not focus jumps.
@@ -40,8 +44,8 @@ export function useFocusOnHover() {
       t.focus({ preventScroll: true });
     }
     function onMouseLeave(e: Event) {
-      const t = e.target as HTMLElement | null;
-      if (!t) return;
+      if (!(e.target instanceof Element)) return;
+      const t = e.target as HTMLElement;
       // Only blur if the element being left is the one actually
       // focused — mouseleave also fires for every ancestor between
       // the old and new hover target, most of which were never

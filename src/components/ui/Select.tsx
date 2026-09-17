@@ -51,10 +51,17 @@ export function Select({ options, value, onChange }: SelectProps) {
         }}
         className="h-9 cursor-pointer appearance-none rounded-lg border border-(--color-border) bg-(--color-surface-2) pl-3 pr-9 text-sm text-(--color-text) outline-none transition focus:border-(--color-accent)"
       >
-        {options.map((o) => {
+        {options.map((o, i) => {
           const opt = toOption(o);
+          // Use `value-idx` so callers that pass duplicate values
+          // (e.g. two monitor entries both reporting `\\.\DISPLAY1`
+          // before the dedupe lands) don't trip React's "two
+          // children with the same key" warning. The visible
+          // `value=` attribute is still the raw opt.value so the
+          // browser's selection logic and the onChange contract
+          // are unchanged.
           return (
-            <option key={opt.value} value={opt.value} disabled={opt.disabled}>
+            <option key={`${opt.value}-${i}`} value={opt.value} disabled={opt.disabled}>
               {opt.label}
             </option>
           );
