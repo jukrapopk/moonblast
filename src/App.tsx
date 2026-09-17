@@ -14,6 +14,7 @@ import { useAudioMaster } from "./hooks/useAudio";
 import { useBattery } from "./hooks/useBattery";
 import { useFocusOnHover } from "./hooks/useFocusOnHover";
 import { useSpatialController } from "./input/useSpatialController";
+import { useGamepadAdapter } from "./input/gamepadAdapter";
 import { openPowerMenu, usePowerMenuTrigger } from "./hooks/usePowerMenuTrigger";
 import { useWifi } from "./hooks/useWifi";
 import { AudioModal } from "./components/ui/AudioModal";
@@ -120,6 +121,11 @@ export default function App() {
   // focus traversal handles form controls / buttons / links in
   // document order.
   useSpatialController();
+  // Gamepad adapter — translates D-pad / left stick / A / B / Y into
+  // synthetic KeyboardEvents on `window`, which the controller above
+  // handles via the same code path as a real keyboard. No
+  // per-component refactor required.
+  useGamepadAdapter();
 
   // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
   // asks the frontend to open the Power menu via this event. The
