@@ -32,8 +32,8 @@
  */
 import type { Direction } from "./spatialNav";
 
-const HOLD_INITIAL_DELAY_MS = 300;
-const HOLD_REPEAT_MS = 300;
+const HOLD_INITIAL_DELAY_MS = 240;
+const HOLD_REPEAT_MS = 180;
 
 interface Hold {
   direction: Direction;
