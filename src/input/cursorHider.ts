@@ -12,37 +12,49 @@
  *   per-component overrides don't survive). Sticky — repeated calls
  *   while already hidden are a no-op.
  * - Restore signals — any of:
- *     1. `mousedown` (any button) with `isTrusted: true` —
- *        definitive "I'm using the mouse". The `isTrusted` check
- *        filters out the mousedown that `target.click()` synthesises
- *        from `gamepadAdapter.sendKey("Enter")` — without it, every
- *        gamepad A-button press on a focused button would restore
- *        the cursor via `.click()` → `mousedown` → our listener.
- *     2. `mousemove` with `isTrusted: true` whose coords differ
+ *     1. `pointerdown` with `isTrusted: true` — a real mouse / touch
+ *        / pen button press. Pointer events only fire for actual
+ *        pointer input; the browser does NOT fire pointerdown for
+ *        keyboard activation of a focused button, and JS-dispatched
+ *        events have `isTrusted: false`. So this single check
+ *        filters out every false-positive path: the `mousedown` /
+ *        `mouseup` / `click` that `target.click()` synthesises from
+ *        `gamepadAdapter.sendKey("Enter")`, AND the `mousedown` /
+ *        `mouseup` / `click` that the browser fires natively when
+ *        the user presses Enter or Space on a focused button via
+ *        the real keyboard.
+ *     2. `pointermove` with `isTrusted: true` whose coords differ
  *        by at least 1 pixel in either axis from the last known
  *        cursor position. A zero-delta move records the new
  *        position but does NOT restore — this filters out the
- *        spurious `mousemove` that WebView2 fires when the window
+ *        spurious pointermove that WebView2 fires when the window
  *        transitions into / out of fullscreen (the OS keeps the
  *        cursor at its current screen position but reports the
  *        same WebView-relative coords, so the delta to the
  *        previous sample is 0).
  *
- *   The first `mousemove` after a hide has no "previous position"
+ *   The first `pointermove` after a hide has no "previous position"
  *   in this module (we wipe the reference on hide), so it's stored
  *   and treated as a baseline — only the second move with a
  *   non-zero delta restores. That's a one-move-of-jitter delay, but
  *   it makes the hide-stick behaviour robust against the F11
- *   transition emitting a single re-confirmation `mousemove` at
+ *   transition emitting a single re-confirmation pointermove at
  *   the cursor's current position before the user touches it.
  *
- *   The first `mousemove` after a hide has no "previous position"
- *   in this module (we wipe the reference on hide), so it's stored
- *   and treated as a baseline — only the second move with a
- *   non-zero delta restores. That's a one-move-of-jitter delay, but
- *   it makes the hide-stick behaviour robust against the F11
- *   transition emitting a single re-confirmation `mousemove` at
- *   the cursor's current position before the user touches it.
+ * Why pointer events rather than mouse events
+ * -------------------------------------------
+ * Mouse events (`mousedown`, `mousemove`) fire for more scenarios
+ * than pointer events: in particular, pressing Enter or Space on a
+ * focused `<button>` causes the browser to fire a trusted
+ * `mousedown`/`mouseup`/`click` triplet as part of its keyboard
+ * activation pipeline. Listening to `mousedown` therefore restored
+ * the cursor even when the user was still driving with the
+ * keyboard — the exact bug this module exists to avoid. Pointer
+ * events bypass that: they're only dispatched for actual pointer
+ * input, so keyboard activation of a focused button is silent on
+ * the pointer event side. This is the right event type for
+ * distinguishing "real pointer input" from "any chain of
+ * synthesised / activation-driven events".
  *
  * Trigger sites (callers of `hideCursor()`):
  *   - `useSpatialController.onKey` — fires on the leading edge of a
@@ -72,7 +84,7 @@ export function hideCursor(): void {
   if (hidden) return;
   hidden = true;
   document.body.setAttribute("data-cursor-hidden", "");
-  // Reset the last-known cursor position so the first `mousemove`
+  // Reset the last-known cursor position so the first pointermove
   // after a hide becomes a baseline rather than being compared
   // against a stale position from before the keyboard / gamepad
   // session. (Without this, a user who pushed arrows for a minute
@@ -81,34 +93,33 @@ export function hideCursor(): void {
   lastX = null;
   lastY = null;
   // Bind on `window` to match the keyboard-listener convention used
-  // in `useSpatialController`. `mousemove` and `mousedown` both
+  // in `useSpatialController`. `pointerdown` and `pointermove` both
   // bubble to `window`, so a single pair of listeners covers every
-  // case. `passive: true` on `mousemove` lets the browser skip
-  // waiting for our handler before scrolling / painting — we don't
-  // call `preventDefault` here.
-  window.addEventListener("mousemove", onRestoreMove, { passive: true });
-  window.addEventListener("mousedown", onRestoreClick, { passive: true });
+  // case. `passive: true` lets the browser skip waiting for our
+  // handler before scrolling / painting — we never call
+  // `preventDefault` here.
+  window.addEventListener("pointermove", onRestoreMove, { passive: true });
+  window.addEventListener("pointerdown", onRestoreClick, { passive: true });
   detachListeners = () => {
-    window.removeEventListener("mousemove", onRestoreMove);
-    window.removeEventListener("mousedown", onRestoreClick);
+    window.removeEventListener("pointermove", onRestoreMove);
+    window.removeEventListener("pointerdown", onRestoreClick);
   };
 }
 
-function onRestoreMove(e: MouseEvent): void {
+function onRestoreMove(e: PointerEvent): void {
   if (!hidden) return;
   // `isTrusted` is `true` only for events the browser itself
-  // dispatched in response to OS input. JS-dispatched events
-  // (including any from our own gamepad adapter, though it
-  // currently doesn't synthesise mousemoves) are `false`. Filtering
-  // here is a defence-in-depth measure: if a future code path
-  // ever does `target.dispatchEvent(new MouseEvent("mousemove"))`,
-  // the cursor won't come back from it.
+  // dispatched in response to OS pointer input. JS-dispatched
+  // events have `isTrusted: false`. Filtering here is defence in
+  // depth — pointer events are already trusted-only in practice,
+  // but if a future code path ever synthesises one, we don't want
+  // it to restore the cursor.
   if (!e.isTrusted) return;
   const x = e.clientX;
   const y = e.clientY;
   if (lastX === null || lastY === null) {
     // First sample after a hide — record as baseline, don't
-    // restore. Lets WebView2's fullscreen-transition mousemove
+    // restore. Lets WebView2's fullscreen-transition pointermove
     // (which lands at the cursor's current position with no prior
     // reference) be absorbed silently.
     lastX = x;
@@ -130,21 +141,15 @@ function onRestoreMove(e: MouseEvent): void {
   restore();
 }
 
-function onRestoreClick(e: MouseEvent): void {
+function onRestoreClick(e: PointerEvent): void {
   if (!hidden) return;
-  // Critical: gamepad A-activation routes through `target.click()`
-  // in gamepadAdapter.sendKey. That synthesises a mousedown /
-  // mouseup / click sequence with `isTrusted: false`. Without
-  // this filter every gamepad button press on a focused button
-  // would fire `.click()` → `mousedown` → restore the cursor,
-  // making the "hide on gamepad use" state meaningless.
-  //
-  // Real user clicks (mouse button, touch tap) are `isTrusted:
-  // true` because they originate from the browser's input
-  // pipeline. Same for Space / Enter activation of a focused
-  // <button> — Chromium synthesises that with `isTrusted: true`.
-  // Only the explicit `element.click()` path (which we use for
-  // gamepad A) marks the event untrusted.
+  // Pointer events only fire for actual pointer input. The browser
+  // does NOT fire pointerdown for keyboard activation of a focused
+  // button — that path emits a `keydown` plus a trusted `mousedown`
+  // / `mouseup` / `click` triplet but never a pointerdown. JS
+  // dispatch has `isTrusted: false`. So a simple trusted check is
+  // sufficient here: any pointerdown that reaches us is, by
+  // construction, a real user click on the surface.
   if (!e.isTrusted) return;
   restore();
 }
