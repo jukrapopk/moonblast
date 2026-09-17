@@ -12,6 +12,7 @@ import { SettingsView, DisplaySettingsModal } from "./components/SettingsView";
 import { useSettings, useSettingsField } from "./settings/SettingsContext";
 import { useAudioMaster } from "./hooks/useAudio";
 import { useBattery } from "./hooks/useBattery";
+import { useFocusOnHover } from "./hooks/useFocusOnHover";
 import { useGamepad } from "./hooks/useGamepad";
 import { useLrudMode } from "./hooks/useLrudMode";
 import { useSpatialController } from "./input/useSpatialController";
@@ -50,6 +51,7 @@ const VIEW_ORDER: View[] = ["apps", "moonlight", "settings"];
 
 export default function App() {
   useLrudMode();
+  useFocusOnHover();
   const { settings, ready, update } = useSettings();
 
   // `view` starts at `null` so the first paint doesn't flash the default
