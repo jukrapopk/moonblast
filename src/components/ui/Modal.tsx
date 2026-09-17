@@ -20,6 +20,12 @@ interface ModalProps {
   /** Bootstrap max-width class, e.g. "max-w-md" */
   width?: string;
   /**
+   * Optional control rendered in the header row, to the left of the X
+   * close button (e.g. a radio on/off toggle). Only shown alongside
+   * `title`/`subtitle` — the header row doesn't render otherwise.
+   */
+  headerAction?: ReactNode;
+  /**
    * Selector or element to focus when the modal opens. Defaults to the
    * first focusable inside the panel. Pass `"none"` to skip autoFocus
    * (e.g. when the panel doesn't have a sensible first stop).
@@ -50,6 +56,7 @@ export function Modal({
   children,
   width = "max-w-md",
   initialFocus,
+  headerAction,
 }: ModalProps) {
   // Two parallel handles on the live panel:
   //   - `panelElRef` is the ref the AnimatePresence ref callback
@@ -274,19 +281,22 @@ export function Modal({
                   {title && <h2 className="text-lg font-semibold tracking-tight">{title}</h2>}
                   {subtitle && <p className="mt-0.5 text-sm text-(--color-muted)">{subtitle}</p>}
                 </div>
-                <button
-                  onClick={onClose}
-                  aria-label="Close"
-                  // Circular shape so the focus ring follows a circle
-                  // instead of the default rectangular button outline.
-                  // Sized to comfortably fit the 20px X icon plus the
-                  // 2px focus ring outside; h-9 / w-9 matches the
-                  // TopBarButton's circular touch target for visual
-                  // consistency across the app.
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition focus-visible:bg-(--color-surface) focus-visible:text-(--color-text)"
-                >
-                  <X size={20} weight="bold" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {headerAction}
+                  <button
+                    onClick={onClose}
+                    aria-label="Close"
+                    // Circular shape so the focus ring follows a circle
+                    // instead of the default rectangular button outline.
+                    // Sized to comfortably fit the 20px X icon plus the
+                    // 2px focus ring outside; h-9 / w-9 matches the
+                    // TopBarButton's circular touch target for visual
+                    // consistency across the app.
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition focus-visible:bg-(--color-surface) focus-visible:text-(--color-text)"
+                  >
+                    <X size={20} weight="bold" />
+                  </button>
+                </div>
               </div>
             )}
             {children}

@@ -6,7 +6,6 @@ import { ErrorBanner } from "./ErrorBanner";
 import { EmptyMessage } from "./EmptyMessage";
 import { Spinner } from "./Spinner";
 import { LoadingChip } from "./LoadingChip";
-import { BluetoothIcon } from "./BluetoothIcon";
 import {
   Bluetooth,
   CaretRight,
@@ -247,15 +246,13 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
   const nothingFound = merged.length === 0;
 
   return (
-    <Modal open={open} onClose={onClose} title="Bluetooth" width="max-w-sm">
-      {error && <ErrorBanner>{error}</ErrorBanner>}
-
-      <div className="mb-3 flex items-center justify-between rounded-xl px-1 py-1.5">
-        <div className="flex items-center gap-2.5">
-          <BluetoothIcon radioOn={radioOn === true} connected={paired.some((d) => d.connected)} size={20} />
-          <span className="text-sm font-medium text-(--color-text)">Bluetooth</span>
-        </div>
-        {radioBusy ? (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Bluetooth"
+      width="max-w-sm"
+      headerAction={
+        radioBusy ? (
           <Spinner size={14} />
         ) : (
           <Toggle
@@ -263,8 +260,10 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
             onChange={(v) => void handleToggleRadio(v)}
             disabled={!radioKnown}
           />
-        )}
-      </div>
+        )
+      }
+    >
+      {error && <ErrorBanner>{error}</ErrorBanner>}
 
       {radioOff ? (
         <EmptyMessage>Turn Bluetooth on to see devices</EmptyMessage>
