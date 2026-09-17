@@ -12,15 +12,29 @@
  *   per-component overrides don't survive). Sticky — repeated calls
  *   while already hidden are a no-op.
  * - Restore signals — any of:
- *     1. `mousedown` (any button) — definitive "I'm using the mouse".
- *     2. `mousemove` whose coords differ by at least 1 pixel in
- *        either axis from the last known cursor position. A zero-
- *        delta move records the new position but does NOT restore —
- *        this filters out the spurious `mousemove` that WebView2
- *        fires when the window transitions into / out of fullscreen
- *        (the OS keeps the cursor at its current screen position
- *        but reports the same WebView-relative coords, so the delta
- *        to the previous sample is 0).
+ *     1. `mousedown` (any button) with `isTrusted: true` —
+ *        definitive "I'm using the mouse". The `isTrusted` check
+ *        filters out the mousedown that `target.click()` synthesises
+ *        from `gamepadAdapter.sendKey("Enter")` — without it, every
+ *        gamepad A-button press on a focused button would restore
+ *        the cursor via `.click()` → `mousedown` → our listener.
+ *     2. `mousemove` with `isTrusted: true` whose coords differ
+ *        by at least 1 pixel in either axis from the last known
+ *        cursor position. A zero-delta move records the new
+ *        position but does NOT restore — this filters out the
+ *        spurious `mousemove` that WebView2 fires when the window
+ *        transitions into / out of fullscreen (the OS keeps the
+ *        cursor at its current screen position but reports the
+ *        same WebView-relative coords, so the delta to the
+ *        previous sample is 0).
+ *
+ *   The first `mousemove` after a hide has no "previous position"
+ *   in this module (we wipe the reference on hide), so it's stored
+ *   and treated as a baseline — only the second move with a
+ *   non-zero delta restores. That's a one-move-of-jitter delay, but
+ *   it makes the hide-stick behaviour robust against the F11
+ *   transition emitting a single re-confirmation `mousemove` at
+ *   the cursor's current position before the user touches it.
  *
  *   The first `mousemove` after a hide has no "previous position"
  *   in this module (we wipe the reference on hide), so it's stored
@@ -82,6 +96,14 @@ export function hideCursor(): void {
 
 function onRestoreMove(e: MouseEvent): void {
   if (!hidden) return;
+  // `isTrusted` is `true` only for events the browser itself
+  // dispatched in response to OS input. JS-dispatched events
+  // (including any from our own gamepad adapter, though it
+  // currently doesn't synthesise mousemoves) are `false`. Filtering
+  // here is a defence-in-depth measure: if a future code path
+  // ever does `target.dispatchEvent(new MouseEvent("mousemove"))`,
+  // the cursor won't come back from it.
+  if (!e.isTrusted) return;
   const x = e.clientX;
   const y = e.clientY;
   if (lastX === null || lastY === null) {
@@ -108,8 +130,22 @@ function onRestoreMove(e: MouseEvent): void {
   restore();
 }
 
-function onRestoreClick(): void {
+function onRestoreClick(e: MouseEvent): void {
   if (!hidden) return;
+  // Critical: gamepad A-activation routes through `target.click()`
+  // in gamepadAdapter.sendKey. That synthesises a mousedown /
+  // mouseup / click sequence with `isTrusted: false`. Without
+  // this filter every gamepad button press on a focused button
+  // would fire `.click()` → `mousedown` → restore the cursor,
+  // making the "hide on gamepad use" state meaningless.
+  //
+  // Real user clicks (mouse button, touch tap) are `isTrusted:
+  // true` because they originate from the browser's input
+  // pipeline. Same for Space / Enter activation of a focused
+  // <button> — Chromium synthesises that with `isTrusted: true`.
+  // Only the explicit `element.click()` path (which we use for
+  // gamepad A) marks the event untrusted.
+  if (!e.isTrusted) return;
   restore();
 }
 
