@@ -183,6 +183,31 @@ fn describe_device(id: &HSTRING) -> (bool, String) {
     (false, "other".to_string())
 }
 
+/// Dual-mode devices (most modern audio/input peripherals) show up as
+/// *two* separate `DeviceInformation` entries with the same name — one
+/// from the classic (BR/EDR) selector, one from the LE selector, each
+/// with its own id. `combined_selector` ORs the two selectors together
+/// precisely so discovery/pairing catches LE-only devices too, but that
+/// means every dual-mode device is naturally duplicated in the raw
+/// result. Collapse by case-insensitive trimmed name, keeping whichever
+/// duplicate is connected / has a specific kind over a generic one.
+fn dedupe_by_name(entries: Vec<BluetoothDeviceEntry>) -> Vec<BluetoothDeviceEntry> {
+    let mut by_name: Vec<(String, BluetoothDeviceEntry)> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let key = entry.name.trim().to_lowercase();
+        if let Some((_, existing)) = by_name.iter_mut().find(|(k, _)| *k == key) {
+            let better = (entry.connected, entry.kind != "other")
+                > (existing.connected, existing.kind != "other");
+            if better {
+                *existing = entry;
+            }
+        } else {
+            by_name.push((key, entry));
+        }
+    }
+    by_name.into_iter().map(|(_, e)| e).collect()
+}
+
 /// AQS selector matching both classic and LE devices in a given pairing
 /// state. WinRT's `FindAllAsync`/`CreateWatcher` only accept one selector
 /// string, so the two device-family selectors are OR'd together — the
@@ -213,6 +238,7 @@ pub fn paired_devices() -> Vec<BluetoothDeviceEntry> {
                 kind,
             });
         }
+        let mut out = dedupe_by_name(out);
         // Connected first, then alphabetical — mirrors the WiFi list's
         // "connected/known first" ordering.
         out.sort_by(|a, b| {
@@ -308,6 +334,7 @@ pub fn scan(seconds: u64) -> Vec<BluetoothDeviceEntry> {
                 kind,
             });
         }
+        let mut out = dedupe_by_name(out);
         out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         Ok(out)
     })()
