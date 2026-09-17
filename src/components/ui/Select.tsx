@@ -81,22 +81,28 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
   const selectedIndex = items.findIndex((o) => o.value === value);
 
   // Position the panel beneath the trigger (or above if no room).
-  // The panel's CSS uses `min-w-[--trigger-w] max-w-xs` so the
-  // dropdown is at least as wide as the trigger (so the
-  // connected-control feel reads correctly) but never wider than
-  // `max-w-xs` (20rem ≈ 320px) — long option labels truncate
-  // gracefully with an ellipsis instead of ballooning the panel
-  // across the screen. We still record `triggerWidth` so the
-  // CSS variable used by the panel can resolve it on first paint
-  // without a reflow.
+  // Two-pass: first paint the panel with a placeholder position,
+  // measure its actual rendered height, then adjust. The single-
+  // pass approach (assumes a fixed 280px max) left a visible gap
+  // when the panel had only a few options — the formula subtracted
+  // 280px from the trigger's top even though the panel was only
+  // ~140px tall, leaving the dropdown floating in mid-air.
   const updatePosition = useCallback(() => {
     const t = triggerRef.current;
+    const panel = panelRef.current;
     if (!t) return;
     const rect = t.getBoundingClientRect();
-    const panelMaxHeight = 280;
+    // Use the panel's actual rendered height when available so the
+    // flip-above offset matches the visible panel. Falls back to
+    // the CSS-declared max-h-72 (288px) on the first render before
+    // the panel is mounted.
+    const panelHeight = panel?.offsetHeight ?? 288;
     const spaceBelow = window.innerHeight - rect.bottom - 8;
-    const placeAbove = spaceBelow < panelMaxHeight && rect.top > spaceBelow;
-    const top = placeAbove ? Math.max(8, rect.top - panelMaxHeight - 4) : rect.bottom + 4;
+    const placeAbove =
+      panelHeight > spaceBelow && rect.top - panelHeight - 8 > 8;
+    const top = placeAbove
+      ? Math.max(8, rect.top - panelHeight - 4)
+      : rect.bottom + 4;
     setPos({
       left: rect.left,
       top,
@@ -105,16 +111,21 @@ export function Select({ options, value, onChange, disabled, "aria-label": ariaL
     });
   }, []);
 
+  // Reposition after the panel mounts and lays out so the height
+  // we measured matches reality. The single rAF defers past the
+  // browser's first paint; `updatePosition` reads `panelRef.current`
+  // which is set synchronously in the panel's ref callback.
   useEffect(() => {
     if (!open) return;
-    updatePosition();
+    const id = requestAnimationFrame(() => updatePosition());
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
+      cancelAnimationFrame(id);
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [open, updatePosition]);
+  }, [open, updatePosition, pos]);
 
   // Focus trap for Escape handling and to anchor the spatial scope
   // to the panel so D-pad / arrows don't leak out. Tab trap is
