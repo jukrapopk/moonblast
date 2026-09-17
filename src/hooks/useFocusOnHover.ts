@@ -29,6 +29,22 @@ import { useEffect } from "react";
  */
 export function useFocusOnHover() {
   useEffect(() => {
+    function isFocusable(el: HTMLElement): boolean {
+      // Same set the LRUD spatial library treats as focusable. Plain
+      // `<div>`s aren't focusable by default — and crucially, calling
+      // `.focus()` on them is a no-op in spec but WebView2's Chromium
+      // appears to make them focusable anyway, which then draws the
+      // `:focus-visible` outline around the whole scroll container.
+      // Skip the focus call entirely on non-focusable elements so we
+      // never move focus to a `<div>`.
+      const tag = el.tagName;
+      if (tag === "BUTTON" || tag === "A" || tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+        return !el.hasAttribute("disabled");
+      }
+      const tabindex = el.getAttribute("tabindex");
+      return tabindex !== null && tabindex !== "-1";
+    }
+
     function onMouseEnter(e: Event) {
       // Narrow to Element first — `closest` lives on Element.prototype,
       // and the spec lets `e.target` be a non-Element in edge cases
@@ -40,7 +56,7 @@ export function useFocusOnHover() {
       // contenteditable regions — they need arrows for caret
       // movement, not focus jumps.
       if (t.closest("input, textarea, [contenteditable]")) return;
-      if (typeof t.focus !== "function") return;
+      if (!isFocusable(t)) return;
       t.focus({ preventScroll: true });
     }
     function onMouseLeave(e: Event) {
