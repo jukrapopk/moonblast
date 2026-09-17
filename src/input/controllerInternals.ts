@@ -1,10 +1,7 @@
 /**
- * Internal peek accessors used by `useGamepad` so it can route face
- * buttons (A / B) through modal-registered handlers without making the
- * LIFO stacks part of the controller's public API.
- *
- * Kept in its own module so the controller doesn't need to import
- * `useGamepad`, and vice-versa.
+ * Internal peek accessors. Reserved for any future caller that
+ * wants to read the LIFO escape / enter stacks without making them
+ * part of the controller's public API.
  */
 type KeyHandler = (e: KeyboardEvent) => void;
 

@@ -16,15 +16,10 @@
  * Tab is intentionally NOT intercepted. Native browser Tab moves focus
  * through the document in tabindex order, which is the right behaviour
  * for keyboard users reaching form controls in Settings / modal inputs.
- * View cycling is handled by the gamepad shoulders (LB/RB) in `useGamepad`.
  *
  * Design notes
  * ------------
- *  - Single global keyboard listener. The gamepad poller routes its
- *    D-pad / left-stick presses through the same `processDirection`
- *    function via `dispatchDirection`, so gamepad + keyboard share an
- *    identical directional code path (lost-focus recovery, scope locks,
- *    Up-override, etc.).
+ *  - Single global keyboard listener.
  *  - LIFO escape/enter stacks: each Modal / ContextMenu pushes a handler
  *    on open and pops it on close. The top of the stack wins.
  *  - `spatialScope` lets views / modals constrain spatial movement so
@@ -320,10 +315,9 @@ function processDirection(dir: Direction, preventDefault: () => void): void {
 }
 
 /**
- * Export the shared directional handler so the gamepad poller
- * (`useGamepad`) can route D-pad / left-stick presses through the
- * exact same code path as keyboard arrows. The keyboard listener in
- * `useSpatialController` also calls this internally.
+ * Shared directional handler. The keyboard listener calls it
+ * internally. Exported for any future caller that wants the same
+ * arrow-key behaviour (e.g. a different input device bridge).
  */
 export function dispatchDirection(dir: Direction): void {
   processDirection(dir, () => {});
@@ -405,10 +399,17 @@ export function useSpatialController() {
         return;
       }
 
-      // 3. Arrow keys — share the directional path with the gamepad
-      //    poller so D-pad / left-stick behave identically.
+      // 3. Arrow keys — spatial navigation.
       const dir = directionFromKey(e.key);
       if (dir) {
+        // Respect a local React `onKeyDownCapture` / `onKeyDown`
+        // handler that already redirected focus (e.g. Moonlight
+        // Settings' sub-tab Down override captures ArrowDown to
+        // jump to the first content row). `defaultPrevented` is set
+        // by any `preventDefault()` call on the same event,
+        // including ones from React's capture-phase `onKeyDownCapture`
+        // handlers that ran earlier in the dispatch.
+        if (e.defaultPrevented) return;
         processDirection(dir, () => e.preventDefault());
       }
     }

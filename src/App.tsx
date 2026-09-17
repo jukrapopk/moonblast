@@ -13,7 +13,6 @@ import { useSettings, useSettingsField } from "./settings/SettingsContext";
 import { useAudioMaster } from "./hooks/useAudio";
 import { useBattery } from "./hooks/useBattery";
 import { useFocusOnHover } from "./hooks/useFocusOnHover";
-import { useGamepad } from "./hooks/useGamepad";
 import { useLrudMode } from "./hooks/useLrudMode";
 import { useSpatialController } from "./input/useSpatialController";
 import { openPowerMenu, usePowerMenuTrigger } from "./hooks/usePowerMenuTrigger";
@@ -123,7 +122,6 @@ export default function App() {
   // focus traversal handles form controls / buttons / links in
   // document order.
   useSpatialController();
-  useGamepad();
 
   // Rust intercepts Alt+F4 / taskbar-Close while in Immersive Mode and
   // asks the frontend to open the Power menu via this event. The
