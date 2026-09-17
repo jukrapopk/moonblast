@@ -114,6 +114,22 @@ export function stopArrowHold(source: string): void {
   holds.delete(source);
 }
 
+/**
+ * Tear down the auto-fire subsystem entirely: cancel the rAF loop and
+ * clear every active hold. Call this from the adapter's uninstall path
+ * so a stranded hold (e.g. controller disconnect during a held stick
+ * direction) can't keep the rAF loop running forever. Defense-in-depth
+ * — `holds.size === 0` also stops the loop on the next tick, but that
+ * requires the loop to be scheduled in the first place.
+ */
+export function unbindArrowAutoFire(): void {
+  if (rafId !== null && typeof cancelAnimationFrame !== "undefined") {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+  holds.clear();
+}
+
 /** Currently-held direction for `source`, or `null`. Useful for tests. */
 export function heldArrow(source: string): Direction | null {
   return holds.get(source)?.direction ?? null;

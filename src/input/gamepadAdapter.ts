@@ -42,6 +42,7 @@ import {
   bindArrowAutoFire,
   startArrowHold,
   stopArrowHold,
+  unbindArrowAutoFire,
 } from "./arrowAutoFire";
 import type { Direction } from "./spatialNav";
 
@@ -465,6 +466,11 @@ export function installGamepadAdapter(): () => void {
       rafId = null;
     }
     prev = empty();
+    // Drop any held direction so the auto-fire rAF loop doesn't keep
+    // firing synthetic ArrowKeys forever after the controller drops
+    // mid-stick. The loop's only self-stop path is `holds.size === 0`,
+    // so leaking the entry strands it until app restart.
+    stopArrowHold("gamepad");
   }
   function tick() {
     if (!active) return;
@@ -480,6 +486,11 @@ export function installGamepadAdapter(): () => void {
     window.removeEventListener("gamepadconnected", start);
     window.removeEventListener("gamepaddisconnected", stop);
     stop();
+    // Defense-in-depth: tear down the auto-fire subsystem so no
+    // stranded hold can keep the rAF loop running after the adapter
+    // is uninstalled. `stop()` above already drops the current hold;
+    // this clears any other source-keyed holds and cancels the rAF.
+    unbindArrowAutoFire();
   };
 }
 
