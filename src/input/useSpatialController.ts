@@ -433,6 +433,14 @@ export function useSpatialController() {
         // including ones from React's capture-phase `onKeyDownCapture`
         // handlers that ran earlier in the dispatch.
         if (e.defaultPrevented) return;
+        // Skip the keyboard-sourced hold registration if this arrow
+        // came from the gamepad adapter. The gamepad already
+        // registered its own `gamepad` hold entry, so registering a
+        // parallel `keyboard` hold would double-fire auto-fire emits
+        // every cadence tick. The `__moonblastFromGamepad` tag is
+        // stamped by `gamepadAdapter.sendKey` on synthesised
+        // KeyboardEvents.
+        const fromGamepad = (e as KeyboardEvent & { __moonblastFromGamepad?: boolean }).__moonblastFromGamepad === true;
         if (e.repeat) {
           // The OS is auto-repeating the held key. We've already
           // handled the leading edge on the non-repeat press (and
@@ -447,12 +455,14 @@ export function useSpatialController() {
           return;
         }
         processDirection(dir, () => e.preventDefault());
-        // Register the hold for auto-fire. The leading-edge keydown
-        // we just handled above IS the leading tick — `arrowAutoFire`
-        // skips its own first emission. The rAF loop fires follow-ups
-        // at HOLD_INITIAL_DELAY_MS (400ms) then HOLD_REPEAT_MS (500ms)
-        // while the key stays held. Releasing the key clears the hold.
-        startArrowHold("keyboard", dir);
+        if (!fromGamepad) {
+          // Register the keyboard-sourced hold for auto-fire. The
+          // gamepad path has its own hold entry (registered on the
+          // leading edge in `gamepadAdapter.ts`); if this keydown
+          // came from a gamepad synthesised event, we don't want a
+          // parallel `keyboard` hold racing it.
+          startArrowHold("keyboard", dir);
+        }
         return;
       }
 

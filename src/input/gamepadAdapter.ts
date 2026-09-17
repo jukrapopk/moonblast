@@ -170,6 +170,14 @@ function sendKey(key: Dir | "Enter" | "Escape"): void {
   // listener. When `target === document.body` and there's no React
   // wrapper, the window listener still fires on bubble.
   const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  // Tag synthetic gamepad-driven keydowns so the keyboard listener's
+  // hold-to-rapid-fire registration knows the arrow came from a
+  // gamepad and skips registering its own `keyboard`-sourced hold.
+  // Without this tag, every synthesised arrow would register a
+  // parallel hold entry alongside the gamepad's own, producing two
+  // auto-fire emits per cadence tick (`emit gamepad` + `emit
+  // keyboard`) and skipping focus by 2 per cycle.
+  (ev as KeyboardEvent & { __moonblastFromGamepad?: boolean }).__moonblastFromGamepad = true;
   target.dispatchEvent(ev);
 }
 
@@ -359,8 +367,6 @@ function dispatch(prev: State, next: State, now: number): State {
   const dir: Dir | null = next.dpad ?? next.stick ?? null;
   const prevDir: Dir | null = prev.dpad ?? prev.stick ?? null;
   if (dir !== null && dir !== prevDir) {
-    // eslint-disable-next-line no-console
-    console.log("[gamepadAdapter] leading edge sendKey", dir);
     sendKey(dir);
     // Register the hold with a unique source key so multiple
     // gamepads / sources don't collide. The leading-edge
