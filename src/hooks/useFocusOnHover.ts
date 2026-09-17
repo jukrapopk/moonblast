@@ -1,11 +1,20 @@
 import { useEffect } from "react";
 
 /**
- * Global "hover = focus" handler. Listens for `mouseover` at the
- * capture phase on `document` and focuses the entered element so
- * the same `:focus` / `:focus-visible` styling applies for both
- * mouse and keyboard navigation. One listener covers every
- * component — no per-button wiring needed.
+ * Global "hover = focus" handler. Uses `mouseenter` / `mouseleave`
+ * (not `mouseover` / `mouseout`) captured at `document` — these
+ * only fire when the pointer actually enters/exits an element's
+ * own box, not on every crossing into a child element, so hovering
+ * around inside a button (e.g. over its icon vs. its label) doesn't
+ * spuriously blur it. One listener pair covers every component —
+ * no per-button wiring needed.
+ *
+ * `mouseenter` focuses the entered element so the same `:focus` /
+ * `:focus-visible` styling applies for both mouse and keyboard nav.
+ * `mouseleave` blurs it again — but only when the element being
+ * left is the one currently focused, so leaving stops mid-tree
+ * ancestors (which were never focused in the first place) from
+ * blurring anything.
  *
  * Skipped:
  *   - Targets inside `input` / `textarea` / `[contenteditable]`
@@ -20,7 +29,7 @@ import { useEffect } from "react";
  */
 export function useFocusOnHover() {
   useEffect(() => {
-    function onMouseOver(e: Event) {
+    function onMouseEnter(e: Event) {
       const t = e.target as HTMLElement | null;
       if (!t) return;
       // Don't yank focus out of text inputs / textareas /
@@ -30,10 +39,26 @@ export function useFocusOnHover() {
       if (typeof t.focus !== "function") return;
       t.focus({ preventScroll: true });
     }
-    // Capture phase: runs before any React `onMouseEnter` /
-    // `onMouseOver` handlers, so we focus the element regardless
-    // of how the rest of the tree reacts to the mouseover.
-    document.addEventListener("mouseover", onMouseOver, true);
-    return () => document.removeEventListener("mouseover", onMouseOver, true);
+    function onMouseLeave(e: Event) {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      // Only blur if the element being left is the one actually
+      // focused — mouseleave also fires for every ancestor between
+      // the old and new hover target, most of which were never
+      // focused to begin with (the .focus() call above is a no-op
+      // on non-focusable elements).
+      if (document.activeElement !== t) return;
+      t.blur();
+    }
+    // Capture phase: mouseenter/mouseleave don't bubble, but the
+    // capturing pass still walks root → target for every dispatch,
+    // so a single pair of listeners on `document` sees every
+    // element's enter/leave without per-component wiring.
+    document.addEventListener("mouseenter", onMouseEnter, true);
+    document.addEventListener("mouseleave", onMouseLeave, true);
+    return () => {
+      document.removeEventListener("mouseenter", onMouseEnter, true);
+      document.removeEventListener("mouseleave", onMouseLeave, true);
+    };
   }, []);
 }
