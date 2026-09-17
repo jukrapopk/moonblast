@@ -267,11 +267,18 @@ pub fn forget(id: &str) -> Result<(), String> {
     if !pairing.IsPaired().unwrap_or(false) {
         return Ok(());
     }
-    let _ = pairing.UnpairAsync().map_err(win_err)?.get();
-    if pairing.IsPaired().unwrap_or(false) {
-        Err("Windows could not forget this device".to_string())
-    } else {
+    let result = pairing.UnpairAsync().map_err(win_err)?.get().map_err(win_err)?;
+    // Trust `UnpairAsync`'s own result status rather than re-reading
+    // `pairing.IsPaired()` afterward — `pairing`/`info` are a snapshot
+    // from `CreateFromIdAsync` and don't refresh in place, so a
+    // successful unpair could still read back stale "still paired"
+    // data here and get misreported as a failure.
+    use windows::Devices::Enumeration::DeviceUnpairingResultStatus as S;
+    let status = result.Status().map_err(win_err)?;
+    if status == S::Unpaired || status == S::AlreadyUnpaired {
         Ok(())
+    } else {
+        Err(format!("Windows could not forget this device ({status:?})"))
     }
 }
 
