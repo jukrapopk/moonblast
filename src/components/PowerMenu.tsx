@@ -73,11 +73,6 @@ export function PowerMenu({
   return (
     <Modal open={open} onClose={onClose} title="Power">
       <div className="space-y-1">
-        <MenuItem
-          icon={<GameController size={18} weight="bold" />}
-          label={immersive ? "Exit Immersive Mode" : "Immersive Mode"}
-          onClick={onToggleImmersive}
-        />
         {!immersive && (
           <MenuItem
             icon={fullscreen ? <ArrowsIn size={18} weight="bold" /> : <ArrowsOut size={18} weight="bold" />}
@@ -85,6 +80,11 @@ export function PowerMenu({
             onClick={onToggleFullscreen}
           />
         )}
+        <MenuItem
+          icon={<GameController size={18} weight="bold" />}
+          label={immersive ? "Exit Immersive Mode" : "Immersive Mode"}
+          onClick={onToggleImmersive}
+        />
         <MenuItem
           icon={<X size={18} weight="bold" />}
           label="Close Moonblast"

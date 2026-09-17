@@ -13,7 +13,7 @@
 import { useEffect } from "react";
 import { dispatchDirection } from "../input/useSpatialController";
 import { useSpatialControllerInternals } from "../input/controllerInternals";
-import { refreshLrudMode } from "./useLrudMode";
+import { enterLrudMode } from "./useLrudMode";
 
 const ENTER_KEY = "Enter";
 const ESCAPE_KEY = "Escape";
@@ -55,20 +55,17 @@ export function useGamepad() {
       const pad = pads.find((p) => p && p.connected && isLikelyGamepad(p)) ?? null;
 
       if (pad) {
-        // Treat every connected pad frame as LRUD-mode activity so
-        // the cursor hides and hover styles drop while the user is
-        // holding the controller. `refreshLrudMode` is throttled
-        // (750 ms) so wiggling the mouse mid-gameplay doesn't
-        // create a hide/show cycle. The window-level mouse
-        // listeners in `useLrudMode` will exit LRUD mode as soon
-        // as the gamepad stops being polled (the user releases
-        // the stick / unplugs the pad).
-        refreshLrudMode();
         // Face buttons only — A activates, B cancels. The
         // shoulders (LB/RB) used to cycle top-level views, but
         // that flow is gone: view switching now happens through
         // the directional pad via the TopBar nav buttons, the
-        // same path keyboard users take.
+        // same path keyboard users take. Each pressed-button /
+        // pressed-axis edge also drives LRUD-mode entry so the
+        // cursor hides when the user starts interacting with the
+        // pad (matching the keyboard's `keydown` entry path).
+        // No per-frame re-arm — that approach caused cursor
+        // flicker because mousemove would exit at 60Hz while the
+        // pad was plugged in.
         const faces: [number, "enter" | "escape"][] = [
           [0, "enter"],
           [1, "escape"],
@@ -79,6 +76,7 @@ export function useGamepad() {
           const id = `btn-${idx}`;
           if (btn.pressed && !held.has(id)) {
             held.add(id);
+            enterLrudMode();
             if (kind === "enter") {
               // Route through the registered enter-stack so modal
               // primary actions (submit / pick) win. If nothing is on
@@ -123,6 +121,7 @@ export function useGamepad() {
           const id = `dpad-${idx}`;
           if (btn.pressed && !held.has(id)) {
             held.add(id);
+            enterLrudMode();
             dispatchDirection(dir);
           } else if (!btn.pressed) {
             held.delete(id);
@@ -143,6 +142,7 @@ export function useGamepad() {
           const id = `axis-${dir}`;
           if (v && !held.has(id)) {
             held.add(id);
+            enterLrudMode();
             dispatchDirection(dir as "up" | "down" | "left" | "right");
           } else if (!v) {
             held.delete(id);
