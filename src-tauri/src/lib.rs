@@ -10,6 +10,7 @@ use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+mod bluetooth;
 mod cmd;
 mod display;
 mod hdr;
@@ -2496,6 +2497,58 @@ fn wifi_forget(ssid: String) -> Result<(), String> {
     wifi::forget(&ssid)
 }
 
+/// Bluetooth radio on/off state for the TopBar chip. `supported: false`
+/// means no Bluetooth radio at all — the UI hides the chip in that case.
+#[tauri::command]
+async fn bluetooth_radio_status() -> bluetooth::BluetoothRadioStatus {
+    tauri::async_runtime::spawn_blocking(bluetooth::radio_status)
+        .await
+        .unwrap_or(bluetooth::BluetoothRadioStatus { supported: false, on: false, connected: false })
+}
+
+/// Turn the Bluetooth radio on or off (same API Windows' own Quick
+/// Settings toggle uses).
+#[tauri::command]
+async fn bluetooth_set_radio(on: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bluetooth::set_radio(on))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Already-paired Bluetooth devices, for the modal's "Paired" section.
+#[tauri::command]
+async fn bluetooth_paired_devices() -> Vec<bluetooth::BluetoothDeviceEntry> {
+    tauri::async_runtime::spawn_blocking(bluetooth::paired_devices)
+        .await
+        .unwrap_or_default()
+}
+
+/// Forget (unpair) a device by id. Idempotent.
+#[tauri::command]
+async fn bluetooth_forget(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bluetooth::forget(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Discover nearby devices Windows hasn't paired with yet. Runs a
+/// `DeviceWatcher` for a fixed window (classic inquiry is slow), same
+/// external shape as `wifi_scan` (trigger, wait, return the list).
+#[tauri::command]
+async fn bluetooth_scan() -> Vec<bluetooth::BluetoothDeviceEntry> {
+    tauri::async_runtime::spawn_blocking(|| bluetooth::scan(8))
+        .await
+        .unwrap_or_default()
+}
+
+/// Pair with a discovered device by id.
+#[tauri::command]
+async fn bluetooth_pair(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bluetooth::pair(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Output devices for the TopBar audio picker (default render endpoint first
 /// by `is_default`; the UI sorts alphabetically and marks the default).
 /// Also arms the `audio-changed` push notifications (idempotent).
@@ -2896,6 +2949,12 @@ pub fn run() {
             wifi_connect_with_password,
             wifi_disconnect,
             wifi_forget,
+            bluetooth_radio_status,
+            bluetooth_set_radio,
+            bluetooth_paired_devices,
+            bluetooth_forget,
+            bluetooth_scan,
+            bluetooth_pair,
             audio_devices,
             audio_set_default_device,
             audio_master,

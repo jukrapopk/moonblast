@@ -3,9 +3,11 @@ import { motion } from "framer-motion";
 import { type ReactNode } from "react";
 import { type AudioMaster } from "../hooks/useAudio";
 import { type BatteryStatus } from "../hooks/useBattery";
+import { type BluetoothRadioStatus } from "../hooks/useBluetooth";
 import { formatClock, formatDate, useTime } from "../hooks/useTime";
 import { type WifiConnection } from "../hooks/useWifi";
 import { BatteryIcon } from "./ui/BatteryIcon";
+import { BluetoothIcon } from "./ui/BluetoothIcon";
 import { formatDuration } from "./ui/formatDuration";
 import { SpeakerIcon } from "./ui/SpeakerIcon";
 import { WifiIcon } from "./ui/WifiIcon";
@@ -21,30 +23,38 @@ const items: { id: View; label: string; nav: "left" | "right"; icon: ReactNode }
 /** Battery / WiFi / audio icon buttons shown in the TopBar's right cluster. */
 function Status({
   onWifiClick,
+  onBluetoothClick,
   onAudioClick,
   onBatteryClick,
   onDisplayClick,
   batteryOpen,
+  bluetoothOpen,
   displayOpen,
   battery,
   wifi,
+  bluetooth,
   audio,
   showDisplay,
   showWifi,
+  showBluetooth,
   showBattery,
   showAudio,
 }: {
   onWifiClick: () => void;
+  onBluetoothClick: () => void;
   onAudioClick: () => void;
   onBatteryClick: () => void;
   onDisplayClick: () => void;
   batteryOpen: boolean;
+  bluetoothOpen: boolean;
   displayOpen: boolean;
   battery: BatteryStatus | null;
   wifi: WifiConnection | null | undefined;
+  bluetooth: BluetoothRadioStatus | null | undefined;
   audio: AudioMaster | undefined;
   showDisplay: boolean;
   showWifi: boolean;
+  showBluetooth: boolean;
   showBattery: boolean;
   showAudio: boolean;
 }) {
@@ -72,6 +82,14 @@ function Status({
           label={wifi.radioOn ? "Wi-Fi" : "Wi-Fi off"}
           icon={<WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />}
           onClick={onWifiClick}
+        />
+      )}
+      {showBluetooth && bluetooth?.supported && (
+        <TopBarButton
+          label={bluetooth.on ? (bluetooth.connected ? "Bluetooth · Connected" : "Bluetooth") : "Bluetooth off"}
+          icon={<BluetoothIcon radioOn={bluetooth.on} connected={bluetooth.connected} size={24} />}
+          onClick={onBluetoothClick}
+          active={bluetoothOpen}
         />
       )}
       {showBattery && battery && (
@@ -114,10 +132,13 @@ export function TopBar({
   showDate,
   showDisplay,
   showWifi,
+  showBluetooth,
   showBattery,
   showAudio,
   batteryOpen,
+  bluetoothOpen,
   onWifiClick,
+  onBluetoothClick,
   onAudioClick,
   onBatteryClick,
   displayOpen,
@@ -125,6 +146,7 @@ export function TopBar({
   powerOpen,
   onPowerClick,
   wifi,
+  bluetooth,
   audio,
   battery,
 }: {
@@ -136,10 +158,13 @@ export function TopBar({
   showDate: boolean;
   showDisplay: boolean;
   showWifi: boolean;
+  showBluetooth: boolean;
   showBattery: boolean;
   showAudio: boolean;
   batteryOpen: boolean;
+  bluetoothOpen: boolean;
   onWifiClick: () => void;
+  onBluetoothClick: () => void;
   onAudioClick: () => void;
   onBatteryClick: () => void;
   displayOpen: boolean;
@@ -147,6 +172,7 @@ export function TopBar({
   powerOpen: boolean;
   onPowerClick: () => void;
   wifi: WifiConnection | null | undefined;
+  bluetooth: BluetoothRadioStatus | null | undefined;
   audio: AudioMaster | undefined;
   battery: BatteryStatus | null;
 }) {
@@ -213,16 +239,20 @@ export function TopBar({
 
       <Status
         onWifiClick={onWifiClick}
+        onBluetoothClick={onBluetoothClick}
         onAudioClick={onAudioClick}
         onBatteryClick={onBatteryClick}
         onDisplayClick={onDisplayClick}
         batteryOpen={batteryOpen}
+        bluetoothOpen={bluetoothOpen}
         displayOpen={displayOpen}
         battery={battery}
         wifi={wifi}
+        bluetooth={bluetooth}
         audio={audio}
         showDisplay={showDisplay}
         showWifi={showWifi}
+        showBluetooth={showBluetooth}
         showBattery={showBattery}
         showAudio={showAudio}
       />

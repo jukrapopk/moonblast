@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Monitor, WifiHigh, BatteryFull, SpeakerHigh, Clock } from "@phosphor-icons/react";
+import { Monitor, WifiHigh, Bluetooth, BatteryFull, SpeakerHigh, Clock } from "@phosphor-icons/react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
@@ -769,15 +769,18 @@ function PreferencesSection({
   showDate,
   showDisplay,
   showWifi,
+  showBluetooth,
   showBattery,
   showAudio,
   onToggleShowTime,
   onToggleShowDate,
   onToggleShowDisplay,
   onToggleShowWifi,
+  onToggleShowBluetooth,
   onToggleShowBattery,
   onToggleShowAudio,
   onOpenWifi,
+  onOpenBluetooth,
   onOpenAudio,
   onOpenBattery,
   onOpenDisplay,
@@ -787,15 +790,18 @@ function PreferencesSection({
   showDate: boolean;
   showDisplay: boolean;
   showWifi: boolean;
+  showBluetooth: boolean;
   showBattery: boolean;
   showAudio: boolean;
   onToggleShowTime: (v: boolean) => void;
   onToggleShowDate: (v: boolean) => void;
   onToggleShowDisplay: (v: boolean) => void;
   onToggleShowWifi: (v: boolean) => void;
+  onToggleShowBluetooth: (v: boolean) => void;
   onToggleShowBattery: (v: boolean) => void;
   onToggleShowAudio: (v: boolean) => void;
   onOpenWifi: () => void;
+  onOpenBluetooth: () => void;
   onOpenAudio: () => void;
   onOpenBattery: () => void;
   onOpenDisplay: () => void;
@@ -836,6 +842,16 @@ function PreferencesSection({
       >
         <Row label="Show Wi-Fi in Top Bar">
           <Toggle checked={showWifi} onChange={onToggleShowWifi} />
+        </Row>
+      </PreferenceGroup>
+
+      <PreferenceGroup
+        title="Bluetooth"
+        icon={<Bluetooth size={20} weight="bold" />}
+        onIconClick={onOpenBluetooth}
+      >
+        <Row label="Show Bluetooth in Top Bar">
+          <Toggle checked={showBluetooth} onChange={onToggleShowBluetooth} />
         </Row>
       </PreferenceGroup>
 
@@ -925,11 +941,14 @@ export function SettingsView({
   onToggleShowDisplay,
   showWifi,
   onToggleShowWifi,
+  showBluetooth,
+  onToggleShowBluetooth,
   showBattery,
   onToggleShowBattery,
   showAudio,
   onToggleShowAudio,
   onOpenWifi,
+  onOpenBluetooth,
   onOpenAudio,
   onOpenBattery,
   onOpenDisplay,
@@ -959,11 +978,14 @@ export function SettingsView({
   onToggleShowDisplay: (v: boolean) => void;
   showWifi: boolean;
   onToggleShowWifi: (v: boolean) => void;
+  showBluetooth: boolean;
+  onToggleShowBluetooth: (v: boolean) => void;
   showBattery: boolean;
   onToggleShowBattery: (v: boolean) => void;
   showAudio: boolean;
   onToggleShowAudio: (v: boolean) => void;
   onOpenWifi: () => void;
+  onOpenBluetooth: () => void;
   onOpenAudio: () => void;
   onOpenBattery: () => void;
   onOpenDisplay: () => void;
@@ -1038,14 +1060,17 @@ export function SettingsView({
         showDisplay={showDisplay}
         showBattery={showBattery}
         showWifi={showWifi}
+        showBluetooth={showBluetooth}
         showAudio={showAudio}
         onToggleShowTime={onToggleShowTime}
         onToggleShowDate={onToggleShowDate}
         onToggleShowDisplay={onToggleShowDisplay}
         onToggleShowBattery={onToggleShowBattery}
         onToggleShowWifi={onToggleShowWifi}
+        onToggleShowBluetooth={onToggleShowBluetooth}
         onToggleShowAudio={onToggleShowAudio}
         onOpenWifi={onOpenWifi}
+        onOpenBluetooth={onOpenBluetooth}
         onOpenAudio={onOpenAudio}
         onOpenBattery={onOpenBattery}
         onOpenDisplay={onOpenDisplay}

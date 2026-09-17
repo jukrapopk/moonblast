@@ -17,10 +17,12 @@ import { useSpatialController } from "./input/useSpatialController";
 import { useGamepadAdapter } from "./input/gamepadAdapter";
 import { openPowerMenu, usePowerMenuTrigger } from "./hooks/usePowerMenuTrigger";
 import { useWifi } from "./hooks/useWifi";
+import { useBluetooth } from "./hooks/useBluetooth";
 import { AudioModal } from "./components/ui/AudioModal";
 import { BatteryModal } from "./components/ui/BatteryModal";
 import { useContextMenu, ContextMenuHost } from "./components/ui/ContextMenu";
 import { WifiModal } from "./components/ui/WifiModal";
+import { BluetoothModal } from "./components/ui/BluetoothModal";
 
 // Session-only view override — let users refresh (F5) on the Settings page
 // without losing their place, while still always booting the launcher into
@@ -202,6 +204,7 @@ export default function App() {
   // can't override the modal's spatial scope and leak arrows out to the
   // TopBar buttons.
   const [wifiOpen, setWifiOpen] = useState(false);
+  const [bluetoothOpen, setBluetoothOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [batteryOpen, setBatteryOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
@@ -213,6 +216,10 @@ export default function App() {
   useEffect(() => {
     refreshWifi();
   }, [wifiOpen, refreshWifi]);
+  const { status: bluetooth, refresh: refreshBluetooth } = useBluetooth();
+  useEffect(() => {
+    refreshBluetooth();
+  }, [bluetoothOpen, refreshBluetooth]);
   const { master: audio, refresh: refreshAudio } = useAudioMaster();
   useEffect(() => {
     if (!audioOpen) refreshAudio();
@@ -249,6 +256,7 @@ export default function App() {
   const setShowDate = useSettingsField("customization", "show_date");
   const setShowDisplay = useSettingsField("customization", "show_display");
   const setShowWifi = useSettingsField("customization", "show_wifi");
+  const setShowBluetooth = useSettingsField("customization", "show_bluetooth");
   const setShowBattery = useSettingsField("customization", "show_battery");
   const setShowAudio = useSettingsField("customization", "show_audio");
 
@@ -351,10 +359,13 @@ export default function App() {
         showDate={settings.customization.show_date}
         showDisplay={settings.customization.show_display}
         showWifi={settings.customization.show_wifi}
+        showBluetooth={settings.customization.show_bluetooth}
         showBattery={settings.customization.show_battery}
         showAudio={settings.customization.show_audio}
         batteryOpen={batteryOpen}
+        bluetoothOpen={bluetoothOpen}
         onWifiClick={() => setWifiOpen(true)}
+        onBluetoothClick={() => setBluetoothOpen(true)}
         onAudioClick={() => setAudioOpen(true)}
         onBatteryClick={() => setBatteryOpen(true)}
         displayOpen={displayOpen}
@@ -362,6 +373,7 @@ export default function App() {
         powerOpen={powerOpen}
         onPowerClick={() => setPowerOpen((o) => !o)}
         wifi={wifi}
+        bluetooth={bluetooth}
         audio={audio}
         battery={battery}
       />
@@ -414,11 +426,14 @@ export default function App() {
                 onToggleShowDisplay={setShowDisplay}
                 showWifi={settings.customization.show_wifi}
                 onToggleShowWifi={setShowWifi}
+                showBluetooth={settings.customization.show_bluetooth}
+                onToggleShowBluetooth={setShowBluetooth}
                 showBattery={settings.customization.show_battery}
                 onToggleShowBattery={setShowBattery}
                 showAudio={settings.customization.show_audio}
                 onToggleShowAudio={setShowAudio}
                 onOpenWifi={() => setWifiOpen(true)}
+                onOpenBluetooth={() => setBluetoothOpen(true)}
                 onOpenAudio={() => setAudioOpen(true)}
                 onOpenBattery={() => setBatteryOpen(true)}
                 onOpenDisplay={() => setDisplayOpen(true)}
@@ -445,6 +460,12 @@ export default function App() {
         onClose={() => setWifiOpen(false)}
         currentSsid={wifi?.ssid ?? null}
         radioOn={wifi?.radioOn ?? null}
+      />
+      <BluetoothModal
+        open={bluetoothOpen}
+        onClose={() => setBluetoothOpen(false)}
+        radioOn={bluetooth?.on ?? null}
+        onRadioChanged={refreshBluetooth}
       />
       <AudioModal
         open={audioOpen}

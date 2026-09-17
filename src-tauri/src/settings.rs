@@ -65,6 +65,8 @@ pub struct Customization {
     pub show_battery: bool,
     #[serde(default = "default_true")]
     pub show_audio: bool,
+    #[serde(default = "default_true")]
+    pub show_bluetooth: bool,
 }
 
 fn default_true() -> bool {
@@ -80,6 +82,7 @@ impl Default for Customization {
             show_wifi: true,
             show_battery: true,
             show_audio: true,
+            show_bluetooth: true,
         }
     }
 }

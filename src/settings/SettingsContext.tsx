@@ -57,7 +57,7 @@ export interface Settings {
     capture_system_keys: string;
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean; auto_immersive: boolean };
-  customization: { show_time: boolean; show_date: boolean; show_display: boolean; show_wifi: boolean; show_battery: boolean; show_audio: boolean };
+  customization: { show_time: boolean; show_date: boolean; show_display: boolean; show_wifi: boolean; show_battery: boolean; show_audio: boolean; show_bluetooth: boolean };
   appearance: { theme: string; accent: string; custom_accent: string | null };
   machines: { name: string; address: string }[];
   app_shortcuts: { name: string; path: string; source: string; kind: string; display_name: string | null; custom_icon: string | null; use_desktop_icon: boolean; steamgrid_icon: string | null; auto_launch: boolean }[];
@@ -105,7 +105,7 @@ const DEFAULT_SETTINGS: Settings = {
     capture_system_keys: "never",
   },
   fullscreen: { suppress_explorer: false, auto_fullscreen: false, auto_immersive: false },
-  customization: { show_time: true, show_date: true, show_display: true, show_wifi: true, show_battery: true, show_audio: true },
+  customization: { show_time: true, show_date: true, show_display: true, show_wifi: true, show_battery: true, show_audio: true, show_bluetooth: true },
   appearance: { theme: "dark", accent: "neutral", custom_accent: null },
   machines: [],
   app_shortcuts: [],
