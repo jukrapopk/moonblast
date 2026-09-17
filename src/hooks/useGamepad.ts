@@ -13,7 +13,7 @@
 import { useEffect } from "react";
 import { dispatchDirection } from "../input/useSpatialController";
 import { useSpatialControllerInternals } from "../input/controllerInternals";
-import { enterLrudMode } from "./useLrudMode";
+import { refreshLrudMode } from "./useLrudMode";
 
 const ENTER_KEY = "Enter";
 const ESCAPE_KEY = "Escape";
@@ -57,11 +57,13 @@ export function useGamepad() {
       if (pad) {
         // Treat every connected pad frame as LRUD-mode activity so
         // the cursor hides and hover styles drop while the user is
-        // holding the controller. The window-level mouse listeners
-        // in `useLrudMode` will exit LRUD mode the moment the user
-        // moves the mouse, so this stays self-correcting without
-        // needing a separate "exit on gamepad idle" timer.
-        enterLrudMode();
+        // holding the controller. `refreshLrudMode` is throttled
+        // (750 ms) so wiggling the mouse mid-gameplay doesn't
+        // create a hide/show cycle. The window-level mouse
+        // listeners in `useLrudMode` will exit LRUD mode as soon
+        // as the gamepad stops being polled (the user releases
+        // the stick / unplugs the pad).
+        refreshLrudMode();
         // Face buttons only — A activates, B cancels. The
         // shoulders (LB/RB) used to cycle top-level views, but
         // that flow is gone: view switching now happens through
