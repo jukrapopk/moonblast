@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "@phosphor-icons/react";
 import { useFocusTrap } from "../../input/useSpatialController";
@@ -94,7 +95,19 @@ export function Modal({
     setPanelEl(node);
   }, []);
 
-  return (
+  // Render the overlay + panel into `document.body` via a React
+  // portal. Without this, a Modal mounted inside `<main>` would
+  // make the main's `data-lrud-scope-lock="all"` an ancestor of
+  // the modal's focused button, which the spatial controller's
+  // `findDirectionalScope` then picks as the directional scope —
+  // letting arrows reach every focusable in main, including the
+  // page content behind the modal. Hoisting the DOM up to body
+  // (sibling of <main>) removes that ancestor lock and the
+  // spatial scope correctly falls back to the modal panel itself.
+  // React events still bubble through the React tree as normal;
+  // only the DOM placement changes.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -141,6 +154,7 @@ export function Modal({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
