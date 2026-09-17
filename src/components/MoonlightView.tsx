@@ -635,6 +635,13 @@ export function MoonlightView() {
   }, [sub, scan]);
 
   useEffect(() => {
+    // Race-safe pair-complete registration: if the effect cleans up
+    // between `listen()` returning and its `.then` resolving, the
+    // listener would otherwise be registered with no handle and leak.
+    // Set `cancelled = true` synchronously in cleanup, then check it
+    // inside `.then` and immediately invoke the unlisten if true.
+    // Same pattern as AudioModal.tsx (the prior-audit H5 fix).
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     listen<{ host: string; success: boolean }>("pair-complete", (event) => {
       const { host, success } = event.payload;
@@ -645,9 +652,14 @@ export function MoonlightView() {
         showToast(success ? `Paired with ${host}` : `Couldn't pair with ${host}`);
       }
     }).then((fn) => {
-      unlisten = fn;
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     });
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, [scan]);

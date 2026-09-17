@@ -31,7 +31,10 @@ export function useDebouncedRead<T>(
     if (inFlight.current) return inFlight.current;
     const now = Date.now();
     if (now - lastReadAt.current < collapseMs) return;
-    lastReadAt.current = now;
+    // Stamp `lastReadAt` *after* the invoke resolves (success or fail),
+    // not before. Stamping first means a transient backend hiccup can
+    // consume the collapse window and silently delay the next read by
+    // up to `collapseMs`, even after the backend recovers.
     const p = (async () => {
       try {
         const v = await invoke<T>(command);
@@ -39,6 +42,7 @@ export function useDebouncedRead<T>(
       } catch {
         setValue(null as T);
       }
+      lastReadAt.current = Date.now();
     })();
     inFlight.current = p;
     try {

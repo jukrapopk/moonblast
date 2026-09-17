@@ -34,7 +34,6 @@ import { useEffect, useRef } from "react";
 import { directionFromKey, focusInitial, moveFocus, type Direction } from "./spatialNav";
 import { useSpatialControllerInternals } from "./controllerInternals";
 import {
-  bindArrowAutoFire,
   startArrowHold,
   stopArrowHold,
 } from "./arrowAutoFire";
@@ -333,12 +332,15 @@ export function useSpatialController() {
   useEffect(() => {
     const stopTracking = trackFocusForRecovery();
 
-    // Bind the arrow-auto-fire dispatch callback. It re-runs the
-    // same `processDirection` flow as a real keydown (so held-arrow
-    // behaviour matches what pressing it repeatedly would do).
-    bindArrowAutoFire((_source, dir) => {
-      processDirection(dir, () => {});
-    });
+    // Keyboard auto-fire is intentionally not bound here. The
+    // gamepad adapter (mounted second, see `useGamepadAdapter` in
+    // App.tsx) overwrites any earlier binding with its own
+    // `sendKey` dispatcher before any holds exist, so this line
+    // would be dead. The keyboard's held-arrow repeat is handled
+    // natively by the OS — the controller's keyboard listener at
+    // `onKey` already calls `processDirection` on every real
+    // keydown, so the controller's path is exercised directly
+    // without needing the auto-fire rebound.
 
     function onKey(e: KeyboardEvent) {
       // 0. Context-menu shortcut. Two equivalent triggers:

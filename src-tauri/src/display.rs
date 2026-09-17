@@ -371,7 +371,7 @@ fn wmi_monitor_names() -> HashMap<String, String> {
     // argument parses on newlines — a multiline script aborts after
     // the first line and we get no output.
     let script = "$m = Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID | ForEach-Object { $n = [System.Text.Encoding]::ASCII.GetString($_.UserFriendlyName).Trim([char]0); if ($_.InstanceName -match '^DISPLAY\\\\([^&]+)\\\\') { [PSCustomObject]@{c=$Matches[1];n=$n} } }; if ($m) { $m | ConvertTo-Json -Compress } else { '[]' }";
-    let output = crate::cmd::run_output(
+    let output = crate::cmd::run_output_bounded(
         "powershell",
         &[
             "-NoProfile",
@@ -381,6 +381,7 @@ fn wmi_monitor_names() -> HashMap<String, String> {
             "-Command",
             script,
         ],
+        std::time::Duration::from_secs(5),
     );
     let Ok(out) = output else { return HashMap::new() };
     if !out.status.success() {

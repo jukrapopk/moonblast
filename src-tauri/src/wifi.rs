@@ -450,11 +450,13 @@ fn primary_interface_block(text: &str) -> &str {
 /// or `None` on spawn failure / non-zero exit. Every netsh read in this
 /// module collapses to one of these two helpers.
 fn netsh(args: &[&str]) -> Option<Output> {
-    Command::new("netsh")
-        .args(args)
-        .creation_flags(0x0800_0000)
-        .output()
-        .ok()
+    // `netsh wlan ...` is fast in the common case (~200ms) but a hung
+    // netsh session (driver lockup, winsock transition) can hang
+    // indefinitely. Bound the call to 5s so the chip / connect /
+    // disconnect / forget paths can't pin a `spawn_blocking` worker
+    // past the budget.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    netsh_bounded(args, deadline).ok()
 }
 fn netsh_text(args: &[&str]) -> Option<String> {
     let out = netsh(args)?;
