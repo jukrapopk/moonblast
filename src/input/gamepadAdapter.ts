@@ -1,11 +1,13 @@
 /**
  * Gamepad adapter — translates a standard gamepad's D-pad, action
- * buttons (A/B/Y), and left stick into synthetic `KeyboardEvent`s and
- * dispatches them on `window`. The existing window-level keyboard
- * listener (see `useSpatialController.ts`) handles them via the same
- * code path as a real key press — modals close on B (Esc), buttons
- * activate on A (Enter), arrows navigate, and Y opens the active
- * element's context menu.
+ * buttons (A/B/X), and sticks into synthetic events dispatched on
+ * the focused element. The existing window-level keyboard listener
+ * (see `useSpatialController.ts`) handles the keyboard-shaped ones
+ * (arrows, Enter, Escape) via the same code path as a real key press.
+ * Right-stick scrolls via synthetic `wheel` events, which any scroll
+ * container picks up automatically — modals close on B (Esc), buttons
+ * activate on A (Enter), arrows navigate, X opens the active
+ * element's context menu, the right stick scrolls.
  *
  * Why this is a "remap" instead of a controller-aware pipeline
  * --------------------------------------------------------------
@@ -21,6 +23,7 @@
  *   A (button 0, south)         → Enter
  *   B (button 1, east)          → Escape
  *   X (button 2, west)          → contextmenu (synthesised on focused element)
+ *   Right stick                 → vertical / horizontal scroll (synthetic wheel event)
  *
  * Edge-detected buttons, so an idle controller never repeats. rAF
  * pauses naturally on `document.hidden` — no manual tick scheduling.
@@ -48,6 +51,20 @@ const MENU_BUTTON = 2;    // X on Xbox, □ on PlayStation, Y on Switch (west)
 
 const STICK_DEAD_ZONE = 0.5;
 
+// Right stick on the standard mapping (Chrome / Firefox / WebView2):
+// axes[2] = X, axes[3] = Y. We don't read axes[0]/[1] (left stick).
+const RIGHT_STICK_X = 2;
+const RIGHT_STICK_Y = 3;
+
+/**
+ * Pixels per unit of stick deflection. The synthetic `wheel` event's
+ * `deltaY` / `deltaX` are interpreted by the page in pixels
+ * (`deltaMode: "pixel"`). We multiply stick magnitude (0..1) by this
+ * factor so a full-tilt push scrolls ~120px — Chromium's default
+ * line-height-ish amount. Tweak if it feels too fast / sluggish.
+ */
+const SCROLL_PIXELS_PER_UNIT = 120;
+
 /* ---------------------------------------------------------------------------
  *  Direction helper.
  *  -------------------------------------------------------------------------*/
@@ -66,6 +83,21 @@ function dominant(x: number, y: number, dead: number): Dir | null {
   if (ax < dead && ay < dead) return null;
   if (ax >= ay) return x < 0 ? "ArrowLeft" : "ArrowRight";
   return y < 0 ? "ArrowUp" : "ArrowDown";
+}
+
+/**
+ * Read the right stick and return its dominant axis (or `null`
+ * inside the dead-zone) plus the signed magnitude on that axis.
+ * Magnitude is the raw 0..1 deflection (so full-tilt = 1.0).
+ */
+function readRightStick(pad: Gamepad): { axis: RightStickAxis; magnitude: number } {
+  const x = pad.axes[RIGHT_STICK_X] ?? 0;
+  const y = pad.axes[RIGHT_STICK_Y] ?? 0;
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  if (ax < STICK_DEAD_ZONE && ay < STICK_DEAD_ZONE) return { axis: null, magnitude: 0 };
+  if (ay >= ax) return { axis: "y", magnitude: y };
+  return { axis: "x", magnitude: x };
 }
 
 /* ---------------------------------------------------------------------------
@@ -155,9 +187,59 @@ function sendContextMenu(): void {
   target.dispatchEvent(ev);
 }
 
+/**
+ * Dispatch a synthetic wheel event for the right stick. `dx` and
+ * `dy` are pixel deltas (positive = down / right). Bubbles up to
+ * `window`, so any scrollable container the wheel event passes
+ * through scrolls naturally — including inside modals, the Select
+ * dropdown's overflow list, and the App's main scroll area.
+ *
+ * Non-trusted wheel events are still dispatched as `bubbles: true`,
+ * `cancelable: true`; modern Chromium honours them for scrolling
+ * unless something in the page explicitly blocks them via
+ * `preventDefault()`. The current `useSpatialController` doesn't
+ * touch wheel, so this is a no-conflict path.
+ */
+function sendWheel(dx: number, dy: number): void {
+  if (typeof window === "undefined") return;
+  if (dx === 0 && dy === 0) return;
+  const ev = new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    deltaX: dx,
+    deltaY: dy,
+    deltaZ: 0,
+    deltaMode: 0, // 0 = DOM_DELTA_PIXEL
+    clientX: 0,
+    clientY: 0,
+  });
+  // Dispatch on the focused element (mirror keydown rationale: React
+  // synthetic listeners fire only when the target is inside the React
+  // tree). Falls back to `window` when nothing is focused so an idle
+  // gamepad can still scroll a page that has no focused control.
+  const target = document.activeElement;
+  if (target && target instanceof Element && target !== document.body) {
+    target.dispatchEvent(ev);
+  } else {
+    window.dispatchEvent(ev);
+  }
+}
+
 /* ---------------------------------------------------------------------------
  *  Edge-detection state.
  *  -------------------------------------------------------------------------*/
+
+/**
+ * Right-stick tracking shape. We don't store the raw X/Y each
+ * frame (that would imply continuous scroll while held — see
+ * below); instead we store the *dominant axis* of the previous
+ * frame so we can edge-detect a fresh push out of the dead-zone.
+ * `null` means "inside the dead-zone" (no scroll triggered last
+ * frame); `"x"` / `"y"` means "pushed along this axis last
+ * frame" (next non-zero tick in the same axis is a repeat, which
+ * we currently don't auto-fire).
+ */
+type RightStickAxis = "x" | "y" | null;
 
 interface State {
   primary: boolean;
@@ -167,10 +249,25 @@ interface State {
    *  dispatch on edge (push -> fires once; release -> no-op). */
   stick: Dir | null;
   dpad: Dir | null;
+  /** Dominant axis of last frame's right-stick deflection. */
+  rightAxis: RightStickAxis;
+  /** Last wheel delta we dispatched (after magnitude scaling).
+   *  Tracked so we only fire on the edge: leaving the dead-zone
+   *  triggers one tick; releasing the stick resets the axis so the
+   *  next push fires again. */
+  rightDelta: number;
 }
 
 function empty(): State {
-  return { primary: false, cancel: false, menu: false, stick: null, dpad: null };
+  return {
+    primary: false,
+    cancel: false,
+    menu: false,
+    stick: null,
+    dpad: null,
+    rightAxis: null,
+    rightDelta: 0,
+  };
 }
 
 // Backwards compat: old code referenced `MENU_BUTTON = 3` and labelled
@@ -203,6 +300,13 @@ function read(navigator: Navigator): State {
     // Left stick is the fallback if no D-pad reports.
     const stick = dominant(pad.axes[0] ?? 0, pad.axes[1] ?? 0, STICK_DEAD_ZONE);
     if (stick) next.stick = stick;
+
+    // Right stick is reserved for scrolling. We carry the per-frame
+    // dominant axis + signed magnitude; the dispatch step converts
+    // this into a wheel event on the edge out of the dead-zone.
+    const rs = readRightStick(pad);
+    next.rightAxis = rs.axis;
+    next.rightDelta = rs.magnitude * SCROLL_PIXELS_PER_UNIT;
   }
   return next;
 }
@@ -227,6 +331,28 @@ function dispatch(prev: State, next: State): State {
     // Right).
     if (prevDir !== null) {
       // No dispatch, just record the new state.
+    }
+  }
+
+  // Right stick → scroll. Fire on the *transition into* the deflection
+  // zone (either the dead-zone's outer edge or a swap between axis
+  // directions). Holding the stick at full tilt does not auto-repeat
+  // — that would feel like runaway scroll; users release + re-push
+  // for each tick. Edge cases:
+  //   - prevAxis=null, nextAxis="x"  → push-out, fire wheel.
+  //   - prevAxis=null, nextAxis="y"  → push-out, fire wheel.
+  //   - prevAxis="x", nextAxis="y"  → swap, fire wheel on y axis.
+  //   - prevAxis="x", nextAxis="x"  → held tilt, no fire (repeat
+  //     would surprise the user).
+  //   - prevAxis="x", nextAxis=null → release, no fire. Resets the
+  //     axis so the next push fires.
+  if (next.rightAxis !== prev.rightAxis) {
+    if (next.rightAxis !== null) {
+      const delta = next.rightDelta;
+      sendWheel(
+        next.rightAxis === "x" ? delta : 0,
+        next.rightAxis === "y" ? delta : 0,
+      );
     }
   }
 
