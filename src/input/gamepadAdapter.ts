@@ -38,6 +38,12 @@
  */
 import { useEffect } from "react";
 import { useSpatialControllerInternals } from "./controllerInternals";
+import {
+  bindArrowAutoFire,
+  startArrowHold,
+  stopArrowHold,
+} from "./arrowAutoFire";
+import type { Direction } from "./spatialNav";
 
 /* ---------------------------------------------------------------------------
  *  Mapping constants.
@@ -344,17 +350,35 @@ function dispatch(prev: State, next: State, now: number): State {
   // Direction: prefer D-pad; left stick only if D-pad didn't fire.
   // Only dispatch on a state change so a held stick doesn't repeat
   // every frame. The user releases + re-presses to fire again.
+  //
+  // When the direction is non-null we also register an arrow hold
+  // entry in `arrowAutoFire`, which fires follow-up keydowns at
+  // 400ms / 500ms cadence while the stick stays outside the dead-
+  // zone. Releasing the stick clears the hold; switching from one
+  // direction to another replaces it. Mirrors the keyboard path.
   const dir: Dir | null = next.dpad ?? next.stick ?? null;
   const prevDir: Dir | null = prev.dpad ?? prev.stick ?? null;
   if (dir !== null && dir !== prevDir) {
     sendKey(dir);
+    // Register the hold with a unique source key so multiple
+    // gamepads / sources don't collide. The leading-edge
+    // `sendKey(dir)` above is the only leading emission; the
+    // arrowAutoFire rAF loop fires the rest. Convert from the
+    // KeyboardEvent-style key names ("ArrowUp" etc.) to the
+    // cardinal directions the helper expects.
+    const cardinal =
+      dir === "ArrowUp" ? "up"
+      : dir === "ArrowDown" ? "down"
+      : dir === "ArrowLeft" ? "left"
+      : /* ArrowRight */ "right";
+    startArrowHold("gamepad", cardinal);
   } else if (dir === null) {
     // Reset the previous direction so the next press in any direction
     // fires (covering the case where stick moved from Up to Right
     // while held — without a release, the prev-stored Up would block
     // Right).
     if (prevDir !== null) {
-      // No dispatch, just record the new state.
+      stopArrowHold("gamepad");
     }
   }
 
@@ -398,6 +422,22 @@ export function installGamepadAdapter(): () => void {
   }
   const now = () =>
     typeof performance !== "undefined" ? performance.now() : Date.now();
+  // Bind the arrow auto-fire dispatch callback. When a directional
+  // hold entry is registered (via startArrowHold in `dispatch`), the
+  // rAF loop fires this callback at the configured cadence; we
+  // translate the Direction back to an Arrow* key string and dispatch
+  // a synthetic keydown via the same `sendKey` helper the leading
+  // edge uses.
+  bindArrowAutoFire((_source, cardinal: Direction) => {
+    // Map the cardinal ("up" / "down" / "left" / "right") back to the
+    // KeyboardEvent-style keys our `sendKey` helper accepts.
+    const k = `Arrow${cardinal[0].toUpperCase()}${cardinal.slice(1)}` as
+      | "ArrowUp"
+      | "ArrowDown"
+      | "ArrowLeft"
+      | "ArrowRight";
+    sendKey(k);
+  });
   function start() {
     if (active || typeof requestAnimationFrame === "undefined") return;
     const pads = navigator.getGamepads?.() ?? [];

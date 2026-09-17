@@ -33,6 +33,11 @@
 import { useEffect, useRef } from "react";
 import { directionFromKey, focusInitial, moveFocus, type Direction } from "./spatialNav";
 import { useSpatialControllerInternals } from "./controllerInternals";
+import {
+  bindArrowAutoFire,
+  startArrowHold,
+  stopArrowHold,
+} from "./arrowAutoFire";
 
 type KeyHandler = (e: KeyboardEvent) => void;
 
@@ -326,6 +331,14 @@ export function dispatchDirection(dir: Direction): void {
 export function useSpatialController() {
   useEffect(() => {
     const stopTracking = trackFocusForRecovery();
+
+    // Bind the arrow-auto-fire dispatch callback. It re-runs the
+    // same `processDirection` flow as a real keydown (so held-arrow
+    // behaviour matches what pressing it repeatedly would do).
+    bindArrowAutoFire((_source, dir) => {
+      processDirection(dir, () => {});
+    });
+
     function onKey(e: KeyboardEvent) {
       // 0. Context-menu shortcut. Two equivalent triggers:
       //    - The dedicated ContextMenu key on Windows keyboards
@@ -421,12 +434,31 @@ export function useSpatialController() {
         // handlers that ran earlier in the dispatch.
         if (e.defaultPrevented) return;
         processDirection(dir, () => e.preventDefault());
+        // Register the hold for auto-fire. The leading-edge keydown
+        // we just handled above IS the leading tick — `arrowAutoFire`
+        // skips its own first emission. The rAF loop fires follow-ups
+        // at HOLD_INITIAL_DELAY_MS (400ms) then HOLD_REPEAT_MS (500ms)
+        // while the key stays held. Releasing the key clears the hold.
+        startArrowHold("keyboard", dir);
+        return;
       }
+
+      // 4. Any non-arrow key clears any arrow hold — a Tab or Enter
+      //    during a held arrow is the user cancelling the auto-fire.
+      stopArrowHold("keyboard");
+    }
+
+    function onKeyUp(e: KeyboardEvent) {
+      const dir = directionFromKey(e.key);
+      if (dir) stopArrowHold("keyboard");
     }
 
     window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      stopArrowHold("keyboard");
       stopTracking();
     };
   }, []);
