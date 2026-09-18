@@ -570,6 +570,43 @@ fn shell_open(target: &str) -> Result<(), String> {
     }
 }
 
+/// Bound an in-process blocking Win32 call so a wedged RPC (typical when
+/// activating a packaged app / `ms-settings:` URI without a real shell) can't
+/// pin the calling `spawn_blocking` worker forever and freeze the UI.
+///
+/// `op` runs on a fresh OS thread; we wait at most `deadline` for the result.
+/// On timeout we abandon the thread (it stays wedged inside the kernel/RPC
+/// until the OS reaps it, but no one is waiting on it). The caller gets an
+/// error, the UI gets a toast, and the user can keep clicking.
+///
+/// Why a thread we can't kill is acceptable: the in-flight calls here are
+/// `CoCreateInstance` / DCOM activation / `ShellExecuteW` for packaged-app
+/// URI schemes — none own resource state on our side beyond the COM apartment
+/// they're already running on. An abandoned worker self-cleans once the OS
+/// frees its stack.
+fn launch_with_timeout<F>(op: F, deadline: std::time::Duration, label: &str) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String> + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let r = op();
+        let _ = tx.send(r);
+    });
+    match rx.recv_timeout(deadline) {
+        Ok(r) => r,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            moonblast_log!("launch_app: {label} timed out after {:?} (likely needs desktop shell)", deadline);
+            Err(format!(
+                "This app needs Windows' desktop shell — exit Immersive Mode to launch it"
+            ))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(format!("This app needs Windows' desktop shell — exit Immersive Mode to launch it"))
+        }
+    }
+}
+
 /// COM vtable for `IApplicationActivationManager` (`2e941141-7f97-4756-ba1d-9decde894a3d`).
 ///
 /// `windows-sys` ships the CLSID but not the interface (it binds no COM methods),
@@ -656,22 +693,59 @@ fn activate_store_app(aumid: &str) -> Result<(), String> {
 }
 
 /// Launch an app or shortcut. `kind` selects the launch method.
+///
+/// Async + `spawn_blocking` because packaged-app activation (`kind = "store"`)
+/// and immersive protocol schemes (`ms-settings:`, etc.) route through DCOM /
+/// the activation broker, which can block indefinitely when no shell is
+/// running (Auto Immersive Mode never starts Explorer, so the broker has no
+/// warm state). The actual blocking call is bounded by `launch_with_timeout`
+/// so a wedged RPC can't freeze the IPC; the user gets a toast and keeps
+/// clicking. Mirrors the existing `bounded_wait` pattern used by
+/// `moonlight_quit` / `wifi_scan` / `bluetooth::*`.
 #[tauri::command]
-fn launch_app(path: String, kind: String) -> Result<(), String> {
+async fn launch_app(path: String, kind: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || do_launch(path, kind))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Sync core of `launch_app` — same dispatch + timeout, no Tauri wrapping.
+/// Pulled out so `launch_autolaunch_apps` (which already runs on
+/// `spawn_blocking` and needs a sync helper to interleave its own
+/// stagger loop) can call it directly without awaiting inside an async fn.
+///
+/// Takes owned `String`s because the closures passed to `launch_with_timeout`
+/// must be `'static` (the work runs on a fresh `std::thread::spawn`); each
+/// closure captures the path by move.
+fn do_launch(path: String, kind: String) -> Result<(), String> {
     match kind.as_str() {
-        "store" => activate_store_app(&path).or_else(|e| {
-            // Last resort: the AppsFolder namespace still works when a desktop is
-            // already up, and a launched app beats a failed one.
-            if shell::desktop_replaced() {
-                return Err(e);
-            }
-            let appsfolder = format!("shell:AppsFolder\\{path}");
-            cmd::spawn_detached("explorer.exe", &[&appsfolder])
-                .map(|_| ())
-                .map_err(|e| e.to_string())
-        }),
-        "steam" => shell_open(&format!("steam://rungameid/{path}")),
-        _ => shell_open(&path),
+        "store" => launch_with_timeout(
+            move || {
+                activate_store_app(&path).or_else(|e| {
+                    // Last resort: the AppsFolder namespace still works when a desktop is
+                    // already up, and a launched app beats a failed one.
+                    if shell::desktop_replaced() {
+                        return Err(e);
+                    }
+                    let appsfolder = format!("shell:AppsFolder\\{path}");
+                    cmd::spawn_detached("explorer.exe", &[&appsfolder])
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                })
+            },
+            std::time::Duration::from_secs(5),
+            "store app activation",
+        ),
+        "steam" => launch_with_timeout(
+            move || shell_open(&format!("steam://rungameid/{path}")),
+            std::time::Duration::from_secs(5),
+            "steam protocol",
+        ),
+        _ => launch_with_timeout(
+            move || shell_open(&path),
+            std::time::Duration::from_secs(5),
+            "shell open",
+        ),
     }
 }
 
@@ -704,7 +778,7 @@ async fn launch_autolaunch_apps(
                 std::thread::sleep(std::time::Duration::from_millis(250));
             }
             moonblast_log!("launch_autolaunch_apps: launching [{}/{}] {} kind={}", i + 1, n, path, kind);
-            if let Err(e) = launch_app(path.clone(), kind) {
+            if let Err(e) = do_launch(path.clone(), kind.clone()) {
                 moonblast_log!("launch_autolaunch_apps: failed [{}] path={} err={}", i + 1, path, e);
             }
         }

@@ -592,8 +592,13 @@ export function AppsView() {
   async function launch(a: Shortcut) {
     try {
       await invoke("launch_app", { path: a.path, kind: a.kind || "exe" });
-    } catch {
-      // ignore launch errors
+    } catch (e) {
+      // Surface launch failures (Store / ms-settings URIs under Immersive Mode
+      // return a "needs desktop shell" message from the Rust side). The
+      // previous `// ignore launch errors` made launches look frozen when
+      // they were just silently failing. `String(e)` matches the rest of
+      // the codebase's IPC-error extraction.
+      setToast(String(e));
     }
   }
 
