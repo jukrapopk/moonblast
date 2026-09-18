@@ -139,16 +139,23 @@ pub fn hdr_status_for(adapter_low: u32, adapter_high: i32, target_id: u32) -> Hd
         let enabled = if LAST_SET_INITIALIZED.load(Ordering::Acquire) {
             LAST_SET_ENABLED.load(Ordering::Acquire)
         } else {
+            // Read the registry exactly once and reuse the result for
+            // both the resolved `enabled` value and the debug log.
+            // The previous shape called `read_os_hdr_state_from_registry`
+            // a second time inside the log macro, doubling the
+            // registry-enumeration cost on every `hdr_status` IPC
+            // (called on focus, visibility, modal open, and after
+            // every `set_hdr`).
             match read_os_hdr_state_from_registry() {
                 Some(reg) => reg,
                 None => false,
             }
         };
         moonblast_log!(
-            "hdr_status: bits=0x{:x} supported={supported} driver_enabled={driver_enabled} cached_enabled={} reg_enabled={:?} enabled={enabled} forceDisabled={force_disabled} locked={locked}",
+            "hdr_status: bits=0x{:x} supported={supported} driver_enabled={driver_enabled} cached_enabled={} reg_enabled={} enabled={enabled} forceDisabled={force_disabled} locked={locked}",
             bits,
             LAST_SET_ENABLED.load(Ordering::Acquire),
-            read_os_hdr_state_from_registry(),
+            enabled,
         );
         HdrStatus { supported, enabled, locked }
     }

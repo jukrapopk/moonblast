@@ -27,10 +27,15 @@ export function useDebouncedRead<T>(
   const inFlight = useRef<Promise<void> | null>(null);
   const lastReadAt = useRef(0);
 
-  const read = useCallback(async () => {
+  const read = useCallback(async (force = false) => {
     if (inFlight.current) return inFlight.current;
     const now = Date.now();
-    if (now - lastReadAt.current < collapseMs) return;
+    // `force` bypasses the collapse window: callers that receive an
+    // explicit "state changed" signal (Rust push events, a direct user
+    // action) know the cached value is stale and want to issue the read
+    // regardless of when the last one ran. The in-flight guard above
+    // still collapses concurrent callers into one IPC.
+    if (!force && now - lastReadAt.current < collapseMs) return;
     // Stamp `lastReadAt` *after* the invoke resolves (success or fail),
     // not before. Stamping first means a transient backend hiccup can
     // consume the collapse window and silently delay the next read by

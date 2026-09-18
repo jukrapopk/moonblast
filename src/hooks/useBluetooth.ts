@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useDebouncedRead } from "./useDebouncedRead";
 
 export interface BluetoothRadioStatus {
@@ -20,11 +21,19 @@ export interface BluetoothDevice {
 }
 
 /**
- * Event-driven Bluetooth radio state for the TopBar chip, mirroring
- * `useWifi`: reads on mount, window `focus`, `visibilitychange` to
- * "visible", and an explicit `refresh()` call (the modal calls this after
- * a radio toggle / pair / forget so the chip reflects the new state
- * immediately).
+ * Event-driven Bluetooth radio state for the TopBar chip:
+ *   - mount, `window.focus`, `visibilitychange → visible` (via
+ *     `useDebouncedRead` / `useFocusRefresh`)
+ *   - explicit `refresh()` call (the modal calls this after a radio
+ *     toggle / pair / forget so the chip reflects the new state
+ *     immediately, no debounce involvement)
+ *   - `bluetooth-radio-changed` Tauri event from Rust's WinRT
+ *     `Radio::StateChanged` subscription — fires on any transition of
+ *     the Bluetooth radio's on/off state, including changes made
+ *     *outside* Moonblast (Windows Quick Settings flyout, OS settings,
+ *     hardware kill switch, group policy). Without this push channel,
+ *     a toggle from outside would only be visible after the user
+ *     alt-tabbed back into Moonblast (triggering `focus`).
  */
 export function useBluetooth(): {
   status: BluetoothRadioStatus | null | undefined;
@@ -32,6 +41,17 @@ export function useBluetooth(): {
 } {
   const [status, setStatus] = useState<BluetoothRadioStatus | null | undefined>(undefined);
   const read = useDebouncedRead<BluetoothRadioStatus | null>("bluetooth_radio_status", setStatus);
+  useEffect(() => {
+    // The push event IS the signal that state changed — bypass the
+    // 2 s collapse window so a recent focus/visible-triggered read
+    // doesn't swallow this notification.
+    const unlisten = listen("bluetooth-radio-changed", () => {
+      void read(true);
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, [read]);
   return { status, refresh: read };
 }
 

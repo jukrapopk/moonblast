@@ -2446,10 +2446,18 @@ fn battery() -> Option<BatteryStatus> {
             v => Some(v),
         },
     };
-    moonblast_log!(
-        "battery: flag=0x{:02x} ac={} pct={} life={:?}",
-        s.BatteryFlag, s.ACLineStatus, status.percent, status.timeRemainingSec
-    );
+    // Logging every battery read produces ~17k writes/day at the chip's
+    // 5s poll cadence (plus extra for focus/visibility/manual
+    // refresh). Each write acquires the global Mutex<File> and runs
+    // two Win32 syscalls for the timestamp. Gate behind the
+    // MOONBLAST_LOG_PRESERVE flag so the debug trail stays available
+    // for triage without paying the cost on every read in normal use.
+    if std::env::var("MOONBLAST_LOG_PRESERVE").is_ok() {
+        moonblast_log!(
+            "battery: flag=0x{:02x} ac={} pct={} life={:?}",
+            s.BatteryFlag, s.ACLineStatus, status.percent, status.timeRemainingSec
+        );
+    }
     Some(status)
 }
 
@@ -2530,11 +2538,16 @@ async fn wifi_set_radio(on: bool) -> Result<(), String> {
 
 /// Bluetooth radio on/off state for the TopBar chip. `supported: false`
 /// means no Bluetooth radio at all — the UI hides the chip in that case.
+/// Arms the `bluetooth-radio-changed` push notification (idempotent).
 #[tauri::command]
-async fn bluetooth_radio_status() -> bluetooth::BluetoothRadioStatus {
-    tauri::async_runtime::spawn_blocking(bluetooth::radio_status)
-        .await
-        .unwrap_or(bluetooth::BluetoothRadioStatus { supported: false, on: false, connected: false })
+async fn bluetooth_radio_status(app: AppHandle) -> bluetooth::BluetoothRadioStatus {
+    let app_for_watch = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        bluetooth::ensure_watch(app_for_watch);
+        bluetooth::radio_status()
+    })
+    .await
+    .unwrap_or(bluetooth::BluetoothRadioStatus { supported: false, on: false, connected: false })
 }
 
 /// Turn the Bluetooth radio on or off (same API Windows' own Quick

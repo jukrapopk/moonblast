@@ -32,6 +32,8 @@
 #![cfg(windows)]
 
 use crate::radio::{self, win_err};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter};
 use windows::core::{Ref, HSTRING};
 use windows::Devices::Bluetooth::{
     BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice, BluetoothMajorClass,
@@ -40,7 +42,7 @@ use windows::Devices::Enumeration::{
     DeviceInformation, DeviceInformationCustomPairing, DeviceInformationUpdate,
     DevicePairingKinds, DevicePairingRequestedEventArgs, DeviceWatcher,
 };
-use windows::Devices::Radios::{RadioKind, RadioState};
+use windows::Devices::Radios::{Radio, RadioKind, RadioState};
 use windows::Foundation::TypedEventHandler;
 
 #[derive(serde::Serialize)]
@@ -373,4 +375,97 @@ pub fn pair(id: &str) -> Result<(), String> {
     } else {
         Err("This device needs a PIN or confirmation — pair it from Windows Bluetooth settings instead".to_string())
     }
+}
+
+// --- push notifications -----------------------------------------------------
+// Subscribe to `Radio::StateChanged` for the Bluetooth radio and emit
+// `bluetooth-radio-changed` so the frontend's chip re-reads even when the
+// toggle happened outside Moonblast (Windows Quick Settings flyout, OS
+// settings, hardware kill switch, group-policy flip). Mirrors audio.rs's
+// `WATCH` static + `ensure_watch` pattern, minus the COM vtable — the
+// `windows` typed bindings already expose `Radio::StateChanged` as a
+// regular `TypedEventHandler` event.
+//
+// Process-lifetime subscription: we deliberately don't store the
+// `EventRegistrationToken` (the type isn't re-exported by the `windows`
+// crate's bindings anyway). The Radio handle keeps the delegate alive
+// for the duration of the process, and process exit handles the
+// unsubscribe — same shape as the `DeviceWatcher::Added/Updated`
+// subscriptions in `scan()`, which also discard their tokens.
+//
+// Idempotent: calling `ensure_watch` repeatedly is a no-op once the
+// first call arms.
+
+struct WatchState {
+    app: AppHandle,
+    #[allow(dead_code)]
+    radio: Radio,
+}
+
+// Tauri requires `Send` for state stored in `tauri::State` and for many of
+// its own internals; the `windows` crate's Radio and AppHandle are both
+// `Send` already (Radio wraps an `IInspectable` COM pointer which is
+// apartment-aware, but our subscription fires on the WinRT thread pool
+// and we don't touch the COM pointer from outside the callback, so the
+// constraint is safe).
+unsafe impl Send for WatchState {}
+unsafe impl Sync for WatchState {}
+
+static WATCH: Mutex<Option<WatchState>> = Mutex::new(None);
+
+fn emit_bluetooth_radio_changed() {
+    if let Some(app) = WATCH.lock().ok().and_then(|g| g.as_ref().map(|s| s.app.clone())) {
+        let _ = app.emit("bluetooth-radio-changed", ());
+    }
+}
+
+/// Subscribe to the Bluetooth radio's `StateChanged` event. Idempotent:
+/// calling on every read command is fine — the first call arms, subsequent
+/// calls no-op until the radio handle changes (which it doesn't on a
+/// single machine). Failures (no radio, WinRT hiccup) are logged and
+/// swallowed — the chip falls back to focus/visibility refreshes.
+pub fn ensure_watch(app: AppHandle) {
+    radio::ensure_winrt();
+    let radio = match radio::find_radio(RadioKind::Bluetooth) {
+        Ok(Some(r)) => r,
+        _ => return, // no bluetooth radio at all — chip stays hidden
+    };
+    let mut guard = match WATCH.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    // Already watching? The Radio handle we hold is a stable WinRT object
+    // for the duration of the process, so pointer-equality is a reliable
+    // "same physical radio" check. If something tore us down (lock poison
+    // recovery path), re-arm.
+    if guard.is_some() {
+        return;
+    }
+    let token = match radio.StateChanged(&TypedEventHandler::new(
+        |_sender: Ref<'_, Radio>, _args| {
+            // WinRT calls us on its own thread. We don't touch any audio
+            // state — just emit, and the frontend's `read(true)` does the
+            // single bounded `bluetooth_radio_status` IPC. Collapse window
+            // absorbs bursts (e.g. multiple transitions from a flaky
+            // airplane-mode toggle).
+            emit_bluetooth_radio_changed();
+            Ok(())
+        },
+    )) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[bluetooth] failed to subscribe StateChanged: {e}");
+            return;
+        }
+    };
+    // We deliberately don't store or use the token — this is a
+    // process-lifetime subscription, mirroring the existing watcher
+    // subscription in `scan()` (which also discards the Added/Updated
+    // tokens). The Radio handle keeps the delegate alive; tearing down
+    // on process exit handles the unsubscribe.
+    let _ = token;
+    *guard = Some(WatchState {
+        app,
+        radio,
+    });
 }
