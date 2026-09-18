@@ -452,8 +452,13 @@ unsafe extern "system" fn device_added_or_removed(
     emit_audio_changed();
     0
 }
-/// Default switched elsewhere — emit; the next command's `ensure_watch`
-/// re-registers the volume/session callbacks on the new default.
+/// Default switched elsewhere — tear down the current watch so the
+/// next `ensure_watch` re-registers on the new default. Without the
+/// teardown, the volume callback would stay bound to the old device
+/// and the chip would show stale volume data on every subsequent read.
+/// (The fast path in `ensure_watch` relies on `WATCH` being cleared
+/// here so it doesn't have to do the full COM enumeration just to
+/// detect the switch.)
 unsafe extern "system" fn device_default_changed(
     _this: *mut c_void,
     _flow: i32,
@@ -461,6 +466,11 @@ unsafe extern "system" fn device_default_changed(
     _id: *const u16,
 ) -> HRESULT {
     eprintln!("[audio] event: default device changed");
+    if let Ok(mut guard) = WATCH.lock() {
+        if let Some(st) = guard.take() {
+            unregister_all(&st);
+        }
+    }
     emit_audio_changed();
     0
 }
@@ -519,6 +529,18 @@ fn unregister_all(st: &WatchState) {
 /// switches). Called at the top of the read commands so the first chip read
 /// arms everything and later reads heal a stale registration.
 pub fn ensure_watch(app: AppHandle) {
+    // Fast path: if we already hold a watch, the default device hasn't
+    // changed since the last successful registration (we'd have torn
+    // down via `device_default_changed` otherwise). Skip the three
+    // COM round-trips (`CoCreateInstance` + `GetDefaultAudioEndpoint`
+    // + `GetId`) that the original code did before the cache check —
+    // on a volume-key flood (~30 IPCs/sec) those round-trips add up
+    // to ~90 COM calls/sec for no information.
+    if let Ok(guard) = WATCH.lock() {
+        if guard.is_some() {
+            return;
+        }
+    }
     com_init();
     let current = create_enumerator()
         .and_then(|en| default_device(&en))
@@ -531,6 +553,10 @@ pub fn ensure_watch(app: AppHandle) {
         Ok(g) => g,
         Err(_) => return,
     };
+    // Defense in depth: if the watch survived (e.g. a previous
+    // ensure_watch call was mid-registration when the callback fired),
+    // compare device ids and tear down on mismatch. In normal flow
+    // `device_default_changed` already cleared WATCH for us.
     if let Some(st) = guard.as_ref() {
         if st.default_id == current {
             return; // already watching this device

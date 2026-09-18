@@ -53,13 +53,28 @@ export function useAudioMaster(): {
   }, []);
 
   // Push channel — volume keys, other mixers, device switches.
+  // Core Audio fires volume_on_notify on *every* volume step during a
+  // held volume-key press (~30 events/sec). Without collapsing, each
+  // event triggers an `audio_master` IPC + a TopBar re-render. Coalesce
+  // bursts into one re-read per 250 ms of stillness; the trailing
+  // refresh fires after the burst so the chip shows the final value
+  // (e.g. the user releases the key at volume 73).
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer !== null) return; // already scheduled — coalesce
+      timer = setTimeout(() => {
+        timer = null;
+        if (alive) void refresh();
+      }, 250);
+    };
     const unlisten = listen("audio-changed", () => {
-      if (alive) void refresh();
+      if (alive) schedule();
     });
     return () => {
       alive = false;
+      if (timer !== null) clearTimeout(timer);
       void unlisten.then((f) => f());
     };
   }, [refresh]);

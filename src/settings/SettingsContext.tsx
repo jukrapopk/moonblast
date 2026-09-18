@@ -4,11 +4,23 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+
+/**
+ * How long to wait after the last `update()` call before flushing the
+ * pending settings to Rust. A slider drag fires ~30 updates/sec; without
+ * debouncing, each one is an `update_settings` IPC + an atomic disk write
+ * + a `settings-changed` emit that re-renders every consumer. Coalescing
+ * to one flush per window keeps the UI responsive (state updates apply
+ * instantly via optimistic `setSettings`) while dropping the IPC traffic
+ * by an order of magnitude.
+ */
+const PERSIST_DEBOUNCE_MS = 250;
 
 export interface Settings {
   version: number;
@@ -128,6 +140,23 @@ const SettingsContext = createContext<SettingsContextValue>({
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
+  // Debounced-persist state. The latest pending payload sits in
+  // `pendingRef`; a single `persistTimer` schedules the actual
+  // `invoke("update_settings", ...)` call. Every new `update()` resets
+  // the timer, so a slider drag collapses to one IPC per
+  // `PERSIST_DEBOUNCE_MS` of stillness.
+  const pendingRef = useRef<Settings | null>(null);
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPending = useCallback(() => {
+    if (persistTimer.current !== null) {
+      clearTimeout(persistTimer.current);
+      persistTimer.current = null;
+    }
+    const next = pendingRef.current;
+    pendingRef.current = null;
+    if (next) invoke("update_settings", { settings: next }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     invoke<Settings>("get_settings")
@@ -141,14 +170,25 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       unlisten.then((fn) => fn());
+      // Make sure no in-flight debounced persist is dropped on unmount —
+      // the only unmount path is app shutdown, where the IPC would
+      // race process exit anyway, so this is mostly defensive.
+      flushPending();
     };
-  }, []);
+  }, [flushPending]);
 
   const update = useCallback((mutate: (current: Settings) => Settings) => {
     setSettings((current) => {
       const next = mutate(current);
-      // optimistic + persist in the background
-      invoke("update_settings", { settings: next }).catch(() => {});
+      // Optimistic in-memory update — UI sees the new value instantly.
+      pendingRef.current = next;
+      if (persistTimer.current !== null) clearTimeout(persistTimer.current);
+      persistTimer.current = setTimeout(() => {
+        persistTimer.current = null;
+        const p = pendingRef.current;
+        pendingRef.current = null;
+        if (p) invoke("update_settings", { settings: p }).catch(() => {});
+      }, PERSIST_DEBOUNCE_MS);
       return next;
     });
   }, []);
