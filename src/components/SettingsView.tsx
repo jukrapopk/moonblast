@@ -731,19 +731,34 @@ function ColorPicker({
           onClick={handleCustomClick}
           aria-label="Custom color"
           aria-pressed={accent === "custom"}
-          className={`h-7 w-7 overflow-hidden rounded-full border-2 transition ${
+          // Outer ring = conic rainbow, inner dot = the live custom
+          // accent (or fallback when nothing picked yet). The
+          // ring/dot split gives the swatch a stable "this opens the
+          // picker" affordance (the rainbow never changes) AND a live
+          // preview of the picked color (the inner dot updates as
+          // soon as the user commits in the modal). Selection is
+          // communicated only by the border color.
+          className={`relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2 transition ${
             accent === "custom"
-              ? "scale-110 border-(--color-text)"
+              ? "border-(--color-text)"
               : "border-(--color-border) focus-visible:border-(--color-muted)"
           }`}
           style={{
-            background: customAccent ?? "#6f78c8",
             backgroundImage:
-              accent === "custom"
-                ? undefined
-                : "conic-gradient(from 0deg, #e74c3c, #f1c40f, #2ecc71, #3498db, #9b59b6, #e74c3c)",
+              "conic-gradient(from 0deg, #e74c3c, #f1c40f, #2ecc71, #3498db, #9b59b6, #e74c3c)",
           }}
-        />
+        >
+          {/* Live custom-color dot. Smaller than the outer ring so the
+              rainbow stays visible as an affordance, large enough to
+              preview the picked color at a glance. Sits in the
+              geometric center; pointer-events-none so the click
+              always hits the <button> underneath, not the dot. */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none h-4 w-4 rounded-full border border-white"
+            style={{ background: customAccent ?? "#6f78c8" }}
+          />
+        </button>
       </div>
       <ColorPickerModal
         open={pickerOpen}
