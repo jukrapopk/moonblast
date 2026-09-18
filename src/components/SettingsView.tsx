@@ -6,6 +6,7 @@ import { PageShell } from "./PageShell";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Modal } from "./ui/Modal";
+import { ColorPickerModal } from "./ui/ColorPickerModal";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
 import { Select } from "./ui/Select";
@@ -659,10 +660,16 @@ function AppearanceSection({
 }
 
 /** 12 named swatches + "Auto" (uses the live Windows accent) +
- *  "Custom" (opens a color picker + hex input). Active swatch gets a
+ *  "Custom" (opens an in-app `ColorPickerModal` — pure-DOM SV area +
+ *  hue strip + hex input, no native dialog). Active swatch gets a
  *  ring. The Auto swatch shows the current Windows accent as a
  *  diagonal split so the user can see what they're getting without
- *  needing to commit to it. */
+ *  needing to commit to it.
+ *
+ *  The picker modal is opened by clicking the Custom circle (or by
+ *  clicking Custom when it's already active — reopens to tweak). The
+ *  picker commits every change directly to `customAccent` so closing
+ *  it has no separate "save" step; the picker *is* the live value. */
 function ColorPicker({
   accent,
   customAccent,
@@ -684,80 +691,67 @@ function ColorPicker({
   // swatch is the static color. "Auto" is special: it shows the
   // live Windows accent color.
   const swatchMode: "light" | "dark" = theme === "light" ? "light" : "dark";
+  const [pickerOpen, setPickerOpen] = useState(false);
+  function handleCustomClick() {
+    if (accent !== "custom") onSetAccent("custom");
+    setPickerOpen(true);
+  }
   return (
-    <div className="flex items-center gap-2">
-      {ACCENT_PRESETS.map((p) => {
-        const active = accent === p.id;
-        const swatchColor =
-          p.id === "auto"
-            ? (windowsAccent ?? "#6f78c8")
-            : presetSwatch(p, swatchMode);
-        const isAuto = p.id === "auto";
-        return (
-          <button
-            key={p.id}
-            onClick={() => onSetAccent(p.id)}
-            aria-label={p.label}
-            aria-pressed={active}
-            className={`relative h-7 w-7 rounded-full border-2 transition ${
-              active
-                ? "scale-110 border-(--color-text)"
-                : "border-(--color-border) focus-visible:border-(--color-muted)"
-            }`}
-            style={{ background: swatchColor }}
-          >
-            {isAuto && (
-              <span className="pointer-events-none absolute inset-0 grid place-items-center text-[11px] font-bold leading-none text-white drop-shadow-[0_1px_2px_rgb(0_0_0_/_0.6)]">
-                A
-              </span>
-            )}
-          </button>
-        );
-      })}
-      <button
-        onClick={() => onSetAccent("custom")}
-        aria-label="Custom color"
-        aria-pressed={accent === "custom"}
-        className={`h-7 w-7 overflow-hidden rounded-full border-2 transition ${
-          accent === "custom"
-            ? "scale-110 border-(--color-text)"
-            : "border-(--color-border) focus-visible:border-(--color-muted)"
-        }`}
-        style={{
-          background: customAccent ?? "#6f78c8",
-          backgroundImage:
+    <>
+      <div className="flex items-center gap-2">
+        {ACCENT_PRESETS.map((p) => {
+          const active = accent === p.id;
+          const swatchColor =
+            p.id === "auto"
+              ? (windowsAccent ?? "#6f78c8")
+              : presetSwatch(p, swatchMode);
+          const isAuto = p.id === "auto";
+          return (
+            <button
+              key={p.id}
+              onClick={() => onSetAccent(p.id)}
+              aria-label={p.label}
+              aria-pressed={active}
+              className={`relative h-7 w-7 rounded-full border-2 transition ${
+                active
+                  ? "scale-110 border-(--color-text)"
+                  : "border-(--color-border) focus-visible:border-(--color-muted)"
+              }`}
+              style={{ background: swatchColor }}
+            >
+              {isAuto && (
+                <span className="pointer-events-none absolute inset-0 grid place-items-center text-[11px] font-bold leading-none text-white drop-shadow-[0_1px_2px_rgb(0_0_0_/_0.6)]">
+                  A
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <button
+          onClick={handleCustomClick}
+          aria-label="Custom color"
+          aria-pressed={accent === "custom"}
+          className={`h-7 w-7 overflow-hidden rounded-full border-2 transition ${
             accent === "custom"
-              ? undefined
-              : "conic-gradient(from 0deg, #e74c3c, #f1c40f, #2ecc71, #3498db, #9b59b6, #e74c3c)",
-        }}
+              ? "scale-110 border-(--color-text)"
+              : "border-(--color-border) focus-visible:border-(--color-muted)"
+          }`}
+          style={{
+            background: customAccent ?? "#6f78c8",
+            backgroundImage:
+              accent === "custom"
+                ? undefined
+                : "conic-gradient(from 0deg, #e74c3c, #f1c40f, #2ecc71, #3498db, #9b59b6, #e74c3c)",
+          }}
+        />
+      </div>
+      <ColorPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        value={customAccent}
+        onChange={(hex) => onSetCustomAccent(hex)}
       />
-      {accent === "custom" && (
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={customAccent ?? "#6f78c8"}
-            onChange={(e) => onSetCustomAccent(e.currentTarget.value)}
-            tabIndex={-1}
-            className="h-7 w-10 cursor-pointer rounded border border-(--color-border) bg-transparent"
-            aria-label="Custom color"
-          />
-          <input
-            type="text"
-            value={customAccent ?? ""}
-            onChange={(e) => {
-              const v = e.currentTarget.value.trim();
-              if (/^#[0-9a-fA-F]{6}$/.test(v) || v === "") {
-                onSetCustomAccent(v === "" ? null : v);
-              }
-            }}
-            placeholder="#6f78c8"
-            maxLength={7}
-            tabIndex={-1}
-            className="h-7 w-24 rounded border border-(--color-border) bg-(--color-surface-2) px-2 font-mono text-xs text-(--color-text) outline-none focus:border-(--color-accent)"
-          />
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
