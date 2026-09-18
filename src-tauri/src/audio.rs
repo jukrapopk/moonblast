@@ -312,11 +312,16 @@ fn com_init() {
 /// Push channel: every Core Audio callback below funnels here. The frontend
 /// re-reads (`audio_master` / `audio_sessions` / `audio_devices`) on receipt,
 /// so no polling is needed anywhere.
+///
+/// The `AppHandle` lives in its own static, not in `WatchState` — it used to
+/// be read out of `WatchState.app`, but `device_default_changed` clears
+/// `WATCH` to `None` *before* emitting (it has to, to unblock `ensure_watch`'s
+/// re-registration), which meant every default-device-switch notification
+/// looked up an app handle that was no longer there and silently emitted
+/// nothing. `APP_HANDLE` is set once `ensure_watch` has run at least once
+/// (i.e. by the time any of this can fire) and outlives `WATCH`'s churn.
 fn emit_audio_changed() {
-    let app = WATCH
-        .lock()
-        .ok()
-        .and_then(|g| g.as_ref().map(|st| st.app.clone()));
+    let app = APP_HANDLE.lock().ok().and_then(|g| g.clone());
     if let Some(app) = app {
         let _ = app.emit("audio-changed", ());
     }
@@ -459,6 +464,23 @@ unsafe extern "system" fn device_added_or_removed(
 /// (The fast path in `ensure_watch` relies on `WATCH` being cleared
 /// here so it doesn't have to do the full COM enumeration just to
 /// detect the switch.)
+///
+/// The `Unregister*` COM calls are deliberately NOT made here, even
+/// though this is where the stale state gets taken out of `WATCH`.
+/// MSDN's `IMMNotificationClient` docs warn that a client must never
+/// call `RegisterEndpointNotificationCallback` /
+/// `UnregisterEndpointNotificationCallback` (or the analogous
+/// `IAudioEndpointVolume` register/unregister calls) from inside a
+/// notification callback — the audio engine holds an internal
+/// dispatch lock while invoking the callback, and Unregister tries to
+/// reacquire that same lock, deadlocking this thread forever. Because
+/// that call used to happen while still holding `WATCH`'s lock, the
+/// deadlock then wedged every other audio command behind
+/// `ensure_watch`'s `WATCH.lock()` too — this was the "changing the
+/// output device works, but the picker spins or hangs on Loading
+/// forever" bug. Deferring the actual unregister to a fresh thread
+/// runs it outside the notification dispatch's call stack, so it
+/// can't re-enter that lock.
 unsafe extern "system" fn device_default_changed(
     _this: *mut c_void,
     _flow: i32,
@@ -466,10 +488,12 @@ unsafe extern "system" fn device_default_changed(
     _id: *const u16,
 ) -> HRESULT {
     eprintln!("[audio] event: default device changed");
-    if let Ok(mut guard) = WATCH.lock() {
-        if let Some(st) = guard.take() {
+    let stale = WATCH.lock().ok().and_then(|mut g| g.take());
+    if let Some(st) = stale {
+        std::thread::spawn(move || {
+            com_init();
             unregister_all(&st);
-        }
+        });
     }
     emit_audio_changed();
     0
@@ -500,17 +524,22 @@ static DEVICE_CALLBACK: DeviceCallback = DeviceCallback {
 /// volume callback is bound to; a mismatch in `ensure_watch` tears
 /// everything down and re-registers on the new default.
 struct WatchState {
-    app: AppHandle,
     enumerator: ComPtr,
     endpoint: ComPtr,
     default_id: String,
 }
 
-// Never torn down once built (except default-device switches, which happen
-// on a command thread holding the lock); all use sites are MTA.
+// Torn down on default-device switches: `device_default_changed` takes it
+// out of `WATCH` synchronously (cheap) but defers the actual COM unregister
+// calls to a spawned thread (see that function's doc comment) — all use
+// sites are MTA, so the object is safe to hand to another thread.
 unsafe impl Send for WatchState {}
 
 static WATCH: Mutex<Option<WatchState>> = Mutex::new(None);
+/// The `AppHandle` needed to emit `audio-changed`, kept separate from
+/// `WatchState` so it survives `WATCH` being cleared mid-teardown. See
+/// `emit_audio_changed`.
+static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
 
 fn unregister_all(st: &WatchState) {
     unsafe {
@@ -529,6 +558,12 @@ fn unregister_all(st: &WatchState) {
 /// switches). Called at the top of the read commands so the first chip read
 /// arms everything and later reads heal a stale registration.
 pub fn ensure_watch(app: AppHandle) {
+    // Keep the app handle current regardless of whether we end up
+    // (re)registering below — `emit_audio_changed` reads this independently
+    // of `WATCH`'s lifecycle.
+    if let Ok(mut g) = APP_HANDLE.lock() {
+        *g = Some(app);
+    }
     // Fast path: if we already hold a watch, the default device hasn't
     // changed since the last successful registration (we'd have torn
     // down via `device_default_changed` otherwise). Skip the three
@@ -556,16 +591,24 @@ pub fn ensure_watch(app: AppHandle) {
     // Defense in depth: if the watch survived (e.g. a previous
     // ensure_watch call was mid-registration when the callback fired),
     // compare device ids and tear down on mismatch. In normal flow
-    // `device_default_changed` already cleared WATCH for us.
-    if let Some(st) = guard.as_ref() {
+    // `device_default_changed` already cleared WATCH for us. `take()`
+    // (rather than a shared `&` borrow) lets the stale-teardown path
+    // hand ownership to a spawned thread — same "never unregister
+    // synchronously while holding the lock" reasoning as
+    // `device_default_changed`, even though this call site isn't inside
+    // a COM notification callback.
+    if let Some(st) = guard.take() {
         if st.default_id == current {
-            return; // already watching this device
+            *guard = Some(st); // still current — put it back
+            return;
         }
         eprintln!("[audio] default switched, re-registering");
-        unregister_all(st);
-        *guard = None;
+        std::thread::spawn(move || {
+            com_init();
+            unregister_all(&st);
+        });
     }
-    match register_all(&app, &current) {
+    match register_all(&current) {
         Ok(st) => {
             eprintln!("[audio] watching default device");
             *guard = Some(st);
@@ -576,7 +619,7 @@ pub fn ensure_watch(app: AppHandle) {
     }
 }
 
-fn register_all(app: &AppHandle, default_id: &str) -> Result<WatchState, String> {
+fn register_all(default_id: &str) -> Result<WatchState, String> {
     let en = create_enumerator()?;
     let dev = default_device(&en)?;
     // Master-volume changes on this endpoint.
@@ -597,7 +640,6 @@ fn register_all(app: &AppHandle, default_id: &str) -> Result<WatchState, String>
     };
     check_hr(hr, "could not watch audio devices")?;
     Ok(WatchState {
-        app: app.clone(),
         enumerator: en,
         endpoint,
         default_id: default_id.to_string(),
