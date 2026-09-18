@@ -21,13 +21,25 @@ export function useDebouncedRead<T>(
     pollIntervalMs?: number;
     /** Override the 2 s collapse window. */
     collapseMs?: number;
+    /**
+     * When `false`, `read()` (mount, poll, focus/visibility, and
+     * force-called) is a no-op and the poll interval isn't installed.
+     * Used to suspend background chips the user hid in Customization —
+     * e.g. `useBattery`'s 5 s poll shouldn't run at all if the battery
+     * chip is off. Defaults to `true`. Toggling back to `true` fires an
+     * immediate read (the `read` identity change re-runs the focus
+     * effect below), so re-enabling a chip doesn't wait for the next
+     * focus event to show live data.
+     */
+    enabled?: boolean;
   } = {},
 ) {
-  const { pollIntervalMs, collapseMs = 2000 } = options;
+  const { pollIntervalMs, collapseMs = 2000, enabled = true } = options;
   const inFlight = useRef<Promise<void> | null>(null);
   const lastReadAt = useRef(0);
 
   const read = useCallback(async (force = false) => {
+    if (!enabled) return;
     // Collapse *non-forced* concurrent callers: a focus event and a
     // visibilitychange event firing on the same refocus share one IPC.
     // But a forced call (Rust push event, direct user action) MUST
@@ -60,13 +72,13 @@ export function useDebouncedRead<T>(
     } finally {
       if (!force) inFlight.current = null;
     }
-  }, [command, collapseMs, setValue]);
+  }, [command, collapseMs, setValue, enabled]);
 
   useEffect(() => {
-    if (pollIntervalMs === undefined) return;
+    if (!enabled || pollIntervalMs === undefined) return;
     const id = setInterval(() => void read(), pollIntervalMs);
     return () => clearInterval(id);
-  }, [read, pollIntervalMs]);
+  }, [read, pollIntervalMs, enabled]);
 
   useFocusRefresh(() => void read(), [read]);
 

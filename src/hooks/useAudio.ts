@@ -37,20 +37,26 @@ export interface AudioSession {
  * emits `audio-changed`; we just re-read on receipt, on mount, on window
  * `focus` / visible, and on explicit `refresh()`. The COM read is ~1ms on
  * a blocking thread.
+ *
+ * `enabled` (default `true`) suspends the mount/focus reads and the
+ * `audio-changed` subscription entirely — pass `false` when the speaker
+ * chip is hidden via Customization. `AudioModal` fetches its own state on
+ * open, so hiding the chip never affects the modal's own live data.
  */
-export function useAudioMaster(): {
+export function useAudioMaster(enabled = true): {
   master: AudioMaster | undefined;
   refresh: () => void;
 } {
   const [master, setMaster] = useState<AudioMaster | undefined>(undefined);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     try {
       setMaster(await invoke<AudioMaster>("audio_master"));
     } catch {
       // No audio device (or COM hiccup) — leave the last state alone.
     }
-  }, []);
+  }, [enabled]);
 
   // Push channel — volume keys, other mixers, device switches.
   // Core Audio fires volume_on_notify on *every* volume step during a
@@ -60,6 +66,7 @@ export function useAudioMaster(): {
   // refresh fires after the burst so the chip shows the final value
   // (e.g. the user releases the key at volume 73).
   useEffect(() => {
+    if (!enabled) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = () => {
@@ -77,7 +84,7 @@ export function useAudioMaster(): {
       if (timer !== null) clearTimeout(timer);
       void unlisten.then((f) => f());
     };
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   useFocusRefresh(refresh, [refresh]);
 

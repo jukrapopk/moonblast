@@ -28,14 +28,21 @@ export interface BatteryStatus {
  * itself only updates `SYSTEM_POWER_STATUS` at ~1Hz, so faster polling
  * would just return duplicate values). Back-to-back focus + visibility
  * triggers collapse to a single IPC via the shared `useDebouncedRead`.
+ *
+ * `enabled` (default `true`) suspends the 5s poll (and mount/focus reads)
+ * entirely — pass `false` when the battery chip is hidden via
+ * Customization so a laptop doesn't pay a `GetSystemPowerStatus` wakeup
+ * every 5s for a chip nobody sees. `BatteryModal` reads independently on
+ * open, so hiding the chip never affects the modal's own live data.
  */
-export function useBattery(): {
+export function useBattery(enabled = true): {
   status: BatteryStatus | null;
   refresh: () => void;
 } {
   const [status, setStatus] = useState<BatteryStatus | null>(null);
   const read = useDebouncedRead<BatteryStatus | null>("battery", setStatus, {
     pollIntervalMs: 5_000,
+    enabled,
   });
   return { status, refresh: read };
 }

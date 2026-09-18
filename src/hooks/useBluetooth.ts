@@ -34,14 +34,22 @@ export interface BluetoothDevice {
  *     hardware kill switch, group policy). Without this push channel,
  *     a toggle from outside would only be visible after the user
  *     alt-tabbed back into Moonblast (triggering `focus`).
+ *
+ * `enabled` (default `true`) suspends mount/focus reads and the push
+ * listener entirely — pass `false` when the Bluetooth chip is hidden via
+ * Customization. `BluetoothModal` fetches its own state on open, so
+ * hiding the chip never affects the modal's own live data.
  */
-export function useBluetooth(): {
+export function useBluetooth(enabled = true): {
   status: BluetoothRadioStatus | null | undefined;
   refresh: () => void;
 } {
   const [status, setStatus] = useState<BluetoothRadioStatus | null | undefined>(undefined);
-  const read = useDebouncedRead<BluetoothRadioStatus | null>("bluetooth_radio_status", setStatus);
+  const read = useDebouncedRead<BluetoothRadioStatus | null>("bluetooth_radio_status", setStatus, {
+    enabled,
+  });
   useEffect(() => {
+    if (!enabled) return;
     // The push event IS the signal that state changed — bypass the
     // 2 s collapse window so a recent focus/visible-triggered read
     // doesn't swallow this notification.
@@ -51,7 +59,7 @@ export function useBluetooth(): {
     return () => {
       void unlisten.then((f) => f());
     };
-  }, [read]);
+  }, [read, enabled]);
   return { status, refresh: read };
 }
 

@@ -211,20 +211,26 @@ export default function App() {
   const [powerOpen, setPowerOpen] = useState(false);
 
   // Data hooks for the status modals. Live here (not in TopBar) so the
-  // modals can render at the App root.
-  const { current: wifi, refresh: refreshWifi } = useWifi();
+  // modals can render at the App root. Each is suspended (no mount/focus
+  // reads, no poll timer, no push-event subscription) when its chip is
+  // hidden via Customization — a hidden chip has nothing to refresh, and
+  // every modal below fetches its own live data on open regardless, so
+  // this never affects modal behavior.
+  const { current: wifi, refresh: refreshWifi } = useWifi(settings.customization.show_wifi);
   useEffect(() => {
     refreshWifi();
   }, [wifiOpen, refreshWifi]);
-  const { status: bluetooth, refresh: refreshBluetooth } = useBluetooth();
+  const { status: bluetooth, refresh: refreshBluetooth } = useBluetooth(
+    settings.customization.show_bluetooth,
+  );
   useEffect(() => {
     refreshBluetooth();
   }, [bluetoothOpen, refreshBluetooth]);
-  const { master: audio, refresh: refreshAudio } = useAudioMaster();
+  const { master: audio, refresh: refreshAudio } = useAudioMaster(settings.customization.show_audio);
   useEffect(() => {
     if (!audioOpen) refreshAudio();
   }, [audioOpen, refreshAudio]);
-  const { status: battery, refresh: refreshBattery } = useBattery();
+  const { status: battery, refresh: refreshBattery } = useBattery(settings.customization.show_battery);
   useEffect(() => {
     if (!batteryOpen) refreshBattery();
   }, [batteryOpen, refreshBattery]);

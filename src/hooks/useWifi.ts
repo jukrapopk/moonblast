@@ -45,13 +45,18 @@ export interface WifiNetwork {
  * Back-to-back calls collapse to a single IPC (2 s window) — the wlan
  * service doesn't change state that fast, and the previous read's
  * `current` is still fresh.
+ *
+ * `enabled` (default `true`) suspends mount/focus reads entirely — pass
+ * `false` when the WiFi chip is hidden via Customization. `WifiModal`
+ * does its own independent fetch/scan on open, so hiding the chip never
+ * affects the modal's own live data.
  */
-export function useWifi(): {
+export function useWifi(enabled = true): {
   current: WifiConnection | null | undefined;
   refresh: () => void;
 } {
   const [current, setCurrent] = useState<WifiConnection | null | undefined>(undefined);
-  const read = useDebouncedRead<WifiConnection | null>("wifi_current", setCurrent);
+  const read = useDebouncedRead<WifiConnection | null>("wifi_current", setCurrent, { enabled });
   return { current, refresh: read };
 }
 
