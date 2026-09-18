@@ -115,7 +115,13 @@ function SaturationValueArea({
   onPick: (s: number, v: number) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [dragging, setDragging] = useState(false);
+  // `dragging` is a ref, not state — it only gates `onPointerMove`,
+  // it doesn't affect render. Using state here would force a
+  // full re-render of the SV area on every pointerdown (no visible
+  // change, but enough to trigger a paint + cascade through the
+  // picker's HSV→hex→parent→back effect chain), which manifested
+  // as a one-frame flicker on drag start. Ref is the right primitive.
+  const draggingRef = useRef(false);
 
   const pickFromEvent = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -133,15 +139,15 @@ function SaturationValueArea({
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(true);
+    draggingRef.current = true;
     pickFromEvent(e);
   }
   function onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
+    if (!draggingRef.current) return;
     pickFromEvent(e);
   }
   function onPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
-    setDragging(false);
+    draggingRef.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
   }
 
@@ -161,7 +167,7 @@ function SaturationValueArea({
       onPointerCancel={onPointerUp}
       role="presentation"
       aria-hidden="true"
-      className="relative aspect-[16/10] w-full touch-none rounded-lg"
+      className="relative aspect-[16/10] w-full touch-none select-none rounded-lg"
       style={{
         backgroundColor: baseColor,
         // Layer order (paint order): solid pure-hue base, then the
@@ -196,7 +202,9 @@ function HueStrip({
   onPick: (h: number) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [dragging, setDragging] = useState(false);
+  // Ref instead of state — see SaturationValueArea for the full
+  // reasoning. Same drag-flicker fix applies.
+  const draggingRef = useRef(false);
 
   const pickFromEvent = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -217,15 +225,15 @@ function HueStrip({
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(true);
+    draggingRef.current = true;
     pickFromEvent(e);
   }
   function onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
+    if (!draggingRef.current) return;
     pickFromEvent(e);
   }
   function onPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
-    setDragging(false);
+    draggingRef.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
   }
 
@@ -244,7 +252,7 @@ function HueStrip({
       onPointerCancel={onPointerUp}
       role="presentation"
       aria-hidden="true"
-      className="relative h-3 w-full touch-none rounded-full"
+      className="relative h-3 w-full touch-none select-none rounded-full"
       style={{ backgroundImage: HUE_GRADIENT }}
     >
       <div
@@ -286,19 +294,28 @@ export function ColorPickerModal({
   const [valueV, setValueV] = useState(initialHsv.v);
   const [hexDraft, setHexDraft] = useState(seed);
 
-  // Re-seed when the modal opens so an external change (hex input in
-  // the picker row above the modal, or the initial value prop on first
-  // open) lands at the right starting position.
+  // Re-seed on the closed → open transition (NOT on every `value`
+  // change). Re-seeding on every value change creates a feedback
+  // loop: HSV → onChange → parent updates value prop → this effect
+  // re-derives HSV from value (with quantisation drift from the
+  // rgbToHex round-trip — Math.round clips 127.5 → 128 → rgbToHsv
+  // reads 128/255 = 0.502 ≠ 0.5) → state updates → dot visibly
+  // shifts ~0.2% on every click. Tracking the previous `open` value
+  // in a ref makes the effect fire exactly once per open flip.
+  const prevOpenRef = useRef(open);
   useEffect(() => {
-    if (!open) return;
-    const v = value && isHex(value) ? value : FALLBACK_HEX;
-    const rgb = hexToRgb(v);
-    if (!rgb) return;
-    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-    setHue(hsv.h);
-    setSaturation(hsv.s);
-    setValueV(hsv.v);
-    setHexDraft(v);
+    if (open && !prevOpenRef.current) {
+      const v = value && isHex(value) ? value : FALLBACK_HEX;
+      const rgb = hexToRgb(v);
+      if (rgb) {
+        const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+        setHue(hsv.h);
+        setSaturation(hsv.s);
+        setValueV(hsv.v);
+        setHexDraft(v);
+      }
+    }
+    prevOpenRef.current = open;
   }, [open, value]);
 
   // Every HSV change → committed hex → parent. Skip when the modal
