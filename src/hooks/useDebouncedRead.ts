@@ -28,13 +28,18 @@ export function useDebouncedRead<T>(
   const lastReadAt = useRef(0);
 
   const read = useCallback(async (force = false) => {
-    if (inFlight.current) return inFlight.current;
+    // Collapse *non-forced* concurrent callers: a focus event and a
+    // visibilitychange event firing on the same refocus share one IPC.
+    // But a forced call (Rust push event, direct user action) MUST
+    // issue a fresh IPC — returning an in-flight promise that was
+    // *sent before the state-change event* would surface the
+    // pre-event value to the chip.
+    if (!force && inFlight.current) return inFlight.current;
     const now = Date.now();
     // `force` bypasses the collapse window: callers that receive an
     // explicit "state changed" signal (Rust push events, a direct user
     // action) know the cached value is stale and want to issue the read
-    // regardless of when the last one ran. The in-flight guard above
-    // still collapses concurrent callers into one IPC.
+    // regardless of when the last one ran.
     if (!force && now - lastReadAt.current < collapseMs) return;
     // Stamp `lastReadAt` *after* the invoke resolves (success or fail),
     // not before. Stamping first means a transient backend hiccup can
@@ -49,11 +54,11 @@ export function useDebouncedRead<T>(
       }
       lastReadAt.current = Date.now();
     })();
-    inFlight.current = p;
+    if (!force) inFlight.current = p;
     try {
       await p;
     } finally {
-      inFlight.current = null;
+      if (!force) inFlight.current = null;
     }
   }, [command, collapseMs, setValue]);
 

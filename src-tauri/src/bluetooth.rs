@@ -425,7 +425,20 @@ fn emit_bluetooth_radio_changed() {
 /// single machine). Failures (no radio, WinRT hiccup) are logged and
 /// swallowed — the chip falls back to focus/visibility refreshes.
 pub fn ensure_watch(app: AppHandle) {
-    radio::ensure_winrt();
+    // Fast path: if we already hold a watch, the radio hasn't changed
+    // (and we have no equivalent of audio.rs's `device_default_changed`
+    // callback to tear us down on radio hot-swap — see the comment on
+    // the dead-USB-adapter scenario above). Skip the WinRT enumeration
+    // (`Radio::GetRadiosAsync()` is an async WinRT op that marshals
+    // and can yield the worker thread) — on a busy session this saves
+    // a round-trip per chip read / focus / visibility event.
+    //
+    // Mirrors audio.rs's `ensure_watch` fast path (added in e6ed532).
+    if let Ok(guard) = WATCH.lock() {
+        if guard.is_some() {
+            return;
+        }
+    }
     let radio = match radio::find_radio(RadioKind::Bluetooth) {
         Ok(Some(r)) => r,
         _ => return, // no bluetooth radio at all — chip stays hidden
@@ -434,10 +447,9 @@ pub fn ensure_watch(app: AppHandle) {
         Ok(g) => g,
         Err(_) => return,
     };
-    // Already watching? The Radio handle we hold is a stable WinRT object
-    // for the duration of the process, so pointer-equality is a reliable
-    // "same physical radio" check. If something tore us down (lock poison
-    // recovery path), re-arm.
+    // Defense in depth: if the watch survived (lock-poison recovery or
+    // re-entry between the fast-path lock-release and this re-acquire),
+    // no-op — the previous registration is still live.
     if guard.is_some() {
         return;
     }
