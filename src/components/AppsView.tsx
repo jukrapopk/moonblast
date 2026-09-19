@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText, CheckFat, DotsSixVertical, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText, CheckFat, DotsSixVertical } from "@phosphor-icons/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   DndContext,
@@ -869,32 +869,6 @@ export function AppsView() {
           <div className="py-12 text-center text-sm text-(--color-muted)">No apps match "{query}"</div>
         ) : (
           <>
-            {/* Reorder-mode banner. Only mounted while the mode is on
-             *  so the page doesn't take a permanent visual hit. X is a
-             *  mouse-only close — keyboard users can hit Escape (the
-             *  KeyboardSensor handles that), but Escape will also
-             *  cancel an in-flight drag if one is active. */}
-            {reorderMode && (
-              <div
-                role="status"
-                className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-(--color-accent)/40 bg-(--color-accent-soft) px-4 py-2 text-sm text-(--color-text)"
-              >
-                <span>
-                  <strong className="font-semibold">Reorder mode</strong>
-                  <span className="ml-2 text-(--color-muted)">
-                    Drag tiles to swap, or press Space / Enter to pick up and arrow keys to move.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  aria-label="Exit reorder mode"
-                  onClick={() => setReorderMode(false)}
-                  className="rounded-md p-1 text-(--color-muted) outline-none transition hover:text-(--color-text) focus-visible:bg-(--color-overlay-soft)"
-                >
-                  <X size={16} weight="bold" />
-                </button>
-              </div>
-            )}
             {/* DndContext wraps the sortable grid. sensors is built once
              *  via useSensors at the top of the component and is the
              *  source of truth for which input devices drive drag.
