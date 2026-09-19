@@ -131,8 +131,8 @@ winget install LLVM.LLVM
 powershell -ExecutionPolicy Bypass -File scripts\build-arm64.ps1
 powershell -ExecutionPolicy Bypass -File scripts\build-arm64.ps1 -Destination 'Z:\'
 
-# or manually:
-"D:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
+# or manually (replace the vcvarsall path with your Visual Studio install):
+"<path-to-vcvarsall.bat>" x64_arm64
 npm run tauri build -- --target aarch64-pc-windows-msvc
 ```
 
