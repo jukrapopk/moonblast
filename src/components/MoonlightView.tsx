@@ -451,19 +451,31 @@ function AppsModal({
 }) {
   const [apps, setApps] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Track the in-flight state explicitly so we can distinguish "still
+  // loading" from "loaded with zero apps" — otherwise an empty list (e.g.
+  // host has no apps configured, or the CLI exited cleanly with nothing on
+  // stdout) leaves the modal stuck on "Loading apps" forever.
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !host) return;
     let alive = true;
     setApps([]);
     setError(null);
+    setLoading(true);
     const address = host.address;
     invoke<string[]>("moonlight_list_apps", { host: address })
       .then((list) => {
-        if (alive) setApps(list);
+        if (alive) {
+          setApps(list);
+          setLoading(false);
+        }
       })
       .catch((err) => {
-        if (alive) setError(String(err));
+        if (alive) {
+          setError(String(err));
+          setLoading(false);
+        }
       });
     return () => {
       alive = false;
@@ -473,18 +485,56 @@ function AppsModal({
     // moon-light list call. Same host = same address = same fetch.
   }, [open, host?.address, host?.name]);
 
+  // Re-fetch the current host's apps without closing + reopening the modal.
+  // The `alive` guard handles a click-during-fetch race (rapid Retry clicks):
+  // stale resolutions won't clobber the in-flight response.
+  const retry = () => {
+    if (!host) return;
+    setApps([]);
+    setError(null);
+    setLoading(true);
+    let alive = true;
+    invoke<string[]>("moonlight_list_apps", { host: host.address })
+      .then((list) => {
+        if (alive) {
+          setApps(list);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (alive) {
+          setError(String(err));
+          setLoading(false);
+        }
+      });
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={host ? `${host.name}` : ""} subtitle="Choose an app to stream">
       {error ? (
-        <p className="py-4 text-sm text-(--color-danger)">
-          {error}
-          <span className="mt-1 block text-(--color-muted)">
-            Pair the host first if you haven't yet.
-          </span>
-        </p>
+        <div className="space-y-3 py-2">
+          <p className="text-sm text-(--color-danger)">
+            {error}
+            <span className="mt-1 block text-(--color-muted)">
+              Pair the host first if you haven't yet.
+            </span>
+          </p>
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={retry}
+              icon={<ArrowClockwise size={14} weight="bold" />}
+            >
+              Retry
+            </Button>
+          </div>
+        </div>
+      ) : loading ? (
+        <p className="py-6 text-center text-sm text-(--color-muted)">Loading apps…</p>
       ) : apps.length === 0 ? (
         <p className="py-6 text-center text-sm text-(--color-muted)">
-          {error ? "Couldn't load apps" : "Loading apps"}
+          No apps on this host.
         </p>
       ) : (
         <div className="lrud-container max-h-80 space-y-1 overflow-y-auto p-1">
