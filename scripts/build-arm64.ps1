@@ -38,7 +38,22 @@ function Find-RepoRoot {
 }
 
 $repo     = Find-RepoRoot
-$vcvars   = "D:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+
+# Locate Visual Studio via `vswhere.exe`, which ships with every VS install
+# (Community / Pro / Enterprise / Build Tools) regardless of drive letter or
+# edition. Falls back to the standard install location as a last resort.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vswhere) {
+  $vsInstall = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  if ($LASTEXITCODE -eq 0 -and $vsInstall) {
+    $vcvars = Join-Path $vsInstall "VC\Auxiliary\Build\vcvarsall.bat"
+  } else {
+    $vcvars = "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+  }
+} else {
+  $vcvars = "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+}
+
 $target   = "aarch64-pc-windows-msvc"
 # The cargo-built binary is named after [package].name in src-tauri/Cargo.toml
 # ("tauri-app"), NOT after `productName` in tauri.conf.json ("Moonblast").
@@ -74,13 +89,18 @@ try {
   # path is required because Cargo.toml lives in src-tauri/, not the repo
   # root.
   # `aws-lc-sys` (pulled in transitively by `ureq` → `rustls`) needs
-  # `clang.exe` to compile its C/asm for ARM64 cross-builds. The
-  # system's PATH doesn't include LLVM by default — only the registry
-  # tells us it's at `C:\Program Files\LLVM`. Inject it into both the
-  # `cargo clean` and `cargo tauri build` invocations.
-  $llvmBin = "C:\Program Files\LLVM\bin"
-  if (-not (Test-Path (Join-Path $llvmBin "clang.exe"))) {
-    throw "clang.exe not found at $llvmBin - install LLVM (winget install LLVM.LLVM) before building ARM64"
+  # `clang.exe` to compile its C/asm for ARM64 cross-builds. Look it up
+  # on PATH first (covers winget, scoop, portable installs, etc.); fall
+  # back to the standard `C:\Program Files\LLVM\bin` location if not
+  # found. Inject the resolved directory into both the `cargo clean`
+  # and `cargo tauri build` invocations.
+  $clangExe = Get-Command clang.exe -ErrorAction SilentlyContinue
+  if ($clangExe) {
+    $llvmBin = Split-Path -Parent $clangExe.Source
+  } elseif (Test-Path "${env:ProgramFiles}\LLVM\bin\clang.exe") {
+    $llvmBin = "${env:ProgramFiles}\LLVM\bin"
+  } else {
+    throw "clang.exe not found on PATH or at ${env:ProgramFiles}\LLVM\bin - install LLVM (winget install LLVM.LLVM) before building ARM64"
   }
 
   $cleanCmd = "set PATH=$llvmBin;%PATH% && `"$vcvars`" x64_arm64 && cargo clean --manifest-path src-tauri/Cargo.toml --target $target -p windows -p windows-sys -p windows-targets"
