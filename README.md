@@ -13,7 +13,7 @@ This project is about 95% AI generated
   - Custom icon using local images or SteamGridDB (API key needed)
   - Configurable autolaunch apps
   - Known issue⚠️ - Some apps that require desktop shell might not work with Auto Immersive Mode
-- **Moonlight** - Directly integration into UI. Pair and start streaming right in Moonblast
+- **Moonlight** - Unified host list and streaming settings right in Moonblast. Moonblast drives the Moonlight CLI, doesn't reimplement the protocol
 - **Tailscale** - Connect and disconnect
 - **Device Controls**
   - **Wi-Fi**
@@ -22,14 +22,14 @@ This project is about 95% AI generated
   - **Battery**
   - **Audio**
 - **Keyboard + controller support**
-- **Theming and Customization** - Dark, Light and Auto Mode with customizable color pallete
+- **Theming and Customization** - Dark, Light and Auto Mode with customizable color palette
 
 ## Stack
 
 - **Frontend**: React 19 + TypeScript + Tailwind
 - **Backend**: Tauri 2 (Rust)
 - WebView2 for the window
-- [About window api used for device controls]
+- Device controls straight through native Win32/WinRT APIs - no daemons, no third-party SDKs
 
 ## Getting started
 
