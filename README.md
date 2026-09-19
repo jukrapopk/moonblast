@@ -1,19 +1,35 @@
 # Moonblast
 
-A lightweight, low-footprint **Fullscreen Mode / Big Picture-style launcher for Windows**. A clean shell for launching your apps and streaming games via [Moonlight](https://moonlight-stream.org/) — no remote-control app, no extra daemon, native chrome that hides cleanly in fullscreen. Windows 10/11 only.
+Moonlight meets Xbox Fullscreen Experience. A lightweight launcher focused on simple apps launching and streaming using [Moonlight](https://moonlight-stream.org/).
 
-## What's in it
+My main goal is to have lightweight desktop replacement on my streaming only laptop.
 
-- **Apps** — curated grid of Windows apps with search, sort, and per-app context menus. Discovers from the Start Menu, Microsoft Store, and Steam; you can also browse any `.exe` or `.lnk`.
-- **Moonlight streaming** — one unified list of hosts (mDNS + paired + your saved addresses, deduplicated by name). Per-stream settings (resolution, bitrate, codec, HDR, gamepad mapping, …), online/offline status, and a Pair action that drives Moonlight's own CLI. Works over LAN and Tailscale.
-- **Immersive Mode** — fullscreen + desktop suppression, one tap from the Power menu. Set **Auto Immersive Mode** in Settings to make Moonblast your shell at sign-in: no desktop, no taskbar, no startup apps. Per-user registry write, no UAC, with a crash-safe stub that hands the desktop back if anything goes wrong.
-- **System chips in the TopBar** — Display, Wi-Fi, Bluetooth, Battery, Audio. Each opens a full in-app modal: HDR + resolution controls, Wi-Fi picker with saved profiles and password form, Bluetooth radios, battery status with time-remaining, audio mixer with per-app sliders. Nothing bounces you out to Windows Settings.
-- **Keyboard + gamepad** — every action reachable via keyboard; arrows do spatial navigation, D-pad / left stick mirrors arrows. Tab traverses focusables in document order; Escape closes the topmost modal.
-- **Theming** — Dark / Light / Auto, with a custom accent color picker. Auto follows the Windows app-mode setting live.
+This project is about 95% AI generated
+
+## Features
+
+- **Auto Immersive Mode** - Suppress default desktop and startup apps. Getting straight into Moonblast with minimal background processes
+- **Apps** - Add and remove any app or shortcut to Apps page
+  - Custom icon using local images or SteamGridDB (API key needed)
+  - Configurable autolaunch apps
+  - Known issue⚠️ - Some apps that require desktop shell might not work with Auto Immersive Mode
+- **Moonlight** - Directly integration into UI. Pair and start streaming right in Moonblast
+- **Tailscale** - Connect and disconnect
+- **Device Controls**
+  - **Wi-Fi**
+  - **Bluetooth**
+  - **Display**
+  - **Battery**
+  - **Audio**
+- **Keyboard + controller support**
+- **Theming and Customization** - Dark, Light and Auto Mode with customizable color pallete
 
 ## Stack
 
-React 19 + TypeScript on the frontend, Rust (Tauri 2) on the backend, WebView2 for the window. Tailwind for styling. Phosphor icons. The streaming / Wi-Fi / audio / battery / display / HDR modules are all Rust commands fronted by in-app UI — no hand-offs to the Windows Settings app.
+- **Frontend**: React 19 + TypeScript + Tailwind
+- **Backend**: Tauri 2 (Rust)
+- WebView2 for the window
+- [About window api used for device controls]
 
 ## Getting started
 
@@ -28,7 +44,7 @@ Prerequisites: Node 22+ (or Node 20.19+), Rust stable with the MSVC toolchain, V
 ### ARM64 build
 
 ```bash
-# one-time — ring needs clang for the ARM64 assembly
+# one-time - ring needs clang for the ARM64 assembly
 winget install LLVM.LLVM
 
 # build
@@ -38,25 +54,15 @@ powershell -ExecutionPolicy Bypass -File scripts\build-arm64.ps1 -Destination 'Z
 
 The helper locates Visual Studio via `vswhere.exe` and resolves `clang.exe` from your `PATH`, so it works across VS editions and LLVM install locations.
 
-## Keyboard
+## Controls
 
 | Action | Keys |
 |---|---|
 | Fullscreen | `F11` |
-| Move focus | Arrows (or D-pad / left stick) |
-| Activate | `Enter` / `Space` |
-| Close modal | `Escape` |
-| Move focus through page controls | `Tab` / `Shift+Tab` (native browser order; wraps within an open modal) |
-
-## Project layout
-
-```
-src/                React frontend (components, hooks, shared ui/)
-src-tauri/          Rust backend (commands, settings, Windows shell, audio, Wi-Fi, display, HDR)
-scripts/            ARM64 cross-build helper
-```
-
-[`AGENTS.md`](AGENTS.md) has the deeper project memory — design decisions, module notes, conventions. [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the contributor workflow. [`SECURITY.md`](SECURITY.md) describes the threat model and the asset-protocol scope.
+| Move focus | Arrows + D-Pad or Left Analog |
+| Activate | `Enter` / `Space` / `(A)` |
+| Close modal | `Escape` / `(B)` |
+| Context menu | RMB / `Shift + F10` / `(X)`
 
 ## Licence
 
