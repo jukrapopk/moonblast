@@ -46,7 +46,7 @@ The helper locates Visual Studio via `vswhere.exe` and resolves `clang.exe` from
 | Move focus | Arrows (or D-pad / left stick) |
 | Activate | `Enter` / `Space` |
 | Close modal | `Escape` |
-| Next / prev view | `Tab` / `Shift+Tab` |
+| Move focus through page controls | `Tab` / `Shift+Tab` (native browser order; wraps within an open modal) |
 
 ## Project layout
 
