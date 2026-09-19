@@ -44,6 +44,15 @@ pub use shell::run_shell_stub;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+/// Returns the application's version, sourced from `Cargo.toml` at compile
+/// time so the value shown in Settings → About always matches the build
+/// artifact the user is actually running (no manual sync with `package.json`
+/// or `tauri.conf.json`).
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Toggle the window between windowed and fullscreen. Returns the new state.
 #[tauri::command]
 fn toggle_fullscreen(window: tauri::Window) -> Result<bool, String> {
@@ -3058,6 +3067,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings::get_settings,
             settings::update_settings,
+            app_version,
             toggle_fullscreen,
             is_fullscreen,
             minimize_window,

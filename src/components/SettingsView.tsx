@@ -1023,6 +1023,26 @@ export function SettingsView({
       alive = false;
     };
   }, []);
+  // App version, surfaced in Settings → About. Sourced from Cargo.toml at
+  // compile time on the Rust side so the displayed value always matches
+  // the running binary. `null` while loading; rendered as "—" so the row
+  // doesn't collapse before the IPC resolves.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    invoke<string>("app_version")
+      .then((v) => {
+        if (alive) setAppVersion(v);
+      })
+      .catch(() => {
+        // Fall back to "unknown" rather than leaving the row blank —
+        // better than nothing if the IPC ever fails.
+        if (alive) setAppVersion("unknown");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
   // HDR on the primary display. `undefined` while we haven't checked yet
   // (description says "Checking"); `null` after a failed IPC read; an
   // object with `supported: false` means the panel/driver don't advertise
@@ -1145,6 +1165,22 @@ export function SettingsView({
           Moonblast is a lightweight Fullscreen Mode launcher built on Tauri and Rust.
           Moonlight streaming settings live on the Moonlight page.
         </div>
+        <Row
+          label="Version"
+          description="The build of Moonblast currently running."
+        >
+          {/* Non-button focusable so keyboard / spatial nav can land here
+              even though there's nothing to activate. Matches the pattern
+              used by read-only status rows elsewhere in Settings. */}
+          <span
+            tabIndex={0}
+            role="text"
+            aria-label={`Version ${appVersion ?? "unknown"}`}
+            className="rounded-md px-2 py-1 font-mono text-sm text-(--color-text) outline-none focus-visible:bg-(--color-surface-2)"
+          >
+            {appVersion ?? "unknown"}
+          </span>
+        </Row>
       </Section>
       </div>
     </PageShell>
