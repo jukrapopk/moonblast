@@ -1,0 +1,183 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-x64:
+    name: build (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (x64)
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+          $portableSrc = "src-tauri/target/x86_64-pc-windows-msvc/release/tauri-app.exe"
+          $stage = "dist-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Force (Join-Path $bundle "msi/*.msi") $stage
+          Copy-Item -Force (Join-Path $bundle "nsis/*.exe") $stage
+          Copy-Item -Force $portableSrc (Join-Path $stage "moonblast-x64-portable.exe")
+          Get-ChildItem $stage | ForEach-Object { Write-Host ("  {0} ({1:N2} MB)" -f $_.Name, ($_.Length / 1MB)) }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: moonblast-x64
+          path: dist-x64/*
+
+  build-arm64:
+    name: build (arm64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Locate MSVC + clang
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # vswhere ships with every VS install (Community / Pro / Enterprise / Build Tools).
+          # Don't hardcode edition/drive — let vcvarsall.bat fail loudly if the ARM64
+          # workload isn't installed.
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vsInstall = & $vswhere -latest -property installationPath
+            if ($LASTEXITCODE -ne 0 -or -not $vsInstall) {
+              throw "vswhere returned no install path"
+            }
+            $vcvars = Join-Path $vsInstall "VC\Auxiliary\Build\vcvarsall.bat"
+          } else {
+            throw "vswhere.exe not found at $vswhere"
+          }
+          if (-not (Test-Path $vcvars)) {
+            throw "vcvarsall.bat not found at $vcvars"
+          }
+          echo "VCToolsInstallDir=$vsInstall" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "VCVARS=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          # GitHub's windows-latest image ships LLVM (clang.exe) at the standard path.
+          $clang = "${env:ProgramFiles}\LLVM\bin\clang.exe"
+          if (-not (Test-Path $clang)) {
+            $clangOnPath = Get-Command clang.exe -ErrorAction SilentlyContinue
+            if ($clangOnPath) { $clang = $clangOnPath.Source }
+            else { throw "clang.exe not found at ${env:ProgramFiles}\LLVM\bin and not on PATH" }
+          }
+          $llvmBin = Split-Path -Parent $clang
+          echo "LLVM_BIN=$llvmBin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo ">>> using clang: $clang"
+
+      - name: Build (arm64)
+        shell: pwsh
+        run: |
+          # cargo + vcvarsall + clang need to live in the same cmd invocation so the
+          # cross env vars set by vcvarsall.bat stay around for the build step.
+          # NODE_OPTIONS bump avoids V8 OOM during the Vite bundle (same as the
+          # local build-arm64.ps1 script).
+          $cmd = "set NODE_OPTIONS=--max-old-space-size=8192 && set PATH=$env:LLVM_BIN;%PATH% && `"$env:VCVARS`" x64_arm64 && npm.cmd run tauri -- build --target aarch64-pc-windows-msvc"
+          Write-Host ">>> $cmd"
+          cmd /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "tauri build failed (exit $LASTEXITCODE)" }
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "src-tauri/target/aarch64-pc-windows-msvc/release/bundle"
+          $portableSrc = "src-tauri/target/aarch64-pc-windows-msvc/release/tauri-app.exe"
+          $stage = "dist-arm64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Force (Join-Path $bundle "msi/*.msi") $stage
+          Copy-Item -Force (Join-Path $bundle "nsis/*.exe") $stage
+          Copy-Item -Force $portableSrc (Join-Path $stage "moonblast-arm64-portable.exe")
+          Get-ChildItem $stage | ForEach-Object { Write-Host ("  {0} ({1:N2} MB)" -f $_.Name, ($_.Length / 1MB)) }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: moonblast-arm64
+          path: dist-arm64/*
+
+  publish:
+    name: publish release
+    needs: [build-x64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download x64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: moonblast-x64
+          path: artifacts/moonblast-x64
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: moonblast-arm64
+          path: artifacts/moonblast-arm64
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/moonblast-x64/*.msi
+            artifacts/moonblast-x64/*.exe
+            artifacts/moonblast-arm64/*.msi
+            artifacts/moonblast-arm64/*.exe

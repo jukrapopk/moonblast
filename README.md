@@ -43,6 +43,8 @@ npm run tauri build    # production bundle
 
 Prerequisites: Node 22+ (or Node 20.19+), Rust stable with the MSVC toolchain, Visual Studio 2022 C++ build tools, WebView2.
 
+> **Note on Windows SmartScreen.** Prebuilt installers and binaries are **not code-signed** in this release. Windows SmartScreen will warn "Windows protected your PC / Unknown publisher" on first launch — click **More info → Run anyway** to proceed. This is normal for unsigned open-source Windows apps and does not indicate a problem with the binary.
+
 ### ARM64 build
 
 ```bash
