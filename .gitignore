@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Rust / Tauri
+# src-tauri/target is gitignored by src-tauri/.gitignore; this is a belt-and-braces
+# entry in case anything ever lands at the repo root.
+target
+*.pdb
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
