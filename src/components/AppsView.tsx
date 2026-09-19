@@ -17,10 +17,10 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext,
-  rectSwappingStrategy,
+  rectSortingStrategy,
   useSortable,
   sortableKeyboardCoordinates,
-  arraySwap,
+  arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { PageShell } from "./PageShell";
@@ -627,11 +627,13 @@ export function AppsView() {
     setActiveDragShortcut(found ?? null);
   }
 
-  // On drop: swap the dragged tile with the one it's hovering over.
-  // `rectSwappingStrategy` (configured on SortableContext below)
-  // tells dnd-kit to *report* swaps rather than inserts, so the
-  // user gets true two-way swap semantics: dropping A on B always
-  // gives [B, A] regardless of where in the array they sit.
+  // On drop: move the dragged tile to the hovered position. With
+  // `rectSortingStrategy` (configured on SortableContext below),
+  // dnd-kit shifts non-active items aside while you drag — the
+  // user sees the held content slide through the grid as tiles
+  // animate out of its way, then settle into the new order on
+  // drop. `arrayMove` does the array splice (removes from old
+  // index, inserts at new index, shifting items in between).
   function handleDragEnd(event: DragEndEvent) {
     setActiveDragShortcut(null);
     const { active, over } = event;
@@ -640,7 +642,7 @@ export function AppsView() {
       const oldIndex = s.app_shortcuts.findIndex((x) => x.path === active.id);
       const newIndex = s.app_shortcuts.findIndex((x) => x.path === over.id);
       if (oldIndex < 0 || newIndex < 0) return s;
-      return { ...s, app_shortcuts: arraySwap(s.app_shortcuts, oldIndex, newIndex) };
+      return { ...s, app_shortcuts: arrayMove(s.app_shortcuts, oldIndex, newIndex) };
     });
   }
 
@@ -897,7 +899,7 @@ export function AppsView() {
                *  to the view restores focus to that tile. */}
               <SortableContext
                 items={filtered.map((a) => a.path)}
-                strategy={rectSwappingStrategy}
+                strategy={rectSortingStrategy}
               >
                 <div className="lrud-container grid grid-cols-4 gap-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
                   <AnimatePresence>
