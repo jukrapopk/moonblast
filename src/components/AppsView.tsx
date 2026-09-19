@@ -2,8 +2,27 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText, CheckFat } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText, CheckFat, DotsSixVertical, X } from "@phosphor-icons/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSwappingStrategy,
+  useSortable,
+  sortableKeyboardCoordinates,
+  arraySwap,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { PageShell } from "./PageShell";
 import { Modal } from "./ui/Modal";
 import { Prompt } from "./ui/Prompt";
@@ -93,6 +112,7 @@ function AppTile({
   steamgridIcon,
   useDesktopIcon,
   bust,
+  reorderMode,
   onLaunch,
   onContextMenu,
 }: {
@@ -102,9 +122,30 @@ function AppTile({
   steamgridIcon: string | null;
   useDesktopIcon: boolean;
   bust: number;
+  reorderMode: boolean;
   onLaunch: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
+  // dnd-kit sortable bindings. `attributes` exposes the ARIA
+  // attributes the library expects on a draggable (role, tabindex,
+  // aria-roledescription, etc.). `listeners` is the bag of pointer
+  // / keyboard event handlers — spread onto the button so press /
+  // drag activate from anywhere on the tile. `setNodeRef` attaches
+  // the DOM ref dnd-kit uses to measure the tile's geometry. The
+  // library is no-op when reorderMode is off (`disabled` flag), so
+  // the listeners don't interfere with normal launch clicks.
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: path,
+    disabled: !reorderMode,
+  });
+
   // Custom file icon > pinned SteamGridDB icon > desktop/auto.
   const hasOverride = !!(customIcon || steamgridIcon);
   const forceDesktop = useDesktopIcon && !hasOverride;
@@ -126,11 +167,22 @@ function AppTile({
   // child button.
   return (
     <motion.div
+      ref={setNodeRef}
       layout
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.15 }}
+      // `transform` from useSortable positions the tile while it's
+      // being dragged or when its slot is animating. `transition` is
+      // the CSS transition string for the post-drop settle (a brief
+      // ease-out so tiles slide into place rather than teleport).
+      // `CSS.Transform.toString` is the helper dnd-kit ships for
+      // serializing the typed transform value to a CSS string.
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
       // `data-context-menu` marks the element as having an
       // `onContextMenu` handler. The App-level "Back/Refresh" fallback
       // (src/App.tsx) checks for this attribute on the event target's
@@ -140,13 +192,34 @@ function AppTile({
       // land on the generic menu instead of the focused element's
       // actual actions.
       data-context-menu
-      className="group"
+      // While a drag is active, fade the source tile so the user sees
+      // the held content via the DragOverlay instead — same visual
+      // as desktop file managers when you grab an icon.
+      className={`group ${isDragging ? "opacity-40" : ""}`}
       onContextMenu={onContextMenu}
     >
       <button
-        onClick={onLaunch}
+        // The dnd-kit listeners override the button's own click while
+        // reorder mode is on: pointerdown + small movement starts a
+        // drag (PointerSensor activation distance). When the user
+        // releases without moving (a real click on the tile), the
+        // drag never activates and the native click fires — but only
+        // when reorder mode is off. In reorder mode we explicitly
+        // suppress launch so a click is treated as a no-op (the user
+        // is supposed to drag, not click); they can still launch via
+        // Done → click tile. Keyboard activation is gated on
+        // reorderMode by the parent: we drop listeners when reorder
+        // is off, and the keyboard sensor intercepts Space / Enter
+        // when on.
+        onClick={reorderMode ? undefined : onLaunch}
+        // Spread dnd-kit's listeners + ARIA attributes onto the
+        // button. `{...listeners}` includes the onPointerDown that
+        // starts the drag (after the activation distance is met) and
+        // the keyboard handler for Space / Enter pickup-and-drop.
+        {...listeners}
+        {...attributes}
         aria-label={name}
-        className="relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)]"
+        className={`relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)] ${reorderMode ? "cursor-grab active:cursor-grabbing" : ""}`}
       >
         <div
           className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text) transition-transform group-focus-visible:scale-[1.04]`}
@@ -163,6 +236,53 @@ function AppTile({
         </div>
       </button>
     </motion.div>
+  );
+}
+
+/* --------------------------- drag overlay ---------------------------- */
+
+/**
+ * Tile rendered inside the `<DragOverlay>` while a drag is in flight.
+ * Mirrors the visual of an AppTile (icon + label, rounded-2xl) so
+ * the held content matches what the user just grabbed. The overlay
+ * is positioned by dnd-kit at the pointer (mouse) or focused slot
+ * (keyboard) — we don't manage its transform here.
+ */
+function DragOverlayTile({ shortcut, bust }: { shortcut: Shortcut; bust: number }) {
+  const hasOverride = !!(shortcut.custom_icon || shortcut.steamgrid_icon);
+  const forceDesktop = shortcut.use_desktop_icon && !hasOverride;
+  const fetchedIcon = useAppIcon(
+    labelOf(shortcut),
+    shortcut.path,
+    bust,
+    forceDesktop,
+    hasOverride,
+  );
+  const steamgridSrc = shortcut.steamgrid_icon
+    ? shortcut.steamgrid_icon.startsWith("http")
+      ? shortcut.steamgrid_icon
+      : convertFileSrc(shortcut.steamgrid_icon)
+    : null;
+  const icon = shortcut.custom_icon
+    ? convertFileSrc(shortcut.custom_icon)
+    : (steamgridSrc ?? fetchedIcon);
+  const name = labelOf(shortcut);
+  return (
+    <div className="rounded-2xl border border-(--color-accent) bg-(--color-surface) p-3 shadow-[0_20px_50px_-12px_var(--color-overlay)]">
+      <div
+        className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text)"
+        style={icon ? undefined : { background: gradientFor(name) }}
+      >
+        {icon ? (
+          <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
+        ) : (
+          name.charAt(0)
+        )}
+      </div>
+      <div className="mt-2 truncate text-center text-xs font-medium text-(--color-text)">
+        {name}
+      </div>
+    </div>
   );
 }
 
@@ -474,6 +594,60 @@ export function AppsView() {
   const [renameApp, setRenameApp] = useState<Shortcut | null>(null);
   const { message: toast, show: setToast } = useToast(2600);
 
+  // Reorder mode — toggled by the header "Reorder" button. While
+  // on, dnd-kit's drag sensors are enabled (PointerSensor for mouse,
+  // KeyboardSensor for keyboard / gamepad). Off by default so a
+  // plain click on a tile launches the app without any activation
+  // distance to wait out.
+  const [reorderMode, setReorderMode] = useState(false);
+  // The shortcut currently being dragged (for the DragOverlay's
+  // floating preview). Null when nothing is held.
+  const [activeDragShortcut, setActiveDragShortcut] = useState<Shortcut | null>(null);
+
+  // PointerSensor activation constraint: 5px of movement before a
+  // press counts as a drag. Without this, the simple "press and
+  // release" would start a drag and steal the click — clicking a
+  // tile in reorder mode would silently do nothing instead of
+  // dropping on it. 5px is short enough that a real drag still feels
+  // instant but long enough to keep clicks clicks.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // KeyboardSensor with `sortableKeyboardCoordinates` gives the
+    // standard accessible behaviour out of the box: Space / Enter
+    // picks up, arrow keys move the focused indicator through the
+    // grid, Space / Enter again drops, Escape cancels. Gamepad A
+    // synthesises Enter via the gamepad adapter, so it routes
+    // through this sensor automatically.
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    const path = String(event.active.id);
+    const found = shortcuts.find((s) => s.path === path);
+    setActiveDragShortcut(found ?? null);
+  }
+
+  // On drop: swap the dragged tile with the one it's hovering over.
+  // `rectSwappingStrategy` (configured on SortableContext below)
+  // tells dnd-kit to *report* swaps rather than inserts, so the
+  // user gets true two-way swap semantics: dropping A on B always
+  // gives [B, A] regardless of where in the array they sit.
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDragShortcut(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    update((s) => {
+      const oldIndex = s.app_shortcuts.findIndex((x) => x.path === active.id);
+      const newIndex = s.app_shortcuts.findIndex((x) => x.path === over.id);
+      if (oldIndex < 0 || newIndex < 0) return s;
+      return { ...s, app_shortcuts: arraySwap(s.app_shortcuts, oldIndex, newIndex) };
+    });
+  }
+
+  function handleDragCancel() {
+    setActiveDragShortcut(null);
+  }
+
   const existingPaths = new Set(shortcuts.map((s) => s.path.toLowerCase()));
 
   function addShortcut(a: { name: string; path: string; source?: string; kind: string }) {
@@ -659,6 +833,22 @@ export function AppsView() {
               />
             </div>
             <Button
+              // Reorder toggle. While active, dnd-kit's sensors are
+              // enabled on every tile (PointerSensor + KeyboardSensor)
+              // and the user can drag / keyboard-pickup to swap.
+              // Outline by default, switches to filled (primary)
+              // while active so the mode is obvious at a glance.
+              // Disabled when there are fewer than 2 apps — nothing
+              // to swap.
+              variant={reorderMode ? "primary" : "outline"}
+              onClick={() => setReorderMode((on) => !on)}
+              icon={<DotsSixVertical size={16} weight="bold" />}
+              className="h-9 px-4"
+              disabled={shortcuts.length < 2}
+            >
+              {reorderMode ? "Done" : "Reorder"}
+            </Button>
+            <Button
               onClick={() => setAddOpen(true)}
               icon={<Plus size={16} weight="bold" />}
               className="h-9 px-4"
@@ -678,27 +868,95 @@ export function AppsView() {
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-(--color-muted)">No apps match "{query}"</div>
         ) : (
-          // `lrud-container` opts the grid into the LRUD library: arrows
-          // stay scoped to the tiles, and the last-focused tile is
-          // remembered via `data-focus` so coming back to the view
-          // restores focus to that tile.
-          <div className="lrud-container grid grid-cols-4 gap-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
-            <AnimatePresence>
-              {filtered.map((a) => (
-                <AppTile
-                  key={a.path}
-                  name={labelOf(a)}
-                  path={a.path}
-                  customIcon={a.custom_icon}
-                  steamgridIcon={a.steamgrid_icon}
-                  useDesktopIcon={a.use_desktop_icon}
-                  bust={bust}
-                  onLaunch={() => launch(a)}
-                  onContextMenu={(e) => openAppMenu(e, a)}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
+          <>
+            {/* Reorder-mode banner. Only mounted while the mode is on
+             *  so the page doesn't take a permanent visual hit. X is a
+             *  mouse-only close — keyboard users can hit Escape (the
+             *  KeyboardSensor handles that), but Escape will also
+             *  cancel an in-flight drag if one is active. */}
+            {reorderMode && (
+              <div
+                role="status"
+                className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-(--color-accent)/40 bg-(--color-accent-soft) px-4 py-2 text-sm text-(--color-text)"
+              >
+                <span>
+                  <strong className="font-semibold">Reorder mode</strong>
+                  <span className="ml-2 text-(--color-muted)">
+                    Drag tiles to swap, or press Space / Enter to pick up and arrow keys to move.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  aria-label="Exit reorder mode"
+                  onClick={() => setReorderMode(false)}
+                  className="rounded-md p-1 text-(--color-muted) outline-none transition hover:text-(--color-text) focus-visible:bg-(--color-overlay-soft)"
+                >
+                  <X size={16} weight="bold" />
+                </button>
+              </div>
+            )}
+            {/* DndContext wraps the sortable grid. sensors is built once
+             *  via useSensors at the top of the component and is the
+             *  source of truth for which input devices drive drag.
+             *  `closestCenter` is the right collision strategy for a
+             *  variable-column grid (4/5/6/8 cols at different
+             *  breakpoints): a tile is "over" when the cursor / focus
+             *  indicator is nearest its center. Announcements are off
+             *  by default; the project doesn't ship a live region and
+             *  a screen-reader user would hear raw dnd-kit strings
+             *  ("Draggable item Notepad") which isn't useful here.
+             *
+             *  The DragOverlay renders the active shortcut at the
+             *  cursor (mouse) or at the focused slot (keyboard) while
+             *  a drag is in flight, so the user always sees what
+             *  they're holding regardless of input modality. */}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              {/* `lrud-container` opts the grid into the LRUD library:
+               *  arrows stay scoped to the tiles, and the last-focused
+               *  tile is remembered via `data-focus` so coming back
+               *  to the view restores focus to that tile. */}
+              <SortableContext
+                items={filtered.map((a) => a.path)}
+                strategy={rectSwappingStrategy}
+              >
+                <div className="lrud-container grid grid-cols-4 gap-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
+                  <AnimatePresence>
+                    {filtered.map((a) => (
+                      <AppTile
+                        key={a.path}
+                        name={labelOf(a)}
+                        path={a.path}
+                        customIcon={a.custom_icon}
+                        steamgridIcon={a.steamgrid_icon}
+                        useDesktopIcon={a.use_desktop_icon}
+                        bust={bust}
+                        reorderMode={reorderMode}
+                        onLaunch={() => launch(a)}
+                        onContextMenu={(e) => openAppMenu(e, a)}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </SortableContext>
+              {/* Floating preview. Renders the held shortcut at the
+               *  cursor / focus while a drag is active. The overlay
+               *  doesn't participate in the SortableContext (it
+               *  doesn't have an id), so it doesn't accidentally
+               *  register as a drop target. dropAnimation null is
+               *  fine — the source tile's CSS transform animates
+               *  back into place via the transition returned by
+               *  useSortable. */}
+              <DragOverlay dropAnimation={null}>
+                {activeDragShortcut && <DragOverlayTile shortcut={activeDragShortcut} bust={bust} />}
+              </DragOverlay>
+            </DndContext>
+          </>
         )}
       </PageShell>
 
