@@ -1,6 +1,6 @@
 # Moonblast
 
-![Moonblast - Apps view](.github/assets/screenshot.jpg)
+![Moonblast - Apps view](.github/assets/moonlight-screenshot.jpg)
 
 Moonlight meets Xbox Fullscreen Experience. A lightweight launcher focused on simple apps launching and streaming using [Moonlight](https://moonlight-stream.org/).
 
