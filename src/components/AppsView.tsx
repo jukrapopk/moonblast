@@ -166,19 +166,21 @@ function AppTile({
   // library's "ignore if contained in" rule would filter out its
   // child button.
   return (
-    <motion.div
+    <div
       ref={setNodeRef}
-      layout
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ duration: 0.15 }}
+      // Plain `<div>` wrapper. dnd-kit's `transform` and
+      // `transition` own this element's position via the `style`
+      // prop below — using `motion.div` here would race with
+      // dnd-kit because Framer Motion's `animate` prop writes
+      // `transform` on every frame, overriding the inline value.
+      // The entry / exit fade moved down to the inner `<motion.div>`
+      // so AnimatePresence still fires for tiles added or removed.
       // `transform` from useSortable positions the tile while it's
-      // being dragged or when its slot is animating. `transition` is
-      // the CSS transition string for the post-drop settle (a brief
-      // ease-out so tiles slide into place rather than teleport).
-      // `CSS.Transform.toString` is the helper dnd-kit ships for
-      // serializing the typed transform value to a CSS string.
+      // being dragged and slides non-active items aside while a drag
+      // is in flight (the "push to preview" effect: dragging 4 over
+      // 2 in [1,2,3,4,5] makes 2 and 3 visibly shift right to show
+      // the insertion point). `transition` is the CSS transition
+      // string dnd-kit returns for the post-drop settle.
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -198,7 +200,7 @@ function AppTile({
       className={`group ${isDragging ? "opacity-40" : ""}`}
       onContextMenu={onContextMenu}
     >
-      <button
+      <motion.button
         // The dnd-kit listeners override the button's own click while
         // reorder mode is on: pointerdown + small movement starts a
         // drag (PointerSensor activation distance). When the user
@@ -219,6 +221,14 @@ function AppTile({
         {...listeners}
         {...attributes}
         aria-label={name}
+        // Entry / exit fade now lives on the button so AnimatePresence
+        // still drives it when a tile is added (e.g. `Add` modal
+        // commits) or removed (e.g. context-menu Remove). The wrapper
+        // div doesn't animate in / out — dnd-kit owns its transform.
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        transition={{ duration: 0.15 }}
         className={`relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)] ${reorderMode ? "cursor-grab active:cursor-grabbing" : ""}`}
       >
         <div
@@ -234,8 +244,8 @@ function AppTile({
         <div className="mt-2 truncate text-center text-xs font-medium text-(--color-text)">
           {name}
         </div>
-      </button>
-    </motion.div>
+      </motion.button>
+    </div>
   );
 }
 
