@@ -2,7 +2,7 @@
   "name": "moonblast",
   "description": "A lightweight Windows Fullscreen Mode / Big Picture-style launcher centered around Moonlight streaming.",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "license": "MIT",
   "homepage": "https://github.com/jukrapopk/moonblast",
