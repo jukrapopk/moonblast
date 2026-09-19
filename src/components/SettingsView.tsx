@@ -1045,7 +1045,7 @@ export function SettingsView({
             <div className="text-base font-medium text-(--color-text)">Auto Immersive Mode</div>
             <div className="mt-0.5 text-sm text-(--color-muted)">
               {autoImmersive
-                ? "Sign in goes straight to Moonblast instead of the desktop. Hold Shift at sign-in to boot to the desktop once."
+                ? "Sign in goes straight to Moonblast instead of the desktop. Toggle off here to restore the normal desktop at the next sign-in."
                 : "Replace the desktop at sign-in with Moonblast."}
             </div>
           </div>

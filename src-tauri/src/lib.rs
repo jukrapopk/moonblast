@@ -3011,9 +3011,9 @@ pub fn run() {
             };
             let armed = shell::desktop_replaced();
             if want && !armed {
-                // A rescue (Shift at sign-in, or the crash bail-out) already put
-                // the normal shell back. Respect that instead of silently
-                // re-arming, and make the UI reflect it.
+                // A crash bail-out already put the normal shell back. Respect
+                // that instead of silently re-arming, and make the UI reflect
+                // it.
                 let state = app.state::<settings::SettingsState>();
                 settings::disable_auto_immersive(app.handle(), &state);
             } else if want {

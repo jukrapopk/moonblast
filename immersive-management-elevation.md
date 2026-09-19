@@ -68,16 +68,17 @@ elevated), which the no-args design avoids entirely.
   runs the launcher, waits, then guarantees a desktop (`ensure_desktop` → Explorer
   unless `GetShellWindow` reports one) and parks as the session's shell process. A
   launcher crash still leaves a working desktop.
-- **Escape hatches:** Shift held at sign-in, or 3 consecutive fast crashes
-  (`ShellCrashCount` under `HKCU\Software\Moonblast`, cleared 30s into a healthy run),
-  auto-restore the normal shell.
+- **Escape hatch:** 3 consecutive fast crashes (`ShellCrashCount` under
+  `HKCU\Software\Moonblast`, cleared 30s into a healthy run) auto-restore the
+  normal shell. To recover non-emergently, toggle Auto Immersive Mode off in
+  Settings — the setting only arms the *next* sign-in, so it never yanks the
+  user out of Immersive Mode on the spot.
 - **Backup:** the previous `Shell` value is saved to `OriginalShell` /
   `OriginalShellSet`, so restore correctly reproduces "absent" vs. an explicit value.
 - **Self-heal:** `setup` reconciles stored intent against the registry. If the setting is
   on but the shell **isn't** registered, a rescue already fired — it clears the setting
-  rather than silently re-arming (which would have made Shift only a one-boot reprieve).
-  If it is registered, it just refreshes the exe path so moving or updating the app can't
-  strand a stale entry.
+  rather than silently re-arming. If it is registered, it just refreshes the exe path so
+  moving or updating the app can't strand a stale entry.
 - **Store apps** now activate via `IApplicationActivationManager::ActivateApplication`
   instead of `explorer shell:AppsFolder\<AUMID>` — the old path would have started
   Explorer and raised the desktop behind the launcher.

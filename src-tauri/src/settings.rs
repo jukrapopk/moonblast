@@ -345,9 +345,9 @@ pub fn update_settings(
 
 /// Force `auto_immersive` off from Rust and persist it.
 ///
-/// Used when a boot-time rescue (Shift held at sign-in, or the crash bail-out)
-/// has already restored the normal shell: the stored intent would otherwise
-/// disagree with reality and silently re-arm the takeover on the next launch.
+/// Used when the crash bail-out has already restored the normal shell: the
+/// stored intent would otherwise disagree with reality and silently re-arm
+/// the takeover on the next launch.
 pub fn disable_auto_immersive(app: &AppHandle, state: &SettingsState) {
     let updated = {
         let mut guard = state.0.lock().unwrap();

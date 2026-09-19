@@ -146,12 +146,6 @@ pub fn cleanup_legacy_run_key() {
         .and_then(|k| k.delete_value("Moonblast"));
 }
 
-fn shift_held() -> bool {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
-    // High bit set = currently down.
-    (unsafe { GetAsyncKeyState(VK_SHIFT as i32) } as u16 & 0x8000) != 0
-}
-
 /// Whether a shell (Explorer's desktop) is currently running.
 fn shell_running() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::GetShellWindow;
@@ -180,10 +174,10 @@ fn park() -> ! {
 /// Entry point for `Moonblast.exe --shell`, i.e. what Winlogon actually runs.
 ///
 /// Runs the launcher, and whatever happens to it — clean exit, crash, or the user
-/// closing it — hands a working desktop back afterwards. Holding Shift at sign-in,
-/// or three failed starts in a row, disables the takeover entirely.
+/// closing it — hands a working desktop back afterwards. Three failed starts in
+/// a row disables the takeover entirely.
 pub fn run_shell_stub() -> ! {
-    if shift_held() || crash_count() >= MAX_SHELL_CRASHES {
+    if crash_count() >= MAX_SHELL_CRASHES {
         let _ = set_replace_desktop(false);
         ensure_desktop();
         park();
