@@ -1,5 +1,7 @@
 # Moonblast
 
+![Moonblast - Apps view](.github/assets/screenshot.jpg)
+
 Moonlight meets Xbox Fullscreen Experience. A lightweight launcher focused on simple apps launching and streaming using [Moonlight](https://moonlight-stream.org/).
 
 My main goal is to have lightweight desktop replacement on my streaming only laptop.
@@ -29,7 +31,7 @@ This project is about 95% AI generated
 - **Frontend**: React 19 + TypeScript + Tailwind
 - **Backend**: Tauri 2 (Rust)
 - WebView2 for the window
-- Device controls straight through native Win32/WinRT APIs - no daemons, no third-party SDKs
+- Device controls run straight through native Win32/WinRT APIs - no daemons, no third-party SDKs
 
 ## Getting started
 
@@ -62,7 +64,14 @@ The helper locates Visual Studio via `vswhere.exe` and resolves `clang.exe` from
 | Move focus | Arrows + D-Pad or Left Analog |
 | Activate | `Enter` / `Space` / `(A)` |
 | Close modal | `Escape` / `(B)` |
-| Context menu | RMB / `Shift + F10` / `(X)`
+| Context menu | RMB / `Shift + F10` / `(X)` |
+
+## Possible incompatibility
+
+Due to my limited range of devices, I can only test this on:
+
+- Ryzen 5800x PC (x64)
+- Snapdragon X1 Laptop (ARM64)
 
 ## Licence
 
