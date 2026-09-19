@@ -1,8 +1,11 @@
 [package]
 name = "tauri-app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "A lightweight Windows Fullscreen Mode / Big Picture-style launcher centered around Moonlight streaming."
+authors = ["Jukrapop K <jukrapopk@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/jukrapopk/moonblast"
+homepage = "https://github.com/jukrapopk/moonblast"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

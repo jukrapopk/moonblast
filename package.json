@@ -1,8 +1,28 @@
 {
-  "name": "tauri-app",
+  "name": "moonblast",
+  "description": "A lightweight Windows Fullscreen Mode / Big Picture-style launcher centered around Moonlight streaming.",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/jukrapopk/moonblast",
+  "bugs": "https://github.com/jukrapopk/moonblast/issues",
+  "author": {
+    "name": "Jukrapop K",
+    "email": "jukrapopk@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jukrapopk/moonblast.git"
+  },
+  "keywords": [
+    "tauri",
+    "launcher",
+    "moonlight",
+    "game-streaming",
+    "fullscreen",
+    "windows"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
