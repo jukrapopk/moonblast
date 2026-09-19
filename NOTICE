@@ -1,0 +1,25 @@
+Moonblast
+Copyright (c) 2026 Jukrapop K
+
+This product includes software developed by third parties. Their
+copyright notices and license terms are reproduced below.
+
+────────────────────────────────────────────────────────────────────
+lightningcss
+────────────────────────────────────────────────────────────────────
+Copyright (c) 2021, the lightningcss authors.
+
+This product includes lightningcss (https://github.com/parcel-bundler/lightningcss),
+licensed under the Mozilla Public License, v. 2.0.
+
+You may obtain a copy of the MPL-2.0 license at
+<https://www.mozilla.org/en-US/MPL/2.0/>.
+
+The source code for lightningcss is available at
+<https://github.com/parcel-bundler/lightningcss>.
+
+In MPL-2.0 terms: lightningcss is distributed as a build-time tool
+used to produce this project's bundled CSS. The lightningcss source
+code is not bundled with Moonblast's distributed binary; only its
+output (minified CSS) is. Modifications to lightningcss itself, if
+any, are not redistributed under this project.
