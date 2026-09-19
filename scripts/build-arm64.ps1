@@ -41,10 +41,17 @@ $repo     = Find-RepoRoot
 
 # Locate Visual Studio via `vswhere.exe`, which ships with every VS install
 # (Community / Pro / Enterprise / Build Tools) regardless of drive letter or
-# edition. Falls back to the standard install location as a last resort.
+# edition. We deliberately do NOT use `-requires VC.Tools.x86.x64` (or any
+# specific workload): an ARM64 cross-build needs the ARM64 tools on top of
+# x64, but a per-workload filter would just make vswhere return empty for
+# installs that have a different subset, masking the real failure. Let
+# vcvarsall.bat `x64_arm64` fail loudly with a clear error if the ARM64
+# workload isn't present — that's the same "loud failure" UX we prefer
+# elsewhere (see SECURITY.md). Falls back to the standard install path
+# only as a last resort when vswhere.exe itself isn't on the machine.
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (Test-Path $vswhere) {
-  $vsInstall = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  $vsInstall = & $vswhere -latest -property installationPath
   if ($LASTEXITCODE -eq 0 -and $vsInstall) {
     $vcvars = Join-Path $vsInstall "VC\Auxiliary\Build\vcvarsall.bat"
   } else {
