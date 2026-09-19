@@ -103,24 +103,87 @@ function useAppIcon(
   return skip ? null : icon;
 }
 
+/* --------------------------- tile icon + body ------------------------ */
+
+/**
+ * Resolve the icon source for a shortcut at the level above the
+ * hook call — covers the static cases (custom file, SteamGridDB
+ * pinned). The fetched desktop / auto icon (via `useAppIcon`) is
+ * owned by the caller because it depends on `useAppIcon`'s cache
+ * + IPC lifecycle. Returns null when nothing static is set, which
+ * is the signal to fall through to the fetched icon.
+ */
+function resolveShortcutIcon(shortcut: Shortcut): string | null {
+  if (shortcut.custom_icon) return convertFileSrc(shortcut.custom_icon);
+  if (shortcut.steamgrid_icon) {
+    // Local `.icons` cache path or legacy remote URL — see the
+    // migration effect in the parent for the latter's localization.
+    return shortcut.steamgrid_icon.startsWith("http")
+      ? shortcut.steamgrid_icon
+      : convertFileSrc(shortcut.steamgrid_icon);
+  }
+  return null;
+}
+
+/**
+ * The icon-square + label pair that appears inside every tile — both
+ * the in-grid AppTile and the DragOverlayTile render this exact
+ * shape, so a held tile preview matches the source it was lifted
+ * from pixel-for-pixel. The outer chrome (button styling vs overlay
+ * chrome) is owned by each caller.
+ */
+function ShortcutTileBody({
+  shortcut,
+  bust,
+}: {
+  shortcut: Shortcut;
+  bust: number;
+}) {
+  const staticIcon = resolveShortcutIcon(shortcut);
+  const hasOverride = staticIcon !== null;
+  // `useAppIcon` is a hook so it has to be called at component
+  // scope. When a static icon is set we skip the fetch; otherwise
+  // we ask the Rust side for the desktop / auto icon. The two
+  // branches live here so the AppTile and DragOverlayTile callers
+  // don't have to duplicate the precedence logic.
+  const fetchedIcon = useAppIcon(
+    labelOf(shortcut),
+    shortcut.path,
+    bust,
+    shortcut.use_desktop_icon && !hasOverride,
+    hasOverride,
+  );
+  const icon = staticIcon ?? fetchedIcon;
+  const name = labelOf(shortcut);
+  return (
+    <>
+      <div
+        className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text) transition-transform group-focus-visible:scale-[1.04]"
+        style={icon ? undefined : { background: gradientFor(name) }}
+      >
+        {icon ? (
+          <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
+        ) : (
+          name.charAt(0)
+        )}
+      </div>
+      <div className="mt-2 truncate text-center text-xs font-medium text-(--color-text)">
+        {name}
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------ tile ---------------------------------- */
 
 function AppTile({
-  name,
-  path,
-  customIcon,
-  steamgridIcon,
-  useDesktopIcon,
+  shortcut,
   bust,
   reorderMode,
   onLaunch,
   onContextMenu,
 }: {
-  name: string;
-  path: string;
-  customIcon: string | null;
-  steamgridIcon: string | null;
-  useDesktopIcon: boolean;
+  shortcut: Shortcut;
   bust: number;
   reorderMode: boolean;
   onLaunch: () => void;
@@ -142,45 +205,25 @@ function AppTile({
     transition,
     isDragging,
   } = useSortable({
-    id: path,
+    id: shortcut.path,
     disabled: !reorderMode,
   });
 
-  // Custom file icon > pinned SteamGridDB icon > desktop/auto.
-  const hasOverride = !!(customIcon || steamgridIcon);
-  const forceDesktop = useDesktopIcon && !hasOverride;
-  const fetchedIcon = useAppIcon(name, path, bust, forceDesktop, hasOverride);
-  // steamgrid_icon is a local `.icons` cache path (or a legacy remote URL that
-  // gets localized by the migration effect — prefer raw while still remote).
-  const steamgridSrc = steamgridIcon
-    ? steamgridIcon.startsWith("http")
-      ? steamgridIcon
-      : convertFileSrc(steamgridIcon)
-    : null;
-  const icon = customIcon ? convertFileSrc(customIcon) : (steamgridSrc ?? fetchedIcon);
-
   // The tile is a `<button>` so the LRUD spatial library picks it up
   // natively (it scans `button` / `input` / `[tabindex]` / `a`). The
-  // outer `<motion.div>` is for the entry/exit animation only — it
-  // isn't itself focusable and isn't marked `lrud-ignore` because the
-  // library's "ignore if contained in" rule would filter out its
-  // child button.
+  // outer `<div>` is the dnd-kit node — its transform / transition
+  // are owned by the library via the `style` prop below.
   return (
     <div
       ref={setNodeRef}
-      // Plain `<div>` wrapper. dnd-kit's `transform` and
-      // `transition` own this element's position via the `style`
-      // prop below — using `motion.div` here would race with
-      // dnd-kit because Framer Motion's `animate` prop writes
-      // `transform` on every frame, overriding the inline value.
-      // The entry / exit fade moved down to the inner `<motion.div>`
-      // so AnimatePresence still fires for tiles added or removed.
       // `transform` from useSortable positions the tile while it's
       // being dragged and slides non-active items aside while a drag
       // is in flight (the "push to preview" effect: dragging 4 over
       // 2 in [1,2,3,4,5] makes 2 and 3 visibly shift right to show
       // the insertion point). `transition` is the CSS transition
-      // string dnd-kit returns for the post-drop settle.
+      // string dnd-kit returns for the post-drop settle. We avoid
+      // wrapping this in `motion.div` because Framer Motion's
+      // `animate` would overwrite the inline `transform` every frame.
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -208,42 +251,21 @@ function AppTile({
         // drag never activates and the native click fires — but only
         // when reorder mode is off. In reorder mode we explicitly
         // suppress launch so a click is treated as a no-op (the user
-        // is supposed to drag, not click); they can still launch via
-        // Done → click tile. Keyboard activation is gated on
-        // reorderMode by the parent: we drop listeners when reorder
-        // is off, and the keyboard sensor intercepts Space / Enter
-        // when on.
+        // is supposed to drag, not click).
         onClick={reorderMode ? undefined : onLaunch}
-        // Spread dnd-kit's listeners + ARIA attributes onto the
-        // button. `{...listeners}` includes the onPointerDown that
-        // starts the drag (after the activation distance is met) and
-        // the keyboard handler for Space / Enter pickup-and-drop.
         {...listeners}
         {...attributes}
-        aria-label={name}
-        // Entry / exit fade now lives on the button so AnimatePresence
-        // still drives it when a tile is added (e.g. `Add` modal
-        // commits) or removed (e.g. context-menu Remove). The wrapper
-        // div doesn't animate in / out — dnd-kit owns its transform.
+        aria-label={labelOf(shortcut)}
+        // Entry / exit fade lives on the button (not the dnd-kit
+        // wrapper) so AnimatePresence still drives it when a tile
+        // is added (Add modal commits) or removed (Remove).
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
         transition={{ duration: 0.15 }}
         className={`relative block w-full overflow-hidden rounded-2xl p-3 outline-none transition-all duration-150 focus-visible:bg-(--color-accent-soft) focus-visible:shadow-[0_12px_32px_-12px_var(--color-overlay)] ${reorderMode ? "cursor-grab active:cursor-grabbing" : ""}`}
       >
-        <div
-          className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text) transition-transform group-focus-visible:scale-[1.04]`}
-          style={icon ? undefined : { background: gradientFor(name) }}
-        >
-          {icon ? (
-            <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
-          ) : (
-            name.charAt(0)
-          )}
-        </div>
-        <div className="mt-2 truncate text-center text-xs font-medium text-(--color-text)">
-          {name}
-        </div>
+        <ShortcutTileBody shortcut={shortcut} bust={bust} />
       </motion.button>
     </div>
   );
@@ -259,39 +281,9 @@ function AppTile({
  * (keyboard) — we don't manage its transform here.
  */
 function DragOverlayTile({ shortcut, bust }: { shortcut: Shortcut; bust: number }) {
-  const hasOverride = !!(shortcut.custom_icon || shortcut.steamgrid_icon);
-  const forceDesktop = shortcut.use_desktop_icon && !hasOverride;
-  const fetchedIcon = useAppIcon(
-    labelOf(shortcut),
-    shortcut.path,
-    bust,
-    forceDesktop,
-    hasOverride,
-  );
-  const steamgridSrc = shortcut.steamgrid_icon
-    ? shortcut.steamgrid_icon.startsWith("http")
-      ? shortcut.steamgrid_icon
-      : convertFileSrc(shortcut.steamgrid_icon)
-    : null;
-  const icon = shortcut.custom_icon
-    ? convertFileSrc(shortcut.custom_icon)
-    : (steamgridSrc ?? fetchedIcon);
-  const name = labelOf(shortcut);
   return (
     <div className="rounded-2xl border border-(--color-accent) bg-(--color-surface) p-3 shadow-[0_20px_50px_-12px_var(--color-overlay)]">
-      <div
-        className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md text-3xl font-semibold text-(--color-text)"
-        style={icon ? undefined : { background: gradientFor(name) }}
-      >
-        {icon ? (
-          <img src={icon} alt="" draggable={false} className="h-full w-full object-cover" />
-        ) : (
-          name.charAt(0)
-        )}
-      </div>
-      <div className="mt-2 truncate text-center text-xs font-medium text-(--color-text)">
-        {name}
-      </div>
+      <ShortcutTileBody shortcut={shortcut} bust={bust} />
     </div>
   );
 }
@@ -916,11 +908,7 @@ export function AppsView() {
                     {filtered.map((a) => (
                       <AppTile
                         key={a.path}
-                        name={labelOf(a)}
-                        path={a.path}
-                        customIcon={a.custom_icon}
-                        steamgridIcon={a.steamgrid_icon}
-                        useDesktopIcon={a.use_desktop_icon}
+                        shortcut={a}
                         bust={bust}
                         reorderMode={reorderMode}
                         onLaunch={() => launch(a)}
