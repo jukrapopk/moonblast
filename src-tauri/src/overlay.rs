@@ -8,16 +8,25 @@
 //! - The window is `focusable(false)` (`WS_EX_NOACTIVATE`) — it can receive
 //!   mouse clicks but never becomes the foreground window.
 //! - Because it can't hold keyboard focus, its own React UI can't receive key
-//!   events. While it is visible we register the navigation keys as *global
-//!   hotkeys* (arrows / Enter / Escape) and forward them to the webview as
-//!   `menu-key` events. Hotkeys are focus-independent — a `WH_KEYBOARD_LL` hook
-//!   goes deaf whenever a Chromium/WebView2 window is in the foreground (the
-//!   deafness described in `mediakeys.rs`), which is the case whenever the menu
-//!   floats over Moonblast's own UI — so the hook is installed only as a
-//!   fallback when the hotkeys can't be claimed.
-//! - The summon hotkey is a `RegisterHotKey` global shortcut (works regardless
-//!   of which window is focused), armed for the whole app lifetime so it can
-//!   always bring the menu up even when `show_floating_menu` is off.
+//!   events, so the keys are read in Rust and forwarded to the webview as
+//!   `menu-key` events. **Two channels, both always live**, because each one
+//!   goes deaf in a case the other covers:
+//!   - a `RegisterHotKey` global shortcut (`HK_MENU` for the summon chord, the
+//!     `NAV_HOTKEYS` for the menu's arrows / Enter / Escape / Space), which is
+//!     focus-independent and armed for the whole app lifetime — but is
+//!     **suppressed while a foreground app has grabbed the keyboard**, which is
+//!     exactly what a running stream does (that is why a summon over Moonlight
+//!     used to do nothing);
+//!   - a `WH_KEYBOARD_LL` hook (`key_proc`), which is *not* suppressed by an
+//!     app's keyboard grab — neither its raw-input registration nor its own
+//!     hook affects our callback — so it is what actually sees the keys over a
+//!     stream. It goes deaf over a Chromium/WebView2 window (the deafness
+//!     described in `mediakeys.rs`), which is the case while the menu floats
+//!     over Moonblast's own UI, where the hotkey covers.
+//! - The hook **swallows** whatever it handles, so a keystroke can only ever
+//!   take one channel: if the hook saw it there is no `WM_HOTKEY` left to
+//!   deliver, and if it didn't, the hotkey is the one that fires. A short time
+//!   guard in the `WM_HOTKEY` handler also covers the case where both deliver.
 //!
 //! Actions either run as Rust commands (Disconnect / End Session, which reuse
 //! the stream teardown) or inject Moonlight's own `Ctrl+Alt+Shift+<key>`
@@ -26,7 +35,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -36,14 +45,15 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VK_CONTROL, VK_MENU, VK_SHIFT,
+    GetAsyncKeyState, RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_KEYBOARD,
+    KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
+    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
-    PeekMessageW, PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW, TranslateMessage,
-    UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
-    WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW,
+    SetForegroundWindow, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
+    MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN,
+    WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::moonblast_log;
@@ -64,11 +74,9 @@ const HEIGHT: f64 = 410.0;
 /// Global-hotkey id for the summon shortcut (0x0000–0xBFFF).
 const HK_MENU: i32 = 0x2100;
 
-/// Nav keys, registered as global hotkeys while the menu is open. Hotkeys fire
-/// regardless of which window has focus — unlike the low-level keyboard hook,
-/// which goes deaf whenever a Chromium/WebView2 window is in the foreground
-/// (the same issue `mediakeys.rs` hit). The hook is kept only as a fallback for
-/// when these are already claimed.
+/// Nav keys, kept as global hotkeys (the second channel, see the module doc)
+/// while the menu is open — they cover the case where the low-level hook is the
+/// deaf one (a Chromium/WebView2 window in the foreground).
 const NAV_HOTKEYS: [(i32, u32); 7] = [
     (0x2201, 0x26), // up
     (0x2202, 0x28), // down
@@ -84,6 +92,7 @@ const WM_APP_MENU_HOOK: u32 = WM_APP + 20; // wParam: 1 arm hook, 0 disarm
 const WM_APP_MENU_NAV: u32 = WM_APP + 21; // wParam: VK forwarded to the webview
 const WM_APP_MENU_RELOAD: u32 = WM_APP + 22; // re-register the summon hotkey
 const WM_APP_MENU_OUTSIDE: u32 = WM_APP + 23; // click landed outside the overlay
+const WM_APP_MENU_SUMMON: u32 = WM_APP + 24; // the key hook matched the summon chord
 
 static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -92,21 +101,43 @@ static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static APPLIED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 /// The hotkey we want registered (parsed from settings).
 static DESIRED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
+/// `DESIRED` mirrored into atomics so the low-level hook can match the chord
+/// without taking a lock on every keystroke (vk = 0 disables the match).
+static HOTKEY_VK: AtomicU32 = AtomicU32::new(0);
+static HOTKEY_MODS: AtomicU32 = AtomicU32::new(0);
+/// True while the summon key is held — the hook sees auto-repeat as a stream of
+/// key-downs, and the hotkey it stands in for never repeats.
+static SUMMON_HELD: AtomicBool = AtomicBool::new(false);
+/// When the hook last handled the summon chord, so a `WM_HOTKEY` for the same
+/// press (if the system delivered both) is ignored.
+static SUMMON_VIA_HOOK_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Anchor the overlay to the monitor centre instead of the trigger button.
 /// Set by the Power view; cleared on hide so the next summon anchors again.
 static CENTERED: AtomicBool = AtomicBool::new(false);
-static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// The keyboard hook — installed once for the app lifetime.
+static HOOK_KEY: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// The mouse hook — armed only while the menu is up (see `mouse_proc`).
 static HOOK_MOUSE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-/// True while nav is driven by global hotkeys (the preferred path) rather than
-/// the low-level keyboard-hook fallback.
-static NAV_VIA_HOTKEYS: AtomicBool = AtomicBool::new(false);
+/// True while the nav hotkeys are registered (they are only claimed while the
+/// menu is up; the hook covers nav the rest of the time by not matching).
+static NAV_HOTKEYS_REGISTERED: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
 /// Physical-pixel rects of the two overlay windows, kept in atomics so the
 /// low-level mouse hook can test a click without ever taking a lock.
-static MENU_RECT: [AtomicI32; 4] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
+static MENU_RECT: [AtomicI32; 4] = [
+    AtomicI32::new(0),
+    AtomicI32::new(0),
+    AtomicI32::new(0),
+    AtomicI32::new(0),
+];
 static MENU_RECT_VALID: AtomicBool = AtomicBool::new(false);
-static BUTTON_RECT: [AtomicI32; 4] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
+static BUTTON_RECT: [AtomicI32; 4] = [
+    AtomicI32::new(0),
+    AtomicI32::new(0),
+    AtomicI32::new(0),
+    AtomicI32::new(0),
+];
 static BUTTON_RECT_VALID: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, serde::Serialize)]
@@ -662,7 +693,11 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
                 x = x.clamp(mx, (mx + mw - anchor_w).max(mx));
                 if y + h > my + mh {
                     let above = by - gap - h;
-                    y = if above >= my { above } else { (my + mh - h).max(my) };
+                    y = if above >= my {
+                        above
+                    } else {
+                        (my + mh - h).max(my)
+                    };
                 }
                 y = y.max(my);
             }
@@ -743,6 +778,7 @@ fn thread_main() {
         THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
     }
     apply_hotkey();
+    install_key_hook();
 
     loop {
         let mut msg: MSG = unsafe { std::mem::zeroed() };
@@ -754,8 +790,18 @@ fn thread_main() {
             WM_HOTKEY => {
                 let id = msg.wParam as i32;
                 if id == HK_MENU {
-                    if let Some(app) = app_handle() {
-                        toggle_now(&app);
+                    // Our hook swallows the chord when it sees it, so reaching
+                    // here means the hook was bypassed (a Chromium/WebView2
+                    // window in the foreground). Guard anyway, in case the
+                    // system delivered both.
+                    if !summon_handled_by_hook() {
+                        if let Some(app) = app_handle() {
+                            moonblast_log!("overlay: summon via hotkey");
+                            // Window work must not run on this thread — the
+                            // hook callbacks are delivered here, so blocking it
+                            // would delay every keystroke system-wide.
+                            request_toggle(app);
+                        }
                     }
                 } else if let Some(name) = nav_key_for_hotkey(id) {
                     if let Some(app) = app_handle() {
@@ -763,19 +809,25 @@ fn thread_main() {
                     }
                 }
             }
+            WM_APP_MENU_SUMMON => {
+                if let Some(app) = app_handle() {
+                    moonblast_log!("overlay: summon via key hook");
+                    request_toggle(app);
+                }
+            }
             WM_APP_MENU_NAV => {
-                if let (Some(app), Some(name)) =
-                    (app_handle(), nav_key_name(msg.wParam as u32))
-                {
+                if let (Some(app), Some(name)) = (app_handle(), nav_key_name(msg.wParam as u32)) {
                     let _ = app.emit_to(LABEL, "menu-key", MenuKey { key: name.into() });
                 }
             }
             WM_APP_MENU_HOOK => set_hook(msg.wParam == 1),
             WM_APP_MENU_RELOAD => apply_hotkey(),
             WM_APP_MENU_OUTSIDE => {
-                if let Some(app) = app_handle() {
-                    if VISIBLE.load(Ordering::SeqCst) {
-                        hide_now(&app);
+                if VISIBLE.load(Ordering::SeqCst) {
+                    // Hop off this thread: hiding can create/show the trigger
+                    // button window, and the hook callbacks are delivered here.
+                    if let Some(app) = app_handle() {
+                        request_hide(app);
                     }
                 }
             }
@@ -788,17 +840,42 @@ fn thread_main() {
 
     set_hook(false);
     unregister_hotkey();
+    unhook_key();
     THREAD_ID.store(0, Ordering::SeqCst);
     moonblast_log!("overlay: hotkey thread exiting");
 }
 
+/// Did the low-level hook handle the summon chord within the last moment?
+fn summon_handled_by_hook() -> bool {
+    SUMMON_VIA_HOOK_AT
+        .lock()
+        .map(|t| t.is_some_and(|t| t.elapsed() < Duration::from_millis(400)))
+        .unwrap_or(false)
+}
+
 /// Unregister the applied hotkey (if any) and register the desired one.
+///
+/// The chord is published to the hook's atomics either way: the hook is the
+/// channel that has to work **when the hotkey can't be claimed**, so a failed
+/// `RegisterHotKey` must not leave the hook without a chord to match.
 fn apply_hotkey() {
     let desired = DESIRED.lock().ok().and_then(|g| *g);
     let mut applied = match APPLIED.lock() {
         Ok(a) => a,
         Err(_) => return,
     };
+    // Always cheap to redo: the atomics are idempotent, and the hook reads them
+    // on every keystroke.
+    match desired {
+        Some((mods, vk)) => {
+            HOTKEY_MODS.store(mods, Ordering::SeqCst);
+            HOTKEY_VK.store(vk, Ordering::SeqCst);
+        }
+        None => {
+            HOTKEY_VK.store(0, Ordering::SeqCst);
+            HOTKEY_MODS.store(0, Ordering::SeqCst);
+        }
+    }
     if *applied == desired {
         return;
     }
@@ -809,20 +886,20 @@ fn apply_hotkey() {
     }
     *applied = None;
     if let Some((mods, vk)) = desired {
-        let ok = unsafe {
-            RegisterHotKey(std::ptr::null_mut(), HK_MENU, mods | MOD_NOREPEAT, vk)
-        };
+        let ok = unsafe { RegisterHotKey(std::ptr::null_mut(), HK_MENU, mods | MOD_NOREPEAT, vk) };
         if ok != 0 {
             *applied = Some((mods, vk));
             moonblast_log!("overlay: hotkey registered (mods=0x{mods:04X}, vk=0x{vk:02X})");
         } else {
             let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-            moonblast_log!("overlay: RegisterHotKey failed (err={err})");
+            moonblast_log!("overlay: RegisterHotKey failed (err={err}); the key hook carries it");
         }
     }
 }
 
 fn unregister_hotkey() {
+    HOTKEY_VK.store(0, Ordering::SeqCst);
+    HOTKEY_MODS.store(0, Ordering::SeqCst);
     if let Ok(mut applied) = APPLIED.lock() {
         if applied.is_some() {
             unsafe {
@@ -843,36 +920,49 @@ fn set_hook(arm: bool) {
     }
 }
 
-/// Nav input: global hotkeys first (focus-independent), low-level keyboard hook
-/// only as a fallback. The hook is deaf while a Chromium/WebView2 window has
-/// focus, which is exactly the "arrows sometimes don't work" symptom.
-fn arm_nav() {
-    if register_nav_hotkeys() {
-        NAV_VIA_HOTKEYS.store(true, Ordering::SeqCst);
-        moonblast_log!("overlay: nav hotkeys registered");
+/// Install the keyboard hook, once, for the app lifetime: it carries the summon
+/// chord (the hotkey is suppressed while a stream holds the keyboard) and the
+/// menu's nav keys.
+fn install_key_hook() {
+    if !HOOK_KEY.load(Ordering::SeqCst).is_null() {
         return;
     }
     let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
-    let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(nav_proc), hmod, 0) };
+    let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_proc), hmod, 0) };
     if hook.is_null() {
-        moonblast_log!("overlay: nav input unavailable (hotkeys + hook both failed)");
+        let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        moonblast_log!("overlay: keyboard hook install failed (err={err})");
     } else {
-        HOOK.store(hook, Ordering::SeqCst);
-        moonblast_log!("overlay: nav hotkeys taken; using keyboard-hook fallback");
+        HOOK_KEY.store(hook, Ordering::SeqCst);
+        moonblast_log!("overlay: keyboard hook installed");
     }
 }
 
-fn disarm_nav() {
-    if NAV_VIA_HOTKEYS.swap(false, Ordering::SeqCst) {
-        unregister_nav_hotkeys();
-        moonblast_log!("overlay: nav hotkeys unregistered");
-    }
-    let hook = HOOK.swap(std::ptr::null_mut(), Ordering::SeqCst);
+fn unhook_key() {
+    let hook = HOOK_KEY.swap(std::ptr::null_mut(), Ordering::SeqCst);
     if !hook.is_null() {
         unsafe {
             UnhookWindowsHookEx(hook);
         }
-        moonblast_log!("overlay: keyboard hook released");
+    }
+}
+
+/// Nav keys as global hotkeys. Claiming them is best-effort: the keyboard hook
+/// covers nav either way, and it never fights the hotkey because it swallows
+/// what it matches (so only one of the two ever sees a given keystroke).
+fn arm_nav() {
+    if register_nav_hotkeys() {
+        NAV_HOTKEYS_REGISTERED.store(true, Ordering::SeqCst);
+        moonblast_log!("overlay: nav hotkeys registered");
+    } else {
+        moonblast_log!("overlay: nav hotkeys taken; the key hook covers nav");
+    }
+}
+
+fn disarm_nav() {
+    if NAV_HOTKEYS_REGISTERED.swap(false, Ordering::SeqCst) {
+        unregister_nav_hotkeys();
+        moonblast_log!("overlay: nav hotkeys unregistered");
     }
 }
 
@@ -989,21 +1079,73 @@ fn nav_key_name(vk: u32) -> Option<&'static str> {
     })
 }
 
-/// Low-level hook callback: swallow the nav keys (both down and up, so the
-/// game never sees a stuck key) and forward the key-downs to the menu thread.
-unsafe extern "system" fn nav_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+/// True when `vk` is the configured summon key with exactly its modifiers held.
+/// A low-level hook reports one key at a time, so the rest of the chord is read
+/// live with `GetAsyncKeyState`; `RegisterHotKey` matches modifiers exactly, and
+/// so do we.
+fn summon_chord_active(vk: u32) -> bool {
+    let want_vk = HOTKEY_VK.load(Ordering::SeqCst);
+    if want_vk == 0 || vk != want_vk {
+        return false;
+    }
+    let mods = HOTKEY_MODS.load(Ordering::SeqCst);
+    let held = |k: u16| (unsafe { GetAsyncKeyState(k as i32) } as u16 & 0x8000) != 0;
+    held(VK_CONTROL) == (mods & MOD_CONTROL != 0)
+        && held(VK_SHIFT) == (mods & MOD_SHIFT != 0)
+        && held(VK_MENU) == (mods & MOD_ALT != 0)
+        && (held(VK_LWIN) || held(VK_RWIN)) == (mods & MOD_WIN != 0)
+}
+
+/// Low-level keyboard hook, installed for the app lifetime. It handles the two
+/// things the overlay needs and **swallows** them, so the game never sees the
+/// summon chord or (while the menu is up) the nav keys — and so the `WM_HOTKEY`
+/// channel can't deliver the same press twice.
+///
+/// Nav is gated on `VISIBLE`: with the menu down, arrows / Enter / Escape /
+/// Space must reach the stream untouched. With the menu up they drive the menu
+/// instead, exactly like `useFocusOnHover` does in the launcher.
+///
+/// The callback must stay cheap — it runs on our thread, and the system strips a
+/// hook whose callback blocks (`LowLevelHooksTimeout`). It only posts a message.
+unsafe extern "system" fn key_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
         let msg = wparam as u32;
         let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
         let up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
         if down || up {
             let kb = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
-            if nav_key_name(kb.vkCode).is_some() {
+            let vk = kb.vkCode;
+            // Summon chord. Swallowed on the way down *and* on the matching
+            // release, so the chord never sticks in the game. Auto-repeat from a
+            // held key arrives as more key-downs — swallow them, but only act on
+            // the transition, matching the hotkey's `MOD_NOREPEAT`.
+            if down && summon_chord_active(vk) {
+                if !SUMMON_HELD.swap(true, Ordering::SeqCst) {
+                    if let Ok(mut at) = SUMMON_VIA_HOOK_AT.lock() {
+                        *at = Some(Instant::now());
+                    }
+                    let tid = THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        unsafe {
+                            PostThreadMessageW(tid, WM_APP_MENU_SUMMON, 0, 0);
+                        }
+                    }
+                }
+                return 1;
+            }
+            if up
+                && vk == HOTKEY_VK.load(Ordering::SeqCst)
+                && SUMMON_HELD.swap(false, Ordering::SeqCst)
+            {
+                return 1;
+            }
+            // Nav keys — only while the menu is up.
+            if VISIBLE.load(Ordering::SeqCst) && nav_key_name(vk).is_some() {
                 if down {
                     let tid = THREAD_ID.load(Ordering::SeqCst);
                     if tid != 0 {
                         unsafe {
-                            PostThreadMessageW(tid, WM_APP_MENU_NAV, kb.vkCode as WPARAM, 0);
+                            PostThreadMessageW(tid, WM_APP_MENU_NAV, vk as WPARAM, 0);
                         }
                     }
                 }
@@ -1011,7 +1153,7 @@ unsafe extern "system" fn nav_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
             }
         }
     }
-    unsafe { CallNextHookEx(HOOK.load(Ordering::SeqCst), code, wparam, lparam) }
+    unsafe { CallNextHookEx(HOOK_KEY.load(Ordering::SeqCst), code, wparam, lparam) }
 }
 
 // ---------------------------------------------------------------------------
@@ -1280,9 +1422,7 @@ pub fn stream_menu_center(app: AppHandle, centered: bool) {
         position(&app, &win);
         return;
     }
-    if let Some((mx, my, mw, mh)) =
-        stream_monitor_rect(&app).or_else(|| main_monitor_rect(&app))
-    {
+    if let Some((mx, my, mw, mh)) = stream_monitor_rect(&app).or_else(|| main_monitor_rect(&app)) {
         let _ = win.set_position(PhysicalPosition::new(mx, my));
         let _ = win.set_size(tauri::PhysicalSize::new(mw as u32, mh as u32));
         set_rect(&MENU_RECT, &MENU_RECT_VALID, mx, my, mw, mh);
