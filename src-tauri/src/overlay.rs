@@ -56,9 +56,10 @@ pub const LABEL: &str = "stream-menu";
 const DEFAULT_HOTKEY: &str = "Ctrl+Shift+F10";
 
 const WIDTH: f64 = 300.0;
-/// Sized to fit the 9-item list + the open Mouse Mode submenu (2 extra rows)
-/// + footer (no header row).
-const HEIGHT: f64 = 620.0;
+/// Seed size only — the frontend shrink-wraps the window to the list (see
+/// `StreamMenu.tsx`), and `position` then reads the real size back off the
+/// window. This just avoids a wrong-sized first frame.
+const HEIGHT: f64 = 410.0;
 
 /// Global-hotkey id for the summon shortcut (0x0000–0xBFFF).
 const HK_MENU: i32 = 0x2100;
@@ -566,8 +567,15 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
         .get_webview_window("main")
         .and_then(|m| m.scale_factor().ok())
         .unwrap_or(1.0);
-    let w = (WIDTH * scale).round() as i32;
-    let h = (HEIGHT * scale).round() as i32;
+    let (w, h) = win
+        .outer_size()
+        .ok()
+        .map(|s| (s.width as i32, s.height as i32))
+        .filter(|(w, h)| *w > 0 && *h > 0)
+        .unwrap_or((
+            (WIDTH * scale).round() as i32,
+            (HEIGHT * scale).round() as i32,
+        ));
     let monitor = stream_monitor_rect(app).or_else(|| main_monitor_rect(app));
 
     if let Some((bx, by, bw, bh)) = button_rect(app) {

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   ArrowsIn,
   CaretRight,
@@ -54,6 +56,9 @@ interface Row {
   item: Item;
   option?: SubOption;
 }
+
+/** Menu window width in logical px (mirrors `overlay::WIDTH`). */
+const MENU_WIDTH = 300;
 
 /**
  * Contents of the `stream-menu` window — the Parsec-style floating menu that
@@ -221,6 +226,34 @@ export function StreamMenu() {
   );
   runRef.current = (i: number) => void run(i);
 
+  // Shrink-wrap the window to the list. The panel is content-sized (`items-start`
+  // on the root stops it stretching), so it can be measured directly and the
+  // window resized to match; it is then re-anchored to the button, because Rust
+  // positions the menu from the window's real size.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const appliedHeight = useRef(0);
+  useEffect(() => {
+    const apply = () => {
+      const panel = panelRef.current;
+      const root = rootRef.current;
+      if (!panel || !root) return;
+      const cs = getComputedStyle(root);
+      const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const height = Math.ceil(panel.getBoundingClientRect().height + pad);
+      if (height <= 0 || Math.abs(height - appliedHeight.current) < 1) return;
+      appliedHeight.current = height;
+      void getCurrentWebviewWindow()
+        .setSize(new LogicalSize(MENU_WIDTH, height))
+        .then(() => invoke("stream_menu_follow"))
+        .catch(() => {});
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    if (panelRef.current) observer.observe(panelRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   /** Enter / click on a row: expand a submenu, otherwise run it. */
   const activate = useCallback((i: number) => {
     const row = rowsRef.current[i];
@@ -289,8 +322,11 @@ export function StreamMenu() {
   }, [index]);
 
   return (
-    <div className="flex h-full w-full p-1.5">
-      <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl">
+    <div ref={rootRef} className="flex h-full w-full items-start p-1.5">
+      <div
+        ref={panelRef}
+        className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl"
+      >
         <div className="space-y-0.5 p-1.5">
           {rows.map((row, i) => {
             const selected = i === index;
@@ -343,9 +379,14 @@ export function StreamMenu() {
           })}
         </div>
 
-        <div className="border-t border-(--color-border) px-4 py-2 text-center text-xs text-(--color-muted)">
-          {flash ?? "↑↓ Navigate · ←→ Options · Enter Select · Esc Close"}
-        </div>
+        {/* Errors / confirmations only — no permanent footer. */}
+        {flash && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2">
+            <span className="rounded-full bg-(--color-surface-2) px-3 py-1 text-xs font-medium text-(--color-text) shadow-lg">
+              {flash}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
