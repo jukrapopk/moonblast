@@ -39,6 +39,8 @@ mod shell;
 mod theme;
 mod wifi;
 mod audio;
+mod mediakeys;
+mod osd;
 
 pub use shell::run_shell_stub;
 
@@ -2380,6 +2382,9 @@ static EXPLORER_KILLED: AtomicBool = AtomicBool::new(false);
 
 /// Kill or restart the Windows shell (Explorer) to hide/show the taskbar +
 /// desktop. `suppress_shell(true)` hides; `suppress_shell(false)` restores.
+/// Also arms/disarms the volume-key hook (`mediakeys`), because Explorer is
+/// what normally handles the hardware volume keys + its flyout — with no
+/// shell they'd be dead.
 fn suppress_shell(hidden: bool) {
     if hidden {
         let _ = cmd::spawn_detached("taskkill.exe", &["/f", "/im", "explorer.exe"]);
@@ -2387,6 +2392,7 @@ fn suppress_shell(hidden: bool) {
     } else if EXPLORER_KILLED.swap(false, Ordering::SeqCst) {
         let _ = Command::new("explorer.exe").spawn();
     }
+    mediakeys::set_active(hidden);
 }
 
 /// Minimize every visible top-level window except our own, so nothing shows
@@ -2961,6 +2967,12 @@ pub fn run() {
     moonblast_log!("run() entering tauri::Builder");
     tauri::Builder::default()
         .on_window_event(|window, event| {
+            // Only the launcher window drives lifecycle behavior — the volume
+            // OSD is a second window and must not trigger shell restore /
+            // stream teardown when it's destroyed.
+            if window.label() != "main" {
+                return;
+            }
             // If the app is closed while in Immersive Mode, bring the shell back.
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 moonblast_log!("window event: Destroyed");
@@ -2992,6 +3004,13 @@ pub fn run() {
         .setup(|app| {
             app.manage(settings::SettingsState::load(app.handle()));
             app.manage(StreamState::default());
+            // Arm the volume-key handler's app handle so it can emit
+            // `volume-key` once Immersive Mode suppresses Explorer (which is
+            // what normally handles the hardware volume keys + flyout). The
+            // OSD window itself is created lazily when the hook first activates
+            // (see `mediakeys::set_active`), so users who never enter Immersive
+            // Mode don't pay for a second webview.
+            mediakeys::init(app.handle().clone());
             // Drop any stale `HKCU\...\Run\Moonblast` from the previous build
             // that had a Start with Windows toggle — otherwise upgrading
             // users would briefly see two Moonblast.exe processes at

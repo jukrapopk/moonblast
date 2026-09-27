@@ -76,6 +76,14 @@ body,
    * is the standard Windows app behavior and avoids mid-frame flicker. */
 }
 
+/* Volume OSD window: the window itself is transparent with rounded corners —
+ * only the inner card rendered by VolumeOsd should paint. */
+html[data-window="osd"],
+html[data-window="osd"] body,
+html[data-window="osd"] #root {
+  background: transparent;
+}
+
 /* Hide the OS cursor while the user is driving with the keyboard or
  * gamepad. `hideCursor()` (src/input/cursorHider.ts) sets the
  * `data-cursor-hidden` attribute on <body>; the first `mousemove`
