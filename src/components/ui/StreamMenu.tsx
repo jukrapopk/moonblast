@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -40,6 +40,8 @@ interface Item {
   label: string;
   icon: ReactNode;
   danger?: boolean;
+  /** draw a separator rule under this row */
+  dividerAfter?: boolean;
   /** toggle: current state of the checkbox */
   checked?: boolean;
   /** toggle: Moonlight `Ctrl+Alt+Shift+<chord>`; absent for our own setting */
@@ -95,7 +97,14 @@ export function StreamMenu() {
   const items: Item[] = [
     { id: "minimize", kind: "action", label: "Minimize Stream", icon: <ArrowsIn size={19} weight="bold" /> },
     { id: "disconnect", kind: "action", label: "Disconnect", icon: <Plugs size={19} weight="bold" /> },
-    { id: "end_session", kind: "action", label: "End Session", icon: <XCircle size={19} weight="bold" />, danger: true },
+    {
+      id: "end_session",
+      kind: "action",
+      label: "End Session",
+      icon: <XCircle size={19} weight="bold" />,
+      danger: true,
+      dividerAfter: true,
+    },
     {
       id: "stats",
       kind: "toggle",
@@ -125,6 +134,7 @@ export function StreamMenu() {
       kind: "submenu",
       label: "Mouse Mode",
       icon: <Cursor size={19} weight="bold" />,
+      dividerAfter: true,
       children: [
         {
           id: "absolute",
@@ -401,44 +411,46 @@ export function StreamMenu() {
           {items.map((item, i) => {
             const selected = i === index;
             return (
-              <button
-                key={item.id}
-                type="button"
-                ref={(el) => {
-                  rowRefs.current[i] = el;
-                }}
-                onMouseEnter={() => {
-                  setZone("list");
-                  setIndex(i);
-                }}
-                onClick={() => activateRef.current(i)}
-                className={`flex w-full items-center gap-3 rounded-xl py-2.5 pr-3 pl-3 text-left transition-colors ${
-                  selected ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"
-                }`}
-              >
-                <span
-                  className={
-                    item.danger
-                      ? "text-(--color-danger)"
-                      : selected
-                        ? "text-(--color-accent)"
-                        : "text-(--color-muted)"
-                  }
-                >
-                  {item.icon}
-                </span>
-                <span
-                  className={`flex-1 text-sm font-medium ${
-                    item.danger ? "text-(--color-danger)" : "text-(--color-text)"
+              <Fragment key={item.id}>
+                <button
+                  type="button"
+                  ref={(el) => {
+                    rowRefs.current[i] = el;
+                  }}
+                  onMouseEnter={() => {
+                    setZone("list");
+                    setIndex(i);
+                  }}
+                  onClick={() => activateRef.current(i)}
+                  className={`flex w-full items-center gap-3 rounded-xl py-2.5 pr-3 pl-3 text-left transition-colors ${
+                    selected ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"
                   }`}
                 >
-                  {item.label}
-                </span>
-                {item.kind === "toggle" && <Checkbox checked={!!item.checked} />}
-                {item.kind === "submenu" && (
-                  <CaretRight size={14} weight="bold" className="text-(--color-muted)" />
-                )}
-              </button>
+                  <span
+                    className={
+                      item.danger
+                        ? "text-(--color-danger)"
+                        : selected
+                          ? "text-(--color-accent)"
+                          : "text-(--color-muted)"
+                    }
+                  >
+                    {item.icon}
+                  </span>
+                  <span
+                    className={`flex-1 text-sm font-medium ${
+                      item.danger ? "text-(--color-danger)" : "text-(--color-text)"
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+                  {item.kind === "toggle" && <Checkbox checked={!!item.checked} />}
+                  {item.kind === "submenu" && (
+                    <CaretRight size={14} weight="bold" className="text-(--color-muted)" />
+                  )}
+                </button>
+                {item.dividerAfter && <div className="mx-3 my-1 h-px bg-(--color-border)" />}
+              </Fragment>
             );
           })}
         </div>
