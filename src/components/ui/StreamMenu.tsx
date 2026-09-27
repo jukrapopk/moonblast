@@ -67,7 +67,8 @@ const FLYOUT_NUDGE = -5;
  *
  * Toggles render as checkboxes whose state comes from Rust's best-effort mirror
  * (`stream_menu_toggles` / `stream-toggles`) — except "Show Floating Menu",
- * which is a Moonblast setting. Any item with `children` renders a right caret
+ * which is a Moonblast setting applied **immediately** (Rust reconciles on the
+ * settings write). Any item with `children` renders a right caret
  * and opens a **flyout column to the right** on hover (or Right / Enter), so
  * the pattern is reusable for future submenus.
  *
@@ -202,7 +203,7 @@ export function StreamMenu() {
             ...s,
             moonlight: { ...s.moonlight, show_floating_menu: next },
           }));
-          showFlash(`Floating menu ${next ? "on" : "off"} for next stream`);
+          showFlash(`Floating menu ${next ? "on" : "off"}`);
           return;
         }
         // Moonlight shortcut rows — toggles and one-shot actions alike.

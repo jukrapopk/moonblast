@@ -18,9 +18,12 @@ interface DragState {
  * handle that opens the floating menu (Parsec-style). It never takes focus
  * (`focusable(false)`), so it can sit over a stream without disturbing input.
  *
- * Baseline for debugging: no ring / hover / press / transition effects — just
- * the circle and the logo. Effects get added back one at a time once the
- * rendering artifact is understood.
+ * Drag is tracked from the *absolute* cursor delta captured on pointer-down and
+ * fed to `setPosition`, so the moving window can't feed back into the delta.
+ * Past ~4px it counts as a drag — which pins the position in Rust via
+ * `stream_button_moved`; below that, pointer-up is a click that toggles the
+ * menu. The ring + tint are drawn *inside* the circle: nothing sits on the
+ * outer edge, where the removed OS region clip used to leave artifacts.
  */
 export function StreamButton() {
   const drag = useRef<DragState | null>(null);
@@ -64,7 +67,12 @@ export function StreamButton() {
     if (!d) return;
     const dx = (e.screenX - d.startX) * d.scale;
     const dy = (e.screenY - d.startY) * d.scale;
-    if (!d.moved && Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
+    if (!d.moved && Math.abs(dx) + Math.abs(dy) > 4) {
+      d.moved = true;
+      // Tell Rust this is a real drag, so it stops re-placing the button at its
+      // default spot on every show and remembers where the user put it.
+      void invoke("stream_button_moved").catch(() => {});
+    }
     await getCurrentWindow().setPosition(
       new PhysicalPosition(Math.round(d.winX + dx), Math.round(d.winY + dy)),
     );

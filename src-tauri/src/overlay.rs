@@ -149,6 +149,11 @@ static TOGGLES: Mutex<StreamToggles> = Mutex::new(StreamToggles {
     mouse_absolute: false,
 });
 
+/// Last `show_floating_menu` value seen by `on_settings_changed`, so the
+/// real-time reconcile only fires on an actual change (that hook runs on every
+/// settings write, including unrelated ones).
+static LAST_AUTO_SHOW: Mutex<Option<bool>> = Mutex::new(None);
+
 fn toggles() -> StreamToggles {
     TOGGLES.lock().map(|t| *t).unwrap_or(StreamToggles {
         stats: false,
@@ -177,8 +182,8 @@ pub fn reset_toggles(app: &AppHandle, fullscreen: bool, stats: bool, mouse_absol
     emit_toggles(app);
 }
 
-/// Flip the mirrored flag for the toggle chords. No-op for the non-toggle ones
-/// (clipboard / minimize), so the mirror only tracks what it can.
+/// Flip the mirrored flag for the toggle chords. A no-op for the one-shot
+/// chords (minimize), so the mirror only tracks what it can.
 fn apply_toggle_key(app: &AppHandle, key: &str) {
     let changed = match TOGGLES.lock() {
         Ok(mut t) => match key.to_ascii_lowercase().as_str() {
@@ -246,9 +251,10 @@ pub fn init(app: AppHandle) {
     moonblast_log!("overlay: hotkey thread started");
 }
 
-/// Re-apply the summon hotkey after a settings write. No-op unless the spec
-/// actually changed.
-pub fn on_settings_changed(_app: &AppHandle, settings: &crate::settings::Settings) {
+/// Re-apply the summon hotkey after a settings write, and mirror the
+/// "Show Floating Menu" preference onto what is currently on screen so the
+/// checkbox takes effect immediately rather than at the next stream.
+pub fn on_settings_changed(app: &AppHandle, settings: &crate::settings::Settings) {
     let parsed = parse_hotkey(&settings.moonlight.floating_menu_hotkey)
         .or_else(|_| parse_hotkey(DEFAULT_HOTKEY))
         .ok();
@@ -267,6 +273,39 @@ pub fn on_settings_changed(_app: &AppHandle, settings: &crate::settings::Setting
     if changed {
         reload_hotkey();
     }
+
+    let enabled = settings.moonlight.show_floating_menu;
+    let auto_show_changed = match LAST_AUTO_SHOW.lock() {
+        Ok(mut last) => {
+            if *last == Some(enabled) {
+                false
+            } else {
+                *last = Some(enabled);
+                true
+            }
+        }
+        Err(_) => false,
+    };
+    if !auto_show_changed {
+        return;
+    }
+    // Window work must not run on the IPC/main thread.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if enabled {
+            // Don't re-show an already-open menu — that would re-emit
+            // `menu-shown` and reset the menu's highlight and open submenu.
+            if !VISIBLE.load(Ordering::SeqCst) && available(&app) {
+                show_now(&app);
+            }
+        } else if VISIBLE.load(Ordering::SeqCst) {
+            hide_now(&app);
+        } else {
+            // Nothing on screen, but switching the setting off must still take
+            // the button away: in this state it can be up on its own.
+            reconcile_button(&app);
+        }
+    });
 }
 
 fn reload_hotkey() {
@@ -320,9 +359,9 @@ fn available(app: &AppHandle) -> bool {
 // Show / hide / toggle
 // ---------------------------------------------------------------------------
 
-/// Called once a stream starts. Always offers the trigger button; opens the
-/// full menu too when the user has auto-show enabled. Runs on a short delay so
-/// Moonlight's own window exists and owns the foreground first.
+/// Called once a stream starts. Brings the floating menu up when the user has
+/// it enabled; otherwise nothing is shown until the summon hotkey. Runs on a
+/// short delay so Moonlight's own window exists and owns the foreground first.
 pub fn maybe_autoshow(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -330,7 +369,6 @@ pub fn maybe_autoshow(app: &AppHandle) {
         if !has_active_stream(&app) {
             return;
         }
-        show_button_now(&app);
         if auto_show_enabled(&app) {
             show_now(&app);
         }
@@ -375,6 +413,11 @@ fn show_now(app: &AppHandle) {
     if !ensure_window(app) {
         return;
     }
+    // The menu anchors to the button, so the button has to be up — and its rect
+    // known — *before* we place the menu. `position` can only read a button rect
+    // while `BUTTON_VISIBLE` is set, so doing this after the fact left the menu
+    // centred on the monitor instead of anchored.
+    show_button_now(app);
     if let Some(win) = app.get_webview_window(LABEL) {
         position(app, &win);
         let _ = win.show();
@@ -385,6 +428,7 @@ fn show_now(app: &AppHandle) {
     arm_hook(true);
     let _ = app.emit_to(LABEL, "menu-shown", ());
     start_watch(app.clone());
+    reconcile_button(app);
     moonblast_log!("overlay: shown");
 }
 
@@ -397,7 +441,26 @@ fn hide_now(app: &AppHandle) {
     arm_hook(false);
     // The button must not stay highlighted once the menu is gone.
     let _ = app.emit_to(BUTTON_LABEL, "menu-focus", MenuFocus { on: false });
+    reconcile_button(app);
     moonblast_log!("overlay: hidden");
+}
+
+/// Button visibility: shown whenever the menu is up **or** the setting is on.
+///
+/// | setting | menu | button |
+/// |---|---|---|
+/// | on  | up   | yes — the drag handle stays available |
+/// | on  | down | yes — the way back to a dismissed menu |
+/// | off | up   | yes — accompanies a manually summoned menu |
+/// | off | down | no — nothing floating at all, hotkey only |
+///
+/// Call this after anything that changes either side.
+fn reconcile_button(app: &AppHandle) {
+    if VISIBLE.load(Ordering::SeqCst) || auto_show_enabled(app) {
+        show_button_now(app);
+    } else {
+        hide_button_now(app);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +477,10 @@ const BUTTON_SIZE: f64 = 44.0;
 const BUTTON_MARGIN: f64 = 16.0;
 
 static BUTTON_VISIBLE: AtomicBool = AtomicBool::new(false);
+/// Set once the user drags the button. Until then every show re-applies the
+/// default resting spot (so it tracks the stream's monitor); afterwards the
+/// user's position wins for the life of the window.
+static BUTTON_PINNED: AtomicBool = AtomicBool::new(false);
 
 fn ensure_button_window(app: &AppHandle) -> bool {
     if app.get_webview_window(BUTTON_LABEL).is_some() {
@@ -450,8 +517,9 @@ fn ensure_button_window(app: &AppHandle) -> bool {
     }
 }
 
-/// Default resting spot: top-center of the stream's monitor. Only applied when
-/// the button is shown; the user's drag keeps its position for the session.
+/// Default resting spot: top-center of the stream's monitor. `show_button_now`
+/// applies it on every show *until* the user drags the button (`BUTTON_PINNED`),
+/// from which point the user's spot wins.
 fn position_button(app: &AppHandle, win: &tauri::WebviewWindow) {
     let scale = app
         .get_webview_window("main")
@@ -481,7 +549,23 @@ fn show_button_now(app: &AppHandle) {
         return;
     }
     if let Some(win) = app.get_webview_window(BUTTON_LABEL) {
-        position_button(app, &win);
+        if BUTTON_PINNED.load(Ordering::SeqCst) {
+            // The user placed it — keep it, but re-publish the rect: the menu
+            // anchors to it and the click-outside test needs it, and neither
+            // should read a stale value after a hide/show.
+            if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) {
+                set_rect(
+                    &BUTTON_RECT,
+                    &BUTTON_RECT_VALID,
+                    p.x,
+                    p.y,
+                    s.width as i32,
+                    s.height as i32,
+                );
+            }
+        } else {
+            position_button(app, &win);
+        }
         let _ = win.show();
         let _ = win.set_always_on_top(true);
     }
@@ -1189,6 +1273,13 @@ pub fn stream_button_click(app: AppHandle) {
     request_toggle(app);
 }
 
+/// The user actually dragged the button: stop re-placing it at the default
+/// resting spot on every show.
+#[tauri::command]
+pub fn stream_button_moved() {
+    BUTTON_PINNED.store(true, Ordering::SeqCst);
+}
+
 /// Keep the open menu attached to the button while the button is dragged.
 /// No-op when the menu isn't showing.
 #[tauri::command]
@@ -1296,6 +1387,7 @@ pub fn stream_menu_end_session(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn open_power_menu(app: AppHandle) {
     hide_now(&app);
+    hide_button_now(&app);
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
         let _ = main.show();
