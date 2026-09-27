@@ -167,7 +167,7 @@ export function MoonlightSettings() {
         <Section title="Floating Menu">
           <Row
             label="Show floating menu"
-            description="Floats over the stream when it starts"
+            description="Floats over the stream — applies immediately"
           >
             <Toggle
               checked={showFloatingMenu}

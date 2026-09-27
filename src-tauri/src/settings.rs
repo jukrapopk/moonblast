@@ -191,9 +191,10 @@ pub struct MoonlightStreaming {
     pub capture_system_keys: String, // "never" | "fullscreen" | "always"
 
     // In-stream floating menu (`overlay.rs`). Surfaced in Moonlight → Settings.
-    /// Auto-show the floating menu when a stream starts. The summon hotkey is
-    /// always registered regardless of this value, so the menu can still be
-    /// called up when this is `false`.
+    /// Show the floating menu. Applied **live** (toggling it shows/hides at
+    /// once) and used as the auto-show default when a stream starts. The summon
+    /// hotkey is always registered regardless of this value, so the menu can
+    /// still be called up when this is `false`.
     #[serde(default = "default_true")]
     pub show_floating_menu: bool,
     /// Global shortcut that summons/toggles the floating menu, canonical form

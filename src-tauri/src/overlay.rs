@@ -117,12 +117,6 @@ struct MenuFocus {
     on: bool,
 }
 
-#[derive(Clone, serde::Serialize)]
-pub struct ActiveStreamInfo {
-    host: String,
-    app: String,
-}
-
 /// Best-effort mirror of Moonlight's *live* stream toggles, shown as checkboxes
 /// in the floating menu. Moonlight exposes no read-back for any of these at
 /// runtime — the chord we inject only mutates its session state — so each flag
@@ -379,11 +373,6 @@ pub fn maybe_autoshow(app: &AppHandle) {
 /// window creation would deadlock — so hop to a worker).
 pub fn request_toggle(app: AppHandle) {
     std::thread::spawn(move || toggle_now(&app));
-}
-
-/// Request a show from a Tauri command.
-pub fn request_show(app: AppHandle) {
-    std::thread::spawn(move || show_now(&app));
 }
 
 /// Request a hide from a Tauri command.
@@ -1253,16 +1242,6 @@ fn send_chord(vk: u16) {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn stream_menu_toggle(app: AppHandle) {
-    request_toggle(app);
-}
-
-#[tauri::command]
-pub fn stream_menu_show(app: AppHandle) {
-    request_show(app);
-}
-
-#[tauri::command]
 pub fn stream_menu_hide(app: AppHandle) {
     request_hide(app);
 }
@@ -1303,11 +1282,6 @@ pub fn stream_menu_follow(app: AppHandle) {
             position(&app, &win);
         }
     }
-}
-
-#[tauri::command]
-pub fn stream_menu_active(app: AppHandle) -> Option<ActiveStreamInfo> {
-    active_stream_full(&app).map(|(host, app, _pid)| ActiveStreamInfo { host, app })
 }
 
 /// Validate a hotkey spec without persisting it (used by the capture field).
