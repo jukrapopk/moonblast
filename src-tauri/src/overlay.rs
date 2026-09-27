@@ -1109,95 +1109,6 @@ fn vk_for_name(name: &str) -> Option<u32> {
     })
 }
 
-/// Validate + normalize a spec from the frontend. Returns the canonical form.
-pub fn validate_hotkey(spec: &str) -> Result<String, String> {
-    parse_hotkey(spec)?;
-    Ok(canonical_hotkey(spec))
-}
-
-fn canonical_hotkey(spec: &str) -> String {
-    let mut mods: Vec<&str> = Vec::new();
-    let mut key = String::new();
-    for part in spec.split('+') {
-        let p = part.trim().to_ascii_lowercase();
-        if p.is_empty() {
-            continue;
-        }
-        match p.as_str() {
-            "ctrl" | "control" => {
-                if !mods.contains(&"Ctrl") {
-                    mods.push("Ctrl")
-                }
-            }
-            "alt" => {
-                if !mods.contains(&"Alt") {
-                    mods.push("Alt")
-                }
-            }
-            "shift" => {
-                if !mods.contains(&"Shift") {
-                    mods.push("Shift")
-                }
-            }
-            "win" | "super" | "meta" => {
-                if !mods.contains(&"Win") {
-                    mods.push("Win")
-                }
-            }
-            other => {
-                key = display_key_name(other);
-            }
-        }
-    }
-    let mut out = mods.join("+");
-    if !out.is_empty() {
-        out.push('+');
-    }
-    out.push_str(&key);
-    out
-}
-
-fn display_key_name(lower: &str) -> String {
-    if lower.len() == 1 {
-        return lower.to_ascii_uppercase();
-    }
-    if let Some(rest) = lower.strip_prefix('f') {
-        if rest.parse::<u32>().is_ok() {
-            return format!("F{rest}");
-        }
-    }
-    match lower {
-        "space" | "spacebar" => "Space",
-        "tab" => "Tab",
-        "enter" | "return" => "Enter",
-        "escape" | "esc" => "Escape",
-        "backspace" => "Backspace",
-        "insert" | "ins" => "Insert",
-        "delete" | "del" => "Delete",
-        "home" => "Home",
-        "end" => "End",
-        "pageup" | "pgup" => "PageUp",
-        "pagedown" | "pgdn" => "PageDown",
-        "up" => "Up",
-        "down" => "Down",
-        "left" => "Left",
-        "right" => "Right",
-        "minus" | "-" => "Minus",
-        "equal" | "=" => "Equal",
-        "comma" | "," => "Comma",
-        "period" | "." => "Period",
-        "slash" | "/" => "Slash",
-        "backslash" | "\\" => "Backslash",
-        "semicolon" | ";" => "Semicolon",
-        "quote" | "'" => "Quote",
-        "bracketleft" | "[" => "BracketLeft",
-        "bracketright" | "]" => "BracketRight",
-        "grave" | "`" => "Grave",
-        other => other,
-    }
-    .to_string()
-}
-
 // ---------------------------------------------------------------------------
 // Moonlight key injection
 // ---------------------------------------------------------------------------
@@ -1293,12 +1204,6 @@ pub fn stream_menu_follow(app: AppHandle) {
             position(&app, &win);
         }
     }
-}
-
-/// Validate a hotkey spec without persisting it (used by the capture field).
-#[tauri::command]
-pub fn validate_floating_menu_hotkey(spec: String) -> Result<String, String> {
-    validate_hotkey(&spec)
 }
 
 /// Inject one of Moonlight's `Ctrl+Alt+Shift+<key>` chords and update the toggle

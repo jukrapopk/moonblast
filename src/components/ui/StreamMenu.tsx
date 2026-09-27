@@ -359,7 +359,7 @@ export function StreamMenu() {
           // -1 is a real target in both views (the trigger button in the menu
           // view, the X in the Power view) → activating it dismisses. -2 is
           // "nothing focused" (the pointer left / is off the panel) → no-op.
-          if (i === -1) void invoke("stream_menu_hide");
+          if (i === -1) void invoke("stream_menu_hide").catch(() => {});
           return;
         }
         const item = list[i];
@@ -372,7 +372,7 @@ export function StreamMenu() {
         runRef.current(i);
       } else if (key === "escape") {
         if (openSubRef.current) setOpenSub(null);
-        else void invoke("stream_menu_hide");
+        else void invoke("stream_menu_hide").catch(() => {});
       }
     };
     const unKeys = listen<{ key: string }>("menu-key", (e) => onKey(e.payload.key));
@@ -487,7 +487,7 @@ export function StreamMenu() {
             type="button"
             aria-label="Close"
             onMouseEnter={() => setIndex(-1)}
-            onClick={() => void invoke("stream_menu_hide")}
+            onClick={() => void invoke("stream_menu_hide").catch(() => {})}
             className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
               index === -1
                 ? "bg-(--color-accent-soft) text-(--color-accent)"
@@ -566,7 +566,7 @@ export function StreamMenu() {
     return (
       <div
         ref={rootRef}
-        onClick={() => void invoke("stream_menu_hide")}
+        onClick={() => void invoke("stream_menu_hide").catch(() => {})}
         className="flex h-full w-full items-center justify-center bg-(--color-overlay)"
       >
         {/* The wrapper's box is exactly the panel, so its `mouseleave` fires for

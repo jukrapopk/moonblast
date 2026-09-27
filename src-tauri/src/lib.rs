@@ -3175,7 +3175,6 @@ pub fn run() {
             overlay::stream_menu_set_mouse_mode,
             overlay::stream_menu_disconnect,
             overlay::stream_menu_end_session,
-            overlay::validate_floating_menu_hotkey,
             overlay::stream_menu_center,
             discover_hosts,
             moonlight_paired_hosts,
