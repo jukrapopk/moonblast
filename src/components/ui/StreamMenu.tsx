@@ -83,6 +83,7 @@ export function StreamMenu() {
   });
 
   const items: Item[] = [
+    { id: "minimize", kind: "action", label: "Minimize Stream", icon: <ArrowsIn size={19} weight="bold" /> },
     { id: "disconnect", kind: "action", label: "Disconnect", icon: <Plugs size={19} weight="bold" /> },
     { id: "end_session", kind: "action", label: "End Session", icon: <XCircle size={19} weight="bold" />, danger: true },
     {
@@ -129,7 +130,6 @@ export function StreamMenu() {
         },
       ],
     },
-    { id: "minimize", kind: "action", label: "Minimize Stream", icon: <ArrowsIn size={19} weight="bold" /> },
     {
       id: "toggle_floating",
       kind: "toggle",
