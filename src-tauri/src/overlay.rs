@@ -23,7 +23,7 @@
 //! shortcuts via `SendInput` (Moonlight is still the foreground window, so the
 //! injected chord lands on it).
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -39,10 +39,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, PeekMessageW,
-    PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW, TranslateMessage,
-    UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
-    WM_SYSKEYUP,
+    CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
+    PeekMessageW, PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW, TranslateMessage,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+    WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::moonblast_log;
@@ -65,6 +65,7 @@ const HK_MENU: i32 = 0x2100;
 const WM_APP_MENU_HOOK: u32 = WM_APP + 20; // wParam: 1 arm hook, 0 disarm
 const WM_APP_MENU_NAV: u32 = WM_APP + 21; // wParam: VK forwarded to the webview
 const WM_APP_MENU_RELOAD: u32 = WM_APP + 22; // re-register the summon hotkey
+const WM_APP_MENU_OUTSIDE: u32 = WM_APP + 23; // click landed outside the overlay
 
 static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -75,7 +76,14 @@ static APPLIED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 static DESIRED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 static VISIBLE: AtomicBool = AtomicBool::new(false);
 static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static HOOK_MOUSE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static WATCHING: AtomicBool = AtomicBool::new(false);
+/// Physical-pixel rects of the two overlay windows, kept in atomics so the
+/// low-level mouse hook can test a click without ever taking a lock.
+static MENU_RECT: [AtomicI32; 4] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
+static MENU_RECT_VALID: AtomicBool = AtomicBool::new(false);
+static BUTTON_RECT: [AtomicI32; 4] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
+static BUTTON_RECT_VALID: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, serde::Serialize)]
 struct MenuKey {
@@ -274,6 +282,7 @@ fn hide_now(app: &AppHandle) {
         let _ = win.hide();
     }
     VISIBLE.store(false, Ordering::SeqCst);
+    MENU_RECT_VALID.store(false, Ordering::Relaxed);
     arm_hook(false);
     moonblast_log!("overlay: hidden");
 }
@@ -332,7 +341,9 @@ fn position_button(app: &AppHandle, win: &tauri::WebviewWindow) {
         return;
     };
     let px = x + ((rw - size) / 2).max(0);
-    let _ = win.set_position(PhysicalPosition::new(px, y + margin));
+    let py = y + margin;
+    let _ = win.set_position(PhysicalPosition::new(px, py));
+    set_rect(&BUTTON_RECT, &BUTTON_RECT_VALID, px, py, size, size);
 }
 
 fn show_button_now(app: &AppHandle) {
@@ -354,6 +365,7 @@ fn hide_button_now(app: &AppHandle) {
         let _ = win.hide();
     }
     BUTTON_VISIBLE.store(false, Ordering::SeqCst);
+    BUTTON_RECT_VALID.store(false, Ordering::Relaxed);
 }
 
 /// Once anything is visible, hide the menu + button automatically if the
@@ -443,6 +455,7 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
             y = y.max(my);
         }
         let _ = win.set_position(PhysicalPosition::new(x, y));
+        set_rect(&MENU_RECT, &MENU_RECT_VALID, x, y, w, h);
         return;
     }
 
@@ -452,6 +465,7 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
     let px = x + ((rw - w) / 2).max(0);
     let py = y + ((rh - h) / 2).max(0);
     let _ = win.set_position(PhysicalPosition::new(px, py));
+    set_rect(&MENU_RECT, &MENU_RECT_VALID, px, py, w, h);
 }
 
 /// Rect of the trigger button when it's currently showing.
@@ -538,6 +552,13 @@ fn thread_main() {
             }
             WM_APP_MENU_HOOK => set_hook(msg.wParam == 1),
             WM_APP_MENU_RELOAD => apply_hotkey(),
+            WM_APP_MENU_OUTSIDE => {
+                if let Some(app) = app_handle() {
+                    if VISIBLE.load(Ordering::SeqCst) {
+                        hide_now(&app);
+                    }
+                }
+            }
             _ => unsafe {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -593,15 +614,24 @@ fn unregister_hotkey() {
 }
 
 fn set_hook(arm: bool) {
+    let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
     if arm {
         if HOOK.load(Ordering::SeqCst).is_null() {
-            let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
             let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(nav_proc), hmod, 0) };
             if hook.is_null() {
                 moonblast_log!("overlay: keyboard hook install failed");
             } else {
                 HOOK.store(hook, Ordering::SeqCst);
                 moonblast_log!("overlay: keyboard hook armed");
+            }
+        }
+        if HOOK_MOUSE.load(Ordering::SeqCst).is_null() {
+            let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hmod, 0) };
+            if hook.is_null() {
+                moonblast_log!("overlay: mouse hook install failed");
+            } else {
+                HOOK_MOUSE.store(hook, Ordering::SeqCst);
+                moonblast_log!("overlay: mouse hook armed");
             }
         }
     } else {
@@ -612,7 +642,60 @@ fn set_hook(arm: bool) {
             }
             moonblast_log!("overlay: keyboard hook released");
         }
+        let hook = HOOK_MOUSE.swap(std::ptr::null_mut(), Ordering::SeqCst);
+        if !hook.is_null() {
+            unsafe {
+                UnhookWindowsHookEx(hook);
+            }
+            moonblast_log!("overlay: mouse hook released");
+        }
     }
+}
+
+/// Store a physical-pixel rect for the hook's hit test.
+fn set_rect(rect: &[AtomicI32; 4], valid: &AtomicBool, x: i32, y: i32, w: i32, h: i32) {
+    rect[0].store(x, Ordering::Relaxed);
+    rect[1].store(y, Ordering::Relaxed);
+    rect[2].store(w, Ordering::Relaxed);
+    rect[3].store(h, Ordering::Relaxed);
+    valid.store(true, Ordering::Relaxed);
+}
+
+fn hit(rect: &[AtomicI32; 4], valid: &AtomicBool, x: i32, y: i32) -> bool {
+    if !valid.load(Ordering::Relaxed) {
+        return false;
+    }
+    let rx = rect[0].load(Ordering::Relaxed);
+    let ry = rect[1].load(Ordering::Relaxed);
+    let rw = rect[2].load(Ordering::Relaxed);
+    let rh = rect[3].load(Ordering::Relaxed);
+    x >= rx && x < rx + rw && y >= ry && y < ry + rh
+}
+
+/// Low-level mouse hook: a button-down outside the menu + button closes the
+/// menu. The click is deliberately **not** swallowed, so it still reaches
+/// whatever is underneath (i.e. the game).
+unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let msg = wparam as u32;
+        if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+            && VISIBLE.load(Ordering::SeqCst)
+        {
+            let ms = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
+            let (x, y) = (ms.pt.x, ms.pt.y);
+            if !hit(&MENU_RECT, &MENU_RECT_VALID, x, y)
+                && !hit(&BUTTON_RECT, &BUTTON_RECT_VALID, x, y)
+            {
+                let tid = THREAD_ID.load(Ordering::SeqCst);
+                if tid != 0 {
+                    unsafe {
+                        PostThreadMessageW(tid, WM_APP_MENU_OUTSIDE, 0, 0);
+                    }
+                }
+            }
+        }
+    }
+    unsafe { CallNextHookEx(HOOK_MOUSE.load(Ordering::SeqCst), code, wparam, lparam) }
 }
 
 /// Maps a nav virtual key to the string the webview understands.
@@ -906,11 +989,24 @@ pub fn stream_button_click(app: AppHandle) {
 /// No-op when the menu isn't showing.
 #[tauri::command]
 pub fn stream_menu_follow(app: AppHandle) {
-    if !VISIBLE.load(Ordering::SeqCst) {
-        return;
+    // Keep the button rect fresh for the click-outside test even when the menu
+    // is closed (the button can be dragged on its own).
+    if let Some(win) = app.get_webview_window(BUTTON_LABEL) {
+        if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) {
+            set_rect(
+                &BUTTON_RECT,
+                &BUTTON_RECT_VALID,
+                p.x,
+                p.y,
+                s.width as i32,
+                s.height as i32,
+            );
+        }
     }
-    if let Some(win) = app.get_webview_window(LABEL) {
-        position(&app, &win);
+    if VISIBLE.load(Ordering::SeqCst) {
+        if let Some(win) = app.get_webview_window(LABEL) {
+            position(&app, &win);
+        }
     }
 }
 
