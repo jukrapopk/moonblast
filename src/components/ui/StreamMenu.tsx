@@ -355,7 +355,9 @@ function Checkbox({ checked }: { checked: boolean }) {
   return (
     <span
       className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
-        checked ? "border-(--color-accent) bg-(--color-accent) text-white" : "border-(--color-border) text-transparent"
+        checked
+          ? "border-(--color-accent) bg-(--color-accent) text-white"
+          : "border-(--color-muted) text-transparent"
       }`}
     >
       <Check size={12} weight="bold" />
