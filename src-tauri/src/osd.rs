@@ -26,8 +26,8 @@ pub const LABEL: &str = "osd";
 
 const WIDTH: f64 = 320.0;
 const HEIGHT: f64 = 96.0;
-/// Distance from the top of the monitor, in logical pixels.
-const TOP_MARGIN: f64 = 44.0;
+/// Distance from the bottom of the monitor, in logical pixels.
+const BOTTOM_MARGIN: f64 = 44.0;
 /// Idle time after the last keypress before the overlay hides.
 const HIDE_AFTER_MS: u64 = 1500;
 /// Poll granularity of the hide watcher.
@@ -137,7 +137,9 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
     };
     let scale = m.scale_factor();
     let w = (WIDTH * scale).round() as i32;
+    let h = (HEIGHT * scale).round() as i32;
     let x = m.position().x + ((m.size().width as i32 - w) / 2).max(0);
-    let y = m.position().y + (TOP_MARGIN * scale).round() as i32;
+    // Bottom-center, like the Windows volume flyout's usual resting place.
+    let y = m.position().y + m.size().height as i32 - h - (BOTTOM_MARGIN * scale).round() as i32;
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
