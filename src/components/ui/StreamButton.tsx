@@ -135,8 +135,12 @@ export function StreamButton() {
       onPointerCancel={onPointerUp}
       className="flex h-full w-full cursor-grab items-center justify-center active:cursor-grabbing"
     >
-      <div className="flex aspect-square h-full items-center justify-center rounded-full bg-(--color-surface-2)">
-        <MoonblastMark />
+      <div className="group flex aspect-square h-full items-center justify-center rounded-full bg-(--color-surface-2) p-0.5">
+        {/* The highlight ring is drawn 2px inside the circle (inner element at
+         *  40px) so nothing sits on the outer edge — no clipping artifacts. */}
+        <div className="flex h-full w-full items-center justify-center rounded-full ring-1 ring-inset ring-transparent transition-colors duration-150 group-hover:ring-(--color-accent) group-active:ring-(--color-accent)">
+          <MoonblastMark />
+        </div>
       </div>
     </div>
   );
