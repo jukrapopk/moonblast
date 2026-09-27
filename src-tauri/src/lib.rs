@@ -1659,6 +1659,14 @@ fn moonlight_stream(
     moonblast_log!("moonlight_stream: spawned child pid={pid}");
     // Float the in-stream menu over the stream after it comes up, if the
     // user has auto-show enabled. No-op when disabled.
+    // Seed the menu's toggle mirror from the flags we just spawned with, so the
+    // checkboxes match Moonlight's state at stream start.
+    crate::overlay::reset_toggles(
+        &handle,
+        !prefs.display_mode.eq_ignore_ascii_case("windowed"),
+        prefs.fps_overlay,
+        prefs.absolute_mouse,
+    );
     crate::overlay::maybe_autoshow(&handle);
     Ok(true)
 }
@@ -3165,6 +3173,8 @@ pub fn run() {
             overlay::stream_menu_follow,
             overlay::stream_menu_active,
             overlay::stream_menu_key,
+            overlay::stream_menu_toggles,
+            overlay::stream_menu_set_mouse_mode,
             overlay::stream_menu_disconnect,
             overlay::stream_menu_end_session,
             overlay::validate_floating_menu_hotkey,

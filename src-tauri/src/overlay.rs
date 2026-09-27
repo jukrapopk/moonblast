@@ -8,12 +8,13 @@
 //! - The window is `focusable(false)` (`WS_EX_NOACTIVATE`) — it can receive
 //!   mouse clicks but never becomes the foreground window.
 //! - Because it can't hold keyboard focus, its own React UI can't receive key
-//!   events. While it is visible we install a temporary `WH_KEYBOARD_LL` hook
-//!   that swallows the navigation keys (arrows / Enter / Escape) and forwards
-//!   them to the webview as `menu-key` events. That hook works here because the
-//!   foreground window is Moonlight (native Qt), *not* a Chromium/WebView2
-//!   window — the LL-hook deafness described in `mediakeys.rs` only bites when
-//!   a Chromium-family window is focused.
+//!   events. While it is visible we register the navigation keys as *global
+//!   hotkeys* (arrows / Enter / Escape) and forward them to the webview as
+//!   `menu-key` events. Hotkeys are focus-independent — a `WH_KEYBOARD_LL` hook
+//!   goes deaf whenever a Chromium/WebView2 window is in the foreground (the
+//!   deafness described in `mediakeys.rs`), which is the case whenever the menu
+//!   floats over Moonblast's own UI — so the hook is installed only as a
+//!   fallback when the hotkeys can't be claimed.
 //! - The summon hotkey is a `RegisterHotKey` global shortcut (works regardless
 //!   of which window is focused), armed for the whole app lifetime so it can
 //!   always bring the menu up even when `show_floating_menu` is off.
@@ -55,8 +56,9 @@ pub const LABEL: &str = "stream-menu";
 const DEFAULT_HOTKEY: &str = "Ctrl+Shift+F10";
 
 const WIDTH: f64 = 300.0;
-/// Sized to fit the 10-item list + footer (no header row).
-const HEIGHT: f64 = 560.0;
+/// Sized to fit the 9-item list + the open Mouse Mode submenu (2 extra rows)
+/// + footer (no header row).
+const HEIGHT: f64 = 620.0;
 
 /// Global-hotkey id for the summon shortcut (0x0000–0xBFFF).
 const HK_MENU: i32 = 0x2100;
@@ -118,6 +120,90 @@ struct MenuFocus {
 pub struct ActiveStreamInfo {
     host: String,
     app: String,
+}
+
+/// Best-effort mirror of Moonlight's *live* stream toggles, shown as checkboxes
+/// in the floating menu. Moonlight exposes no read-back for any of these at
+/// runtime — the chord we inject only mutates its session state — so each flag
+/// is seeded from the exact flags the stream was spawned with and flipped
+/// locally whenever its chord is injected. The mirror drifts only if the user
+/// presses Moonlight's own shortcut directly, or Moonlight changes state on its
+/// own (e.g. releasing pointer capture when the window loses focus).
+#[derive(Clone, Copy, serde::Serialize)]
+pub struct StreamToggles {
+    /// Performance overlay (`Ctrl+Alt+Shift+S`).
+    pub stats: bool,
+    /// Fullscreen (`Ctrl+Alt+Shift+X`).
+    pub fullscreen: bool,
+    /// Mouse/pointer capture (`Ctrl+Alt+Shift+Z`).
+    pub mouse_capture: bool,
+    /// Mouse mode: `false` = relative, `true` = absolute (`Ctrl+Alt+Shift+M`).
+    pub mouse_absolute: bool,
+}
+
+static TOGGLES: Mutex<StreamToggles> = Mutex::new(StreamToggles {
+    stats: false,
+    fullscreen: true,
+    mouse_capture: true,
+    mouse_absolute: false,
+});
+
+fn toggles() -> StreamToggles {
+    TOGGLES.lock().map(|t| *t).unwrap_or(StreamToggles {
+        stats: false,
+        fullscreen: true,
+        mouse_capture: true,
+        mouse_absolute: false,
+    })
+}
+
+fn emit_toggles(app: &AppHandle) {
+    let _ = app.emit_to(LABEL, "stream-toggles", toggles());
+}
+
+/// Seed the mirror from the flags a stream is about to spawn with. Called on
+/// every stream start — even when auto-show is off, since the summon hotkey can
+/// still bring the menu up.
+pub fn reset_toggles(app: &AppHandle, fullscreen: bool, stats: bool, mouse_absolute: bool) {
+    if let Ok(mut t) = TOGGLES.lock() {
+        *t = StreamToggles {
+            stats,
+            fullscreen,
+            mouse_capture: true,
+            mouse_absolute,
+        };
+    }
+    emit_toggles(app);
+}
+
+/// Flip the mirrored flag for the toggle chords. No-op for the non-toggle ones
+/// (clipboard / minimize), so the mirror only tracks what it can.
+fn apply_toggle_key(app: &AppHandle, key: &str) {
+    let changed = match TOGGLES.lock() {
+        Ok(mut t) => match key.to_ascii_lowercase().as_str() {
+            "s" => {
+                t.stats = !t.stats;
+                true
+            }
+            "x" => {
+                t.fullscreen = !t.fullscreen;
+                true
+            }
+            "z" => {
+                t.mouse_capture = !t.mouse_capture;
+                true
+            }
+            "m" => {
+                t.mouse_absolute = !t.mouse_absolute;
+                true
+            }
+            _ => false,
+        },
+        Err(_) => false,
+    };
+    if changed {
+        emit_toggles(app);
+    }
 }
 
 fn app_handle() -> Option<AppHandle> {
@@ -1128,12 +1214,13 @@ pub fn validate_floating_menu_hotkey(spec: String) -> Result<String, String> {
     validate_hotkey(&spec)
 }
 
-#[tauri::command]
-pub fn stream_menu_key(app: AppHandle, key: String) -> Result<(), String> {
-    let vk = chord_vk(&key).ok_or_else(|| format!("Unknown shortcut '{key}'"))?;
+/// Inject one of Moonlight's `Ctrl+Alt+Shift+<key>` chords and update the toggle
+/// mirror. Shared by the plain key command and the mouse-mode submenu.
+fn inject_chord(app: &AppHandle, key: &str) -> Result<(), String> {
+    let vk = chord_vk(key).ok_or_else(|| format!("Unknown shortcut '{key}'"))?;
     // Defensive: make sure Moonlight (not something else) owns the foreground
     // before we inject, so the chord can't leak to another window.
-    if let Some((_, _, pid)) = active_stream_full(&app) {
+    if let Some((_, _, pid)) = active_stream_full(app) {
         if let Some(hwnd) = hwnd_for_pid(pid) {
             unsafe {
                 SetForegroundWindow(hwnd as _);
@@ -1141,6 +1228,28 @@ pub fn stream_menu_key(app: AppHandle, key: String) -> Result<(), String> {
         }
     }
     send_chord(vk);
+    apply_toggle_key(app, key);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stream_menu_key(app: AppHandle, key: String) -> Result<(), String> {
+    inject_chord(&app, &key)
+}
+
+/// Current mirrored toggle state, read by the menu on open.
+#[tauri::command]
+pub fn stream_menu_toggles() -> StreamToggles {
+    toggles()
+}
+
+/// Pick a specific mouse mode from the submenu. Moonlight only has a toggle, so
+/// inject the chord only when the mirror says we're in the other mode.
+#[tauri::command]
+pub fn stream_menu_set_mouse_mode(app: AppHandle, absolute: bool) -> Result<(), String> {
+    if toggles().mouse_absolute != absolute {
+        inject_chord(&app, "m")?;
+    }
     Ok(())
 }
 
