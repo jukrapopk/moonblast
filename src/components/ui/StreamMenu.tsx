@@ -44,7 +44,7 @@ interface Item {
   dividerAfter?: boolean;
   /** toggle: current state of the checkbox */
   checked?: boolean;
-  /** toggle: Moonlight `Ctrl+Alt+Shift+<chord>`; absent for our own setting */
+  /** Moonlight `Ctrl+Alt+Shift+<chord>` injected when this row is activated */
   chord?: string;
   /** toggle: the value comes from Moonblast settings rather than Moonlight */
   setting?: "show_floating_menu";
@@ -95,7 +95,7 @@ export function StreamMenu() {
   });
 
   const items: Item[] = [
-    { id: "minimize", kind: "action", label: "Minimize Stream", icon: <ArrowsIn size={19} weight="bold" /> },
+    { id: "minimize", kind: "action", label: "Minimize Stream", icon: <ArrowsIn size={19} weight="bold" />, chord: "d" },
     { id: "disconnect", kind: "action", label: "Disconnect", icon: <Plugs size={19} weight="bold" /> },
     {
       id: "end_session",
@@ -196,17 +196,18 @@ export function StreamMenu() {
       const item = itemsRef.current[i];
       if (!item) return;
       try {
-        if (item.kind === "toggle") {
-          if (item.setting === "show_floating_menu") {
-            const next = !showFloatingRef.current;
-            update((s) => ({
-              ...s,
-              moonlight: { ...s.moonlight, show_floating_menu: next },
-            }));
-            showFlash(`Floating menu ${next ? "on" : "off"} for next stream`);
-            return;
-          }
-          if (item.chord) await invoke("stream_menu_key", { key: item.chord });
+        if (item.kind === "toggle" && item.setting === "show_floating_menu") {
+          const next = !showFloatingRef.current;
+          update((s) => ({
+            ...s,
+            moonlight: { ...s.moonlight, show_floating_menu: next },
+          }));
+          showFlash(`Floating menu ${next ? "on" : "off"} for next stream`);
+          return;
+        }
+        // Moonlight shortcut rows — toggles and one-shot actions alike.
+        if (item.chord) {
+          await invoke("stream_menu_key", { key: item.chord });
           return;
         }
         switch (item.id) {
