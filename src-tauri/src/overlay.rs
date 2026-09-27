@@ -289,17 +289,13 @@ pub fn on_settings_changed(app: &AppHandle, settings: &crate::settings::Settings
     // Window work must not run on the IPC/main thread.
     let app = app.clone();
     std::thread::spawn(move || {
-        if enabled {
-            // Don't re-show an already-open menu — that would re-emit
-            // `menu-shown` and reset the menu's highlight and open submenu.
-            if !VISIBLE.load(Ordering::SeqCst) && available(&app) {
-                show_now(&app);
-            }
-        } else if VISIBLE.load(Ordering::SeqCst) {
+        if !enabled && VISIBLE.load(Ordering::SeqCst) {
+            // Switching off takes an open menu down with it.
             hide_now(&app);
         } else {
-            // Nothing on screen, but switching the setting off must still take
-            // the button away: in this state it can be up on its own.
+            // Switching on only offers the trigger button — popping the menu open
+            // mid-stream would be a surprise. The menu itself arrives on a click,
+            // on the summon hotkey, or from the next stream's auto-show.
             reconcile_button(&app);
         }
     });
