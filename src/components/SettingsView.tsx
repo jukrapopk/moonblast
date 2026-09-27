@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Monitor, WifiHigh, Bluetooth, BatteryFull, SpeakerHigh, Clock } from "@phosphor-icons/react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -518,7 +519,11 @@ export function DisplaySettingsModal({
   const brightnessRef = useRef(brightness);
   brightnessRef.current = brightness;
   const brightnessTimer = useRef<number | null>(null);
+  // Timestamp of the last local write, so the watcher's `brightness-changed`
+  // events don't fight an in-progress drag.
+  const lastLocalChangeRef = useRef(0);
   function changeBrightness(value: number) {
+    lastLocalChangeRef.current = Date.now();
     setBrightness((b) => (b ? { ...b, value } : b));
     if (brightnessTimer.current !== null) window.clearTimeout(brightnessTimer.current);
     brightnessTimer.current = window.setTimeout(() => {
@@ -537,11 +542,18 @@ export function DisplaySettingsModal({
   }
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      void invoke("set_modal_brightness_watch", { on: false }).catch(() => {});
+      return;
+    }
     refreshMonitors();
     refreshHdr();
     refreshDisplay();
     refreshBrightness();
+    void invoke("set_modal_brightness_watch", { on: true }).catch(() => {});
+    return () => {
+      void invoke("set_modal_brightness_watch", { on: false }).catch(() => {});
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -551,6 +563,19 @@ export function DisplaySettingsModal({
     refreshBrightness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDeviceName]);
+
+  // Live brightness from the Rust watcher (hardware brightness keys, Windows
+  // Settings). Only applied to the internal panel (WMI); DDC/CI monitors
+  // don't change externally, so they're left alone.
+  useEffect(() => {
+    const unlisten = listen<{ value: number }>("brightness-changed", (e) => {
+      if (Date.now() - lastLocalChangeRef.current < 1500) return;
+      setBrightness((b) => (b && b.kind === "wmi" ? { ...b, value: e.payload.value } : b));
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
 
   // Revert any pending change when the modal unmounts so a forgotten
   // confirmation modal can't leave the display stuck on a new mode.

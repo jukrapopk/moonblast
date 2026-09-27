@@ -2394,6 +2394,7 @@ fn suppress_shell(hidden: bool) {
         let _ = Command::new("explorer.exe").spawn();
     }
     mediakeys::set_active(hidden);
+    brightness::set_immersive_watch(hidden);
 }
 
 /// Minimize every visible top-level window except our own, so nothing shows
@@ -2506,6 +2507,13 @@ async fn set_display_brightness(
         osd::show_brightness(&app, value, min, max);
     }
     result
+}
+
+/// Enable/disable the brightness change-watch while the Display modal is open
+/// (keeps its slider live). The watch also runs in Immersive Mode for the OSD.
+#[tauri::command]
+fn set_modal_brightness_watch(on: bool) {
+    brightness::set_modal_watch(on);
 }
 
 #[derive(serde::Serialize)]
@@ -3046,6 +3054,9 @@ pub fn run() {
             // `mediakeys::set_active`), so users who never enter Immersive Mode
             // don't pay for a second webview.
             mediakeys::init(app.handle().clone());
+            // Watches the internal panel's brightness for hardware-key changes
+            // (no push API exists) so the OSD + Display modal stay live.
+            brightness::init(app.handle().clone());
             // Drop any stale `HKCU\...\Run\Moonblast` from the previous build
             // that had a Start with Windows toggle — otherwise upgrading
             // users would briefly see two Moonblast.exe processes at
@@ -3135,6 +3146,7 @@ pub fn run() {
             exit_immersive,
             display_brightness,
             set_display_brightness,
+            set_modal_brightness_watch,
             battery,
             wifi_current,
             wifi_scan,

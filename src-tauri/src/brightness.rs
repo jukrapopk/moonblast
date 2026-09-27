@@ -17,9 +17,12 @@
 //! a per-tick PowerShell spawn was exactly the thing that made earlier
 //! poll-based attempts miserable, and there is none of that here.
 
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 use windows_sys::Win32::Devices::Display::{
     DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR,
     GetPhysicalMonitorsFromHMONITOR, SetMonitorBrightness, PHYSICAL_MONITOR,
@@ -31,6 +34,73 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 
 use crate::moonblast_log;
+
+/// Native (typed-COM) read of the internal panel's brightness. Cheap enough to
+/// poll — unlike a PowerShell-per-tick, which is what made earlier poll-based
+/// attempts unusable. `WmiMonitorBrightness.CurrentBrightness` is the same
+/// value the OS brightness slider reads, so it tracks the hardware keys too.
+mod wmi {
+    use windows::core::{w, BSTR, GUID};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    };
+    use windows::Win32::System::Variant::{VARIANT, VT_I4, VT_UI1};
+    use windows::Win32::System::Wmi::{
+        IEnumWbemClassObject, IWbemClassObject, IWbemContext, IWbemLocator, IWbemServices,
+        WBEM_FLAG_FORWARD_ONLY, WBEM_INFINITE,
+    };
+
+    /// {4590F811-1D3A-11D0-891F-00AA004B2E24}
+    const CLSID_WBEM_LOCATOR: GUID = GUID::from_u128(0x4590f811_1d3a_11d0_891f_00aa004b2e24);
+
+    /// Current brightness (0–100) of the first controllable internal panel, or
+    /// `None` when there's no such panel / WMI is unavailable.
+    pub fn read_current() -> Option<u32> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let locator: IWbemLocator =
+                CoCreateInstance(&CLSID_WBEM_LOCATOR, None, CLSCTX_INPROC_SERVER).ok()?;
+            let services: IWbemServices = locator
+                .ConnectServer(
+                    &BSTR::from("ROOT\\WMI"),
+                    &BSTR::new(),
+                    &BSTR::new(),
+                    &BSTR::new(),
+                    0,
+                    &BSTR::new(),
+                    None::<&IWbemContext>,
+                )
+                .ok()?;
+            let lang = BSTR::from("WQL");
+            let query = BSTR::from("SELECT CurrentBrightness FROM WmiMonitorBrightness");
+            let enumerator: IEnumWbemClassObject = services
+                .ExecQuery(&lang, &query, WBEM_FLAG_FORWARD_ONLY, None::<&IWbemContext>)
+                .ok()?;
+            let mut objects: [Option<IWbemClassObject>; 1] = [None];
+            let mut returned = 0u32;
+            let _ = enumerator.Next(WBEM_INFINITE, &mut objects, &mut returned);
+            let object = objects[0].take()?;
+            let mut value = VARIANT::default();
+            object
+                .Get(w!("CurrentBrightness"), 0, &mut value, None, None)
+                .ok()?;
+            variant_u32(&value)
+        }
+    }
+
+    fn variant_u32(v: &VARIANT) -> Option<u32> {
+        unsafe {
+            let inner = &v.Anonymous.Anonymous;
+            if inner.vt == VT_UI1 {
+                Some(inner.Anonymous.bVal as u32)
+            } else if inner.vt == VT_I4 {
+                Some(inner.Anonymous.lVal as u32)
+            } else {
+                None
+            }
+        }
+    }
+}
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -275,4 +345,96 @@ fn powershell(script: &str) -> Option<String> {
 fn wstr(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16_lossy(&buf[..end]).trim().to_string()
+}
+
+// --- change watcher --------------------------------------------------------
+//
+// There is no push API for brightness, so detecting the *hardware* brightness
+// keys (which produce no standard virtual key) means polling. To keep that
+// cheap and bounded, watch only [`wmi::read_current`] (a native WMI read,
+// ~1 ms) and only while it's needed: the Display modal is open (live slider)
+// and/or Immersive Mode is active (OSD for the hardware keys). Nothing runs
+// otherwise.
+
+static WATCH_APP: Mutex<Option<AppHandle>> = Mutex::new(None);
+static WATCH_IMMERSIVE: AtomicBool = AtomicBool::new(false);
+static WATCH_MODAL: AtomicBool = AtomicBool::new(false);
+static WATCH_STOP: AtomicBool = AtomicBool::new(false);
+static WATCH_RUNNING: AtomicBool = AtomicBool::new(false);
+/// Last observed value; -1 = not seeded yet.
+static LAST_VALUE: AtomicI32 = AtomicI32::new(-1);
+
+const POLL_TICK: u64 = 400;
+
+#[derive(Clone, serde::Serialize)]
+struct BrightnessChanged {
+    value: u32,
+}
+
+/// Store the app handle. Called once from `setup`.
+pub fn init(app: AppHandle) {
+    if let Ok(mut g) = WATCH_APP.lock() {
+        *g = Some(app);
+    }
+}
+
+/// Watch while Immersive Mode is active — this drives the OSD for the hardware
+/// brightness keys (Explorer's own flyout is gone then).
+pub fn set_immersive_watch(on: bool) {
+    WATCH_IMMERSIVE.store(on, Ordering::SeqCst);
+    reconcile();
+}
+
+/// Watch while the Display modal is open — keeps its slider in sync with
+/// changes made elsewhere (hardware keys, Windows Settings).
+pub fn set_modal_watch(on: bool) {
+    WATCH_MODAL.store(on, Ordering::SeqCst);
+    reconcile();
+}
+
+fn reconcile() {
+    let want = WATCH_IMMERSIVE.load(Ordering::SeqCst) || WATCH_MODAL.load(Ordering::SeqCst);
+    if want {
+        start_watch();
+    } else {
+        WATCH_STOP.store(true, Ordering::SeqCst);
+    }
+}
+
+fn start_watch() {
+    if WATCH_RUNNING.swap(true, Ordering::SeqCst) {
+        return; // already running
+    }
+    WATCH_STOP.store(false, Ordering::SeqCst);
+    std::thread::spawn(|| {
+        // Seed so the first poll doesn't read as a change.
+        LAST_VALUE.store(
+            wmi::read_current().map(|v| v as i32).unwrap_or(-1),
+            Ordering::SeqCst,
+        );
+        loop {
+            for _ in 0..(POLL_TICK / 100) {
+                if WATCH_STOP.load(Ordering::SeqCst) {
+                    WATCH_RUNNING.store(false, Ordering::SeqCst);
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let Some(value) = wmi::read_current() else {
+                continue;
+            };
+            if LAST_VALUE.swap(value as i32, Ordering::SeqCst) == value as i32 {
+                continue;
+            }
+            let app = WATCH_APP.lock().ok().and_then(|g| g.clone());
+            if let Some(app) = app {
+                let _ = app.emit("brightness-changed", BrightnessChanged { value });
+                // The Windows flyout only needs replacing while Explorer is
+                // suppressed; in windowed mode Windows draws its own.
+                if WATCH_IMMERSIVE.load(Ordering::SeqCst) {
+                    crate::osd::show_brightness(&app, value, 0, 100);
+                }
+            }
+        }
+    });
 }
