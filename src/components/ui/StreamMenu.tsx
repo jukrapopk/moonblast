@@ -26,7 +26,7 @@ interface StreamToggles {
   mouse_absolute: boolean;
 }
 
-/** One choice inside a submenu (e.g. Relative / Absolute). */
+/** One choice inside a submenu flyout (e.g. Relative / Absolute). */
 interface SubOption {
   id: string;
   label: string;
@@ -46,19 +46,15 @@ interface Item {
   chord?: string;
   /** toggle: the value comes from Moonblast settings rather than Moonlight */
   setting?: "show_floating_menu";
-  /** submenu */
+  /** submenu: options for the flyout that opens to the right of the row */
   children?: SubOption[];
 }
 
-/** A navigable row — a menu item, or an option inside an expanded submenu. */
-interface Row {
-  key: string;
-  item: Item;
-  option?: SubOption;
-}
-
-/** Menu window width in logical px (mirrors `overlay::WIDTH`). */
-const MENU_WIDTH = 300;
+/**
+ * Fine nudge (logical px) on the flyout's row alignment. Negative lifts the
+ * flyout above the parent row — purely a look-and-feel tweak.
+ */
+const FLYOUT_NUDGE = -5;
 
 /**
  * Contents of the `stream-menu` window — the Parsec-style floating menu that
@@ -69,17 +65,26 @@ const MENU_WIDTH = 300;
  *
  * Toggles render as checkboxes whose state comes from Rust's best-effort mirror
  * (`stream_menu_toggles` / `stream-toggles`) — except "Show Floating Menu",
- * which is a Moonblast setting. Items that are *not* binary (Mouse Mode) become
- * a submenu behind a right caret instead.
+ * which is a Moonblast setting. Any item with `children` renders a right caret
+ * and opens a **flyout column to the right** on hover (or Right / Enter), so
+ * the pattern is reusable for future submenus.
+ *
+ * The window shrink-wraps to this content: a `ResizeObserver` measures the two
+ * columns and resizes the window, which widens when a flyout opens (Rust
+ * anchors the list column, so only the flyout grows rightwards).
  */
 export function StreamMenu() {
   const { settings, update } = useSettings();
   const showFloating = settings.moonlight.show_floating_menu;
 
-  // -1 = the trigger button itself (the default target); 0.. = a visible row.
+  // -1 = the trigger button itself (the default target); 0.. = a list row.
   const [index, setIndex] = useState(-1);
-  const [flash, setFlash] = useState<string | null>(null);
+  // Open flyout (its parent item id) + which of its options is highlighted.
   const [openSub, setOpenSub] = useState<string | null>(null);
+  const [optionIndex, setOptionIndex] = useState(0);
+  // Where the *keyboard* is. Hovering the flyout never moves it here.
+  const [zone, setZone] = useState<"list" | "flyout">("list");
+  const [flash, setFlash] = useState<string | null>(null);
   const [toggles, setToggles] = useState<StreamToggles>({
     stats: false,
     fullscreen: true,
@@ -146,29 +151,23 @@ export function StreamMenu() {
     { id: "power", kind: "action", label: "Power", icon: <Power size={19} weight="bold" /> },
   ];
 
-  // Flat, navigable view: each item, plus the options of the open submenu.
-  const rows: Row[] = [];
-  for (const item of items) {
-    rows.push({ key: item.id, item });
-    if (item.kind === "submenu" && openSub === item.id) {
-      for (const option of item.children ?? []) {
-        rows.push({ key: `${item.id}:${option.id}`, item, option });
-      }
-    }
-  }
-
-  const rowsRef = useRef(rows);
-  rowsRef.current = rows;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const indexRef = useRef(index);
   indexRef.current = index;
   const openSubRef = useRef(openSub);
   openSubRef.current = openSub;
+  const optionIndexRef = useRef(optionIndex);
+  optionIndexRef.current = optionIndex;
+  const zoneRef = useRef(zone);
+  zoneRef.current = zone;
   const showFloatingRef = useRef(showFloating);
   showFloatingRef.current = showFloating;
   const runRef = useRef<(i: number) => void>(() => {});
   const activateRef = useRef<(i: number) => void>(() => {});
+  const runOptionRef = useRef<(i: number) => void>(() => {});
 
-  // Flash a transient status message in the footer.
+  // Flash a transient status message.
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showFlash = useCallback((msg: string) => {
     setFlash(msg);
@@ -184,16 +183,9 @@ export function StreamMenu() {
 
   const run = useCallback(
     async (i: number) => {
-      const row = rowsRef.current[i];
-      if (!row) return;
+      const item = itemsRef.current[i];
+      if (!item) return;
       try {
-        // An option inside an open submenu: run it, then collapse.
-        if (row.option) {
-          await row.option.run();
-          setOpenSub(null);
-          return;
-        }
-        const item = row.item;
         if (item.kind === "toggle") {
           if (item.setting === "show_floating_menu") {
             const next = !showFloatingRef.current;
@@ -226,75 +218,86 @@ export function StreamMenu() {
   );
   runRef.current = (i: number) => void run(i);
 
-  // Shrink-wrap the window to the list. The panel is content-sized (`items-start`
-  // on the root stops it stretching), so it can be measured directly and the
-  // window resized to match; it is then re-anchored to the button, because Rust
-  // positions the menu from the window's real size.
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const appliedHeight = useRef(0);
-  useEffect(() => {
-    const apply = () => {
-      const panel = panelRef.current;
-      const root = rootRef.current;
-      if (!panel || !root) return;
-      const cs = getComputedStyle(root);
-      const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-      const height = Math.ceil(panel.getBoundingClientRect().height + pad);
-      if (height <= 0 || Math.abs(height - appliedHeight.current) < 1) return;
-      appliedHeight.current = height;
-      void getCurrentWebviewWindow()
-        .setSize(new LogicalSize(MENU_WIDTH, height))
-        .then(() => invoke("stream_menu_follow"))
-        .catch(() => {});
-    };
-    apply();
-    const observer = new ResizeObserver(apply);
-    if (panelRef.current) observer.observe(panelRef.current);
-    return () => observer.disconnect();
-  }, []);
+  /** Run the n-th option of the open flyout. It stays open so the new state shows. */
+  const runOption = useCallback(
+    async (i: number) => {
+      const parent = itemsRef.current.find((it) => it.id === openSubRef.current);
+      const option = parent?.children?.[i];
+      if (!option) return;
+      try {
+        await option.run();
+      } catch (e) {
+        showFlash(String(e));
+      }
+    },
+    [showFlash],
+  );
+  runOptionRef.current = (i: number) => void runOption(i);
 
-  /** Enter / click on a row: expand a submenu, otherwise run it. */
+  /** Enter / click on a list row: open its flyout, otherwise run it. */
   const activate = useCallback((i: number) => {
-    const row = rowsRef.current[i];
-    if (!row) return;
-    if (!row.option && row.item.kind === "submenu") {
-      setOpenSub((v) => (v === row.item.id ? null : row.item.id));
+    const item = itemsRef.current[i];
+    if (!item) return;
+    if (item.kind === "submenu") {
+      setOpenSub(item.id);
+      setOptionIndex(0);
+      setZone("flyout");
       return;
     }
     runRef.current(i);
   }, []);
   activateRef.current = activate;
 
-  /** Collapse a submenu and park the highlight back on its parent row. */
-  const collapseTo = useCallback((itemId: string) => {
-    setOpenSub(null);
-    const parent = rowsRef.current.findIndex((r) => r.key === itemId);
-    if (parent >= 0) setIndex(parent);
-  }, []);
+  // The flyout follows the highlighted list row — by hover (mouse) and by
+  // arrows (keyboard). While the keyboard is inside the flyout, leave it alone.
+  useEffect(() => {
+    if (zone === "flyout") return;
+    const item = itemsRef.current[index];
+    const id = item && item.kind === "submenu" ? item.id : null;
+    if (id === openSubRef.current) return;
+    setOpenSub(id);
+    setOptionIndex(0);
+  }, [index, zone]);
 
   useEffect(() => {
     const onKey = (key: string) => {
-      const list = rowsRef.current;
-      const i = indexRef.current;
-      const row = list[i];
+      const list = itemsRef.current;
+      if (zoneRef.current === "flyout") {
+        const parent = list.find((it) => it.id === openSubRef.current);
+        const count = parent?.children?.length ?? 0;
+        if (key === "up") setOptionIndex((v) => Math.max(0, v - 1));
+        else if (key === "down") setOptionIndex((v) => Math.min(count - 1, v + 1));
+        else if (key === "left" || key === "escape") setZone("list");
+        else if (key === "enter" || key === "space") runOptionRef.current(optionIndexRef.current);
+        return;
+      }
       if (key === "up") {
         setIndex((v) => Math.max(-1, v - 1));
       } else if (key === "down") {
         setIndex((v) => Math.min(list.length - 1, v + 1));
       } else if (key === "right") {
-        if (row && !row.option && row.item.kind === "submenu" && openSubRef.current !== row.item.id) {
-          setOpenSub(row.item.id);
-          setIndex(i + 1); // first option sits right below the parent
+        const item = list[indexRef.current];
+        if (item?.kind === "submenu") {
+          setOpenSub(item.id);
+          setOptionIndex(0);
+          setZone("flyout");
         }
-      } else if (key === "left") {
-        if (row?.option) collapseTo(row.item.id);
       } else if (key === "enter" || key === "space") {
         // Default target is the button → toggles the menu off.
-        if (i < 0) void invoke("stream_menu_hide");
-        else activateRef.current(i);
+        if (indexRef.current < 0) {
+          void invoke("stream_menu_hide");
+          return;
+        }
+        const item = list[indexRef.current];
+        if (item?.kind === "submenu") {
+          setOpenSub(item.id);
+          setOptionIndex(0);
+          setZone("flyout");
+          return;
+        }
+        runRef.current(indexRef.current);
       } else if (key === "escape") {
-        if (openSubRef.current) collapseTo(openSubRef.current);
+        if (openSubRef.current) setOpenSub(null);
         else void invoke("stream_menu_hide");
       }
     };
@@ -302,6 +305,8 @@ export function StreamMenu() {
     const unShown = listen("menu-shown", () => {
       setIndex(-1);
       setOpenSub(null);
+      setOptionIndex(0);
+      setZone("list");
       refreshToggles();
       void emit("menu-focus", { on: true }).catch(() => {});
     });
@@ -313,7 +318,69 @@ export function StreamMenu() {
       void unToggles.then((f) => f());
       if (flashTimer.current) clearTimeout(flashTimer.current);
     };
-  }, [collapseTo, refreshToggles]);
+  }, [refreshToggles]);
+
+  // Shrink-wrap the window to the two columns, and line the flyout up with the
+  // row that opened it (classic submenu) rather than with the top of the list.
+  // The columns are measured directly (rather than the root) because `#root`
+  // clips the overflowing flyout until the window has grown, which would make a
+  // root-based measurement circular.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const flyoutRef = useRef<HTMLDivElement | null>(null);
+  const flyoutListRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const appliedSize = useRef({ w: 0, h: 0 });
+  useEffect(() => {
+    const apply = () => {
+      const root = rootRef.current;
+      const list = listRef.current;
+      if (!root || !list) return;
+      const cs = getComputedStyle(root);
+      const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const gap = parseFloat(cs.columnGap) || 0;
+      const listRect = list.getBoundingClientRect();
+      const flyout = flyoutRef.current;
+      if (flyout) {
+        const parentIndex = openSub ? itemsRef.current.findIndex((it) => it.id === openSub) : -1;
+        const row = parentIndex >= 0 ? rowRefs.current[parentIndex] : null;
+        const inner = flyoutListRef.current;
+        if (row && inner) {
+          // Measure both offsets *absolutely* — the row's distance from the top
+          // of the list, and the first option's from the top of the flyout
+          // panel — then subtract. That makes this idempotent: a self-referential
+          // delta would read 0 once aligned, and the ResizeObserver's initial
+          // callback (which fires on every re-subscribe) would snap it to the
+          // top. Rects rather than `offsetTop`, so the borders can't skew it.
+          const rowOffset = row.getBoundingClientRect().top - listRect.top;
+          const innerOffset = inner.getBoundingClientRect().top - flyout.getBoundingClientRect().top;
+          flyout.style.marginTop = `${Math.max(
+            0,
+            Math.round(rowOffset - innerOffset + FLYOUT_NUDGE),
+          )}px`;
+        }
+      }
+      const flyoutRect = flyout?.getBoundingClientRect();
+      const w = Math.ceil(listRect.width + (flyoutRect ? gap + flyoutRect.width : 0) + padX);
+      const h = Math.ceil(
+        Math.max(listRect.height, flyoutRect ? flyoutRect.bottom - listRect.top : 0) + padY,
+      );
+      if (w <= 0 || h <= 0) return;
+      if (Math.abs(w - appliedSize.current.w) < 1 && Math.abs(h - appliedSize.current.h) < 1) return;
+      appliedSize.current = { w, h };
+      // Re-anchor: Rust positions the menu from the window's real size.
+      void getCurrentWebviewWindow()
+        .setSize(new LogicalSize(w, h))
+        .then(() => invoke("stream_menu_follow"))
+        .catch(() => {});
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    if (listRef.current) observer.observe(listRef.current);
+    if (flyoutRef.current) observer.observe(flyoutRef.current);
+    return () => observer.disconnect();
+  }, [openSub]);
 
   // Tell the button window whether it is the current target, so it can show its
   // active ring (Rust clears it when the menu hides).
@@ -321,59 +388,56 @@ export function StreamMenu() {
     void emit("menu-focus", { on: index < 0 }).catch(() => {});
   }, [index]);
 
+  const subItem = openSub ? items.find((it) => it.id === openSub) : undefined;
+
   return (
-    <div ref={rootRef} className="flex h-full w-full items-start p-1.5">
+    <div ref={rootRef} className="flex w-max items-start gap-1.5 p-1.5">
+      {/* List column. */}
       <div
-        ref={panelRef}
-        className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl"
+        ref={listRef}
+        className="relative flex w-[288px] shrink-0 flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl"
       >
         <div className="space-y-0.5 p-1.5">
-          {rows.map((row, i) => {
+          {items.map((item, i) => {
             const selected = i === index;
-            const item = row.item;
-            const option = row.option;
-            const danger = item.danger;
             return (
               <button
-                key={row.key}
+                key={item.id}
                 type="button"
-                onMouseEnter={() => setIndex(i)}
+                ref={(el) => {
+                  rowRefs.current[i] = el;
+                }}
+                onMouseEnter={() => {
+                  setZone("list");
+                  setIndex(i);
+                }}
                 onClick={() => activateRef.current(i)}
-                className={`flex w-full items-center gap-3 rounded-xl py-2.5 pr-3 text-left transition-colors ${
-                  option ? "pl-11" : "pl-3"
-                } ${selected ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"}`}
+                className={`flex w-full items-center gap-3 rounded-xl py-2.5 pr-3 pl-3 text-left transition-colors ${
+                  selected ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"
+                }`}
               >
-                {!option && (
-                  <span
-                    className={
-                      danger
-                        ? "text-(--color-danger)"
-                        : selected
-                          ? "text-(--color-accent)"
-                          : "text-(--color-muted)"
-                    }
-                  >
-                    {item.icon}
-                  </span>
-                )}
+                <span
+                  className={
+                    item.danger
+                      ? "text-(--color-danger)"
+                      : selected
+                        ? "text-(--color-accent)"
+                        : "text-(--color-muted)"
+                  }
+                >
+                  {item.icon}
+                </span>
                 <span
                   className={`flex-1 text-sm font-medium ${
-                    danger ? "text-(--color-danger)" : "text-(--color-text)"
+                    item.danger ? "text-(--color-danger)" : "text-(--color-text)"
                   }`}
                 >
-                  {option ? option.label : item.label}
+                  {item.label}
                 </span>
-                {!option && item.kind === "toggle" && <Checkbox checked={!!item.checked} />}
-                {!option && item.kind === "submenu" && (
-                  <CaretRight
-                    size={14}
-                    weight="bold"
-                    className={`text-(--color-muted) transition-transform ${
-                      openSub === item.id ? "rotate-90" : ""
-                    }`}
-                  />
+                {item.kind === "toggle" && <Checkbox checked={!!item.checked} />}
+                {item.kind === "submenu" && (
+                  <CaretRight size={14} weight="bold" className="text-(--color-muted)" />
                 )}
-                {option && <Checkbox checked={option.checked} />}
               </button>
             );
           })}
@@ -388,6 +452,31 @@ export function StreamMenu() {
           </div>
         )}
       </div>
+
+      {/* Flyout column — any item with `children`. */}
+      {subItem && (
+        <div
+          ref={flyoutRef}
+          className="flex w-[184px] shrink-0 flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl"
+        >
+          <div ref={flyoutListRef} className="space-y-0.5 p-1.5">
+            {(subItem.children ?? []).map((option, j) => (
+              <button
+                key={option.id}
+                type="button"
+                onMouseEnter={() => setOptionIndex(j)}
+                onClick={() => runOptionRef.current(j)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                  j === optionIndex ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"
+                }`}
+              >
+                <span className="flex-1 text-sm font-medium text-(--color-text)">{option.label}</span>
+                <Checkbox checked={option.checked} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

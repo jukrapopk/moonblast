@@ -577,14 +577,17 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
             (HEIGHT * scale).round() as i32,
         ));
     let monitor = stream_monitor_rect(app).or_else(|| main_monitor_rect(app));
+    // Anchor the *list* column. Extra width is an open submenu flyout, which
+    // must extend to the right without dragging the list sideways.
+    let anchor_w = (WIDTH * scale).round() as i32;
 
     if let Some((bx, by, bw, bh)) = button_rect(app) {
         let gap = (10.0 * scale).round() as i32;
-        let mut x = bx + bw / 2 - w / 2;
+        let mut x = bx + bw / 2 - anchor_w / 2;
         // Prefer opening just below the button; flip above when it won't fit.
         let mut y = by + bh + gap;
         if let Some((mx, my, mw, mh)) = monitor {
-            x = x.clamp(mx, (mx + mw - w).max(mx));
+            x = x.clamp(mx, (mx + mw - anchor_w).max(mx));
             if y + h > my + mh {
                 let above = by - gap - h;
                 y = if above >= my { above } else { (my + mh - h).max(my) };
