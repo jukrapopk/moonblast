@@ -1,7 +1,7 @@
 //! The always-on-top volume overlay window (`osd`).
 //!
 //! While Immersive Mode has Explorer suppressed, Explorer's volume flyout is
-//! gone — `mediakeys.rs` applies the volume and calls [`show_level`] so the
+//! gone — `mediakeys.rs` applies the volume and calls [`show_volume`] so the
 //! level is still visible. It is a second, frameless, transparent, topmost
 //! Tauri window that:
 //! - never takes focus (`focusable(false)`), so it can't steal a stream's
@@ -11,7 +11,7 @@
 //!
 //! Rust owns the whole visibility lifecycle (show **and** the debounced hide),
 //! so the overlay appears even if the hidden webview's JS is throttled; the
-//! frontend only renders the bar from the `volume-key` event.
+//! frontend only renders the bar from the `osd-show` event.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -37,9 +37,14 @@ static HIDE_SCHEDULED: AtomicBool = AtomicBool::new(false);
 static LAST_ACTIVITY_MS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, serde::Serialize)]
-struct VolumeKey {
-    volume: u8,
+struct OsdPayload {
+    /// `"volume"` or `"brightness"`.
+    kind: &'static str,
+    value: u32,
     muted: bool,
+    /// Bar range (brightness uses the monitor's own min/max; volume is 0–100).
+    min: u32,
+    max: u32,
 }
 
 /// Monotonic milliseconds since the first call. `Instant` can't live in a
@@ -82,10 +87,23 @@ pub fn ensure_window(app: &AppHandle) {
     }
 }
 
-/// Update the level, bring the overlay up (top-center of the launcher's
-/// monitor), and arm the debounced hide. Called on every volume keypress.
-pub fn show_level(app: &AppHandle, volume: u8, muted: bool) {
-    let _ = app.emit_to(LABEL, "volume-key", VolumeKey { volume, muted });
+/// Show the volume overlay.
+pub fn show_volume(app: &AppHandle, volume: u8, muted: bool) {
+    present(
+        app,
+        OsdPayload { kind: "volume", value: volume as u32, muted, min: 0, max: 100 },
+    );
+}
+
+/// Show the brightness overlay.
+pub fn show_brightness(app: &AppHandle, value: u32, min: u32, max: u32) {
+    present(app, OsdPayload { kind: "brightness", value, muted: false, min, max });
+}
+
+/// Update the overlay, bring it up (bottom-center of the launcher's monitor),
+/// and arm the debounced hide. Called on every value change.
+fn present(app: &AppHandle, payload: OsdPayload) {
+    let _ = app.emit_to(LABEL, "osd-show", payload);
     if let Some(win) = app.get_webview_window(LABEL) {
         position(app, &win);
         let _ = win.show();

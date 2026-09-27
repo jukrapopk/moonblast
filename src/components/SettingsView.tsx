@@ -13,6 +13,7 @@ import { Select } from "./ui/Select";
 import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
+import { Slider } from "./ui/Slider";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
@@ -37,6 +38,15 @@ interface Monitor {
   friendlyName: string;
   primary: boolean;
   disabled: boolean;
+}
+
+/** Mirror of `brightness::Brightness` from the Rust side. `kind` is `none`
+ *  when neither WMI nor DDC/CI can control the selected display. */
+interface Brightness {
+  value: number;
+  min: number;
+  max: number;
+  kind: "wmi" | "ddc" | "none";
 }
 
 function TailscaleRow() {
@@ -453,6 +463,7 @@ export function DisplaySettingsModal({
   const [currentMode, setCurrentMode] = useState<
     { width: number; height: number; refreshRate: number } | null | undefined
   >(undefined);
+  const [brightness, setBrightness] = useState<Brightness | null | undefined>(undefined);
   const [hasPending, setHasPending] = useState(false);
 
   async function refreshDisplay() {
@@ -487,17 +498,57 @@ export function DisplaySettingsModal({
     }
   }
 
+  async function refreshBrightness() {
+    const m = selectedMonitorRef.current;
+    if (!m) return;
+    setBrightness(undefined);
+    try {
+      setBrightness(
+        await invoke<Brightness>("display_brightness", { deviceName: m.deviceName }),
+      );
+    } catch {
+      setBrightness(null);
+    }
+  }
+
+  // The slider is optimistic (updates instantly) and the actual write is
+  // trailing-throttled at ~300 ms, so a drag issues one/few sets instead of
+  // one per pixel. No polling anywhere: reads happen only on open / monitor
+  // switch, and this setter is the only write path.
+  const brightnessRef = useRef(brightness);
+  brightnessRef.current = brightness;
+  const brightnessTimer = useRef<number | null>(null);
+  function changeBrightness(value: number) {
+    setBrightness((b) => (b ? { ...b, value } : b));
+    if (brightnessTimer.current !== null) window.clearTimeout(brightnessTimer.current);
+    brightnessTimer.current = window.setTimeout(() => {
+      brightnessTimer.current = null;
+      const b = brightnessRef.current;
+      const m = selectedMonitorRef.current;
+      if (!b || !m || b.kind === "none") return;
+      invoke("set_display_brightness", {
+        deviceName: m.deviceName,
+        value,
+        min: b.min,
+        max: b.max,
+        kind: b.kind,
+      }).catch(() => {});
+    }, 300);
+  }
+
   useEffect(() => {
     if (!open) return;
     refreshMonitors();
     refreshHdr();
     refreshDisplay();
+    refreshBrightness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     refreshDisplay();
+    refreshBrightness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDeviceName]);
 
@@ -507,6 +558,7 @@ export function DisplaySettingsModal({
   hasPendingRef.current = hasPending;
   useEffect(() => {
     return () => {
+      if (brightnessTimer.current !== null) window.clearTimeout(brightnessTimer.current);
       if (hasPendingRef.current) {
         const m = selectedMonitorRef.current;
         invoke("revert_display_mode", { deviceName: m?.deviceName ?? null }).catch(() => {});
@@ -583,6 +635,31 @@ export function DisplaySettingsModal({
             }
           />
         )}
+      </Row>
+      <Row
+        label="Brightness"
+        description={
+          brightness === undefined
+            ? "Reading brightness…"
+            : brightness === null
+              ? "Couldn't read brightness"
+              : brightness.kind === "none"
+                ? "This display doesn't support brightness control"
+                : `${brightness.value}`
+        }
+      >
+        {brightness === undefined ? (
+          <LoadingChip label="Reading" />
+        ) : brightness && brightness.kind !== "none" ? (
+          <Slider
+            value={brightness.value}
+            min={brightness.min}
+            max={brightness.max}
+            onChange={changeBrightness}
+            label="Brightness"
+            className="w-40"
+          />
+        ) : null}
       </Row>
       <ResolutionPicker
         modes={displayModes}

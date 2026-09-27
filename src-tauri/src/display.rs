@@ -428,7 +428,7 @@ fn wmi_monitor_names() -> HashMap<String, String> {
 /// the `BNQ7F76` segment (5-char code derived from the manufacturer
 /// name in the EDID block) to look up the friendly name in
 /// `WmiMonitorID`.
-fn edid_vendor_code_from_device_id(device_id: &str) -> Option<String> {
+pub(crate) fn edid_vendor_code_from_device_id(device_id: &str) -> Option<String> {
     let rest = device_id.strip_prefix("MONITOR\\")?;
     let code = rest.split('\\').next()?;
     if code.is_empty() {

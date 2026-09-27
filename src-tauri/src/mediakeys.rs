@@ -62,7 +62,7 @@ static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 /// True while the low-level-hook fallback (not the hotkeys) is what's armed.
 static USING_HOOK: AtomicBool = AtomicBool::new(false);
-/// The `AppHandle` used to drive the OSD overlay (see `osd::show_level`).
+/// The `AppHandle` used to drive the OSD overlay (see `osd::show_volume`).
 static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
 
 /// Store the app handle. Called once from `setup`.
@@ -256,6 +256,6 @@ fn apply_volume_key(vk: u32) {
     }
     let app = APP.lock().ok().and_then(|g| g.clone());
     if let Some(app) = app {
-        crate::osd::show_level(&app, volume, muted);
+        crate::osd::show_volume(&app, volume, muted);
     }
 }
