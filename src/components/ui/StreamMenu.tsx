@@ -7,7 +7,6 @@ import {
   Clipboard,
   CornersOut,
   Cursor,
-  GameController,
   MouseSimple,
   Plugs,
   Power,
@@ -15,11 +14,6 @@ import {
   XCircle,
 } from "@phosphor-icons/react";
 import { useSettings } from "../../settings/SettingsContext";
-
-interface ActiveStream {
-  host: string;
-  app: string;
-}
 
 interface Item {
   id: string;
@@ -40,7 +34,6 @@ export function StreamMenu() {
   const { settings, update } = useSettings();
   const showFloating = settings.moonlight.show_floating_menu;
 
-  const [active, setActive] = useState<ActiveStream | null>(null);
   const [index, setIndex] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -63,12 +56,6 @@ export function StreamMenu() {
   const indexRef = useRef(index);
   indexRef.current = index;
   const runRef = useRef<(i: number) => void>(() => {});
-
-  const refreshActive = useCallback(() => {
-    invoke<ActiveStream | null>("stream_menu_active")
-      .then(setActive)
-      .catch(() => setActive(null));
-  }, []);
 
   // Flash a transient status message in the footer.
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,7 +117,6 @@ export function StreamMenu() {
   runRef.current = (i: number) => void run(i);
 
   useEffect(() => {
-    refreshActive();
     const onKey = (key: string) => {
       const count = itemsRef.current.length;
       if (key === "up") {
@@ -144,28 +130,18 @@ export function StreamMenu() {
       }
     };
     const unKeys = listen<{ key: string }>("menu-key", (e) => onKey(e.payload.key));
-    const unShown = listen("menu-shown", () => {
-      setIndex(0);
-      refreshActive();
-    });
+    const unShown = listen("menu-shown", () => setIndex(0));
     return () => {
       void unKeys.then((f) => f());
       void unShown.then((f) => f());
       if (flashTimer.current) clearTimeout(flashTimer.current);
     };
-  }, [refreshActive]);
-
-  const title = active ? `Streaming · ${active.app}` : "Stream Menu";
+  }, []);
 
   return (
     <div className="flex h-full w-full p-1.5">
       <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl">
-        <div className="flex items-center gap-2 border-b border-(--color-border) px-4 py-3">
-          <GameController size={18} weight="bold" className="text-(--color-accent)" />
-          <div className="truncate text-sm font-semibold text-(--color-text)">{title}</div>
-        </div>
-
-        <div className="flex-1 space-y-0.5 overflow-hidden p-1.5">
+        <div className="space-y-0.5 p-1.5">
           {items.map((item, i) => {
             const selected = i === index;
             return (

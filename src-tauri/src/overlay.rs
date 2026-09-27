@@ -55,7 +55,8 @@ pub const LABEL: &str = "stream-menu";
 const DEFAULT_HOTKEY: &str = "Ctrl+Shift+F10";
 
 const WIDTH: f64 = 300.0;
-const HEIGHT: f64 = 620.0;
+/// Sized to fit the 10-item list + footer (no header row).
+const HEIGHT: f64 = 560.0;
 
 /// Global-hotkey id for the summon shortcut (0x0000–0xBFFF).
 const HK_MENU: i32 = 0x2100;
@@ -899,6 +900,18 @@ pub fn stream_menu_hide(app: AppHandle) {
 #[tauri::command]
 pub fn stream_button_click(app: AppHandle) {
     request_toggle(app);
+}
+
+/// Keep the open menu attached to the button while the button is dragged.
+/// No-op when the menu isn't showing.
+#[tauri::command]
+pub fn stream_menu_follow(app: AppHandle) {
+    if !VISIBLE.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(win) = app.get_webview_window(LABEL) {
+        position(&app, &win);
+    }
 }
 
 #[tauri::command]

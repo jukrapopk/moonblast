@@ -26,6 +26,17 @@ interface DragState {
 export function StreamButton() {
   const drag = useRef<DragState | null>(null);
   const [active, setActive] = useState(false);
+  // Coalesce follow requests so a fast drag doesn't queue one IPC per move —
+  // Rust re-reads the button's live position, so the last request wins.
+  const followPending = useRef(false);
+  function scheduleFollow() {
+    if (followPending.current) return;
+    followPending.current = true;
+    requestAnimationFrame(() => {
+      followPending.current = false;
+      void invoke("stream_menu_follow").catch(() => {});
+    });
+  }
 
   async function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return;
@@ -52,13 +63,17 @@ export function StreamButton() {
     await getCurrentWindow().setPosition(
       new PhysicalPosition(Math.round(d.winX + dx), Math.round(d.winY + dy)),
     );
+    // Drag the open menu along with the button so it stays attached.
+    scheduleFollow();
   }
 
   function onPointerUp() {
     const d = drag.current;
     drag.current = null;
     setActive(false);
-    if (d && !d.moved) void invoke("stream_button_click").catch(() => {});
+    if (!d) return;
+    if (d.moved) scheduleFollow();
+    else void invoke("stream_button_click").catch(() => {});
   }
 
   return (

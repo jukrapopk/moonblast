@@ -3162,6 +3162,7 @@ pub fn run() {
             overlay::stream_menu_show,
             overlay::stream_menu_hide,
             overlay::stream_button_click,
+            overlay::stream_menu_follow,
             overlay::stream_menu_active,
             overlay::stream_menu_key,
             overlay::stream_menu_disconnect,
