@@ -356,9 +356,10 @@ export function StreamMenu() {
       } else if (key === "enter" || key === "space") {
         const i = indexRef.current;
         if (i < 0) {
-          // Menu view: -1 is the trigger button → toggles the overlay off.
-          // Power view: -1 is the header's X (dismiss), -2 is "nothing".
-          if (viewRef.current === "menu" || i === -1) void invoke("stream_menu_hide");
+          // -1 is a real target in both views (the trigger button in the menu
+          // view, the X in the Power view) → activating it dismisses. -2 is
+          // "nothing focused" (the pointer left / is off the panel) → no-op.
+          if (i === -1) void invoke("stream_menu_hide");
           return;
         }
         const item = list[i];
@@ -467,7 +468,7 @@ export function StreamMenu() {
   // Tell the button window whether it is the current target, so it can show its
   // active ring (Rust clears it when the menu hides).
   useEffect(() => {
-    void emit("menu-focus", { on: view === "menu" && index < 0 }).catch(() => {});
+    void emit("menu-focus", { on: view === "menu" && index === -1 }).catch(() => {});
   }, [index, view]);
 
   const subItem = openSub ? items.find((it) => it.id === openSub) : undefined;
@@ -558,24 +559,36 @@ export function StreamMenu() {
 
   // Power view: the panel is centred over a full-monitor tinted scrim, so the
   // window is blown up to the monitor by `stream_menu_center` and the scrim is
-  // what covers the stream. Clicking it dismisses; hovering it clears the
-  // target (-2 = nothing) so no row or the X looks focused while the pointer is
-  // off the panel. -1 targets the X, 0.. the system rows.
+  // what covers the stream. Clicking it dismisses; hovering it clears focus
+  // (-2 = nothing) so no row or the X looks focused while the pointer is off the
+  // panel. -1 targets the X, 0.. the system rows.
   if (view === "power") {
     return (
       <div
         ref={rootRef}
-        onMouseEnter={() => setIndex(-2)}
         onClick={() => void invoke("stream_menu_hide")}
         className="flex h-full w-full items-center justify-center bg-(--color-overlay)"
       >
-        <div onClick={(e) => e.stopPropagation()}>{listColumn}</div>
+        {/* The wrapper's box is exactly the panel, so its `mouseleave` fires for
+            both gestures that should clear focus: onto the scrim, and off the
+            window entirely. One handler, no target inspection needed. */}
+        <div onMouseLeave={() => setIndex(-2)} onClick={(e) => e.stopPropagation()}>
+          {listColumn}
+        </div>
       </div>
     );
   }
 
   return (
-    <div ref={rootRef} className="flex w-max items-start gap-1.5 p-1.5">
+    <div
+      ref={rootRef}
+      // Same rule as the launcher's `useFocusOnHover` (hover = focus,
+      // `mouseleave` = blur), applied to the overlay's own `index`: leaving the
+      // window drops focus so nothing stays lit while the pointer is out over
+      // the stream. -2 = nothing focused.
+      onMouseLeave={() => setIndex(-2)}
+      className="flex w-max items-start gap-1.5 p-1.5"
+    >
       {listColumn}
 
       {/* Flyout column — any item with `children`. */}
