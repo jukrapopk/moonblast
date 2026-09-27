@@ -61,6 +61,21 @@ const HEIGHT: f64 = 560.0;
 /// Global-hotkey id for the summon shortcut (0x0000–0xBFFF).
 const HK_MENU: i32 = 0x2100;
 
+/// Nav keys, registered as global hotkeys while the menu is open. Hotkeys fire
+/// regardless of which window has focus — unlike the low-level keyboard hook,
+/// which goes deaf whenever a Chromium/WebView2 window is in the foreground
+/// (the same issue `mediakeys.rs` hit). The hook is kept only as a fallback for
+/// when these are already claimed.
+const NAV_HOTKEYS: [(i32, u32); 7] = [
+    (0x2201, 0x26), // up
+    (0x2202, 0x28), // down
+    (0x2203, 0x25), // left
+    (0x2204, 0x27), // right
+    (0x2205, 0x0D), // enter
+    (0x2206, 0x1B), // escape
+    (0x2207, 0x20), // space
+];
+
 /// Thread messages for the dedicated hotkey/hook thread.
 const WM_APP_MENU_HOOK: u32 = WM_APP + 20; // wParam: 1 arm hook, 0 disarm
 const WM_APP_MENU_NAV: u32 = WM_APP + 21; // wParam: VK forwarded to the webview
@@ -77,6 +92,9 @@ static DESIRED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 static VISIBLE: AtomicBool = AtomicBool::new(false);
 static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static HOOK_MOUSE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// True while nav is driven by global hotkeys (the preferred path) rather than
+/// the low-level keyboard-hook fallback.
+static NAV_VIA_HOTKEYS: AtomicBool = AtomicBool::new(false);
 static WATCHING: AtomicBool = AtomicBool::new(false);
 /// Physical-pixel rects of the two overlay windows, kept in atomics so the
 /// low-level mouse hook can test a click without ever taking a lock.
@@ -563,9 +581,16 @@ fn thread_main() {
             break;
         }
         match msg.message {
-            WM_HOTKEY if msg.wParam as i32 == HK_MENU => {
-                if let Some(app) = app_handle() {
-                    toggle_now(&app);
+            WM_HOTKEY => {
+                let id = msg.wParam as i32;
+                if id == HK_MENU {
+                    if let Some(app) = app_handle() {
+                        toggle_now(&app);
+                    }
+                } else if let Some(name) = nav_key_for_hotkey(id) {
+                    if let Some(app) = app_handle() {
+                        let _ = app.emit_to(LABEL, "menu-key", MenuKey { key: name.into() });
+                    }
                 }
             }
             WM_APP_MENU_NAV => {
@@ -639,42 +664,99 @@ fn unregister_hotkey() {
 }
 
 fn set_hook(arm: bool) {
-    let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
     if arm {
-        if HOOK.load(Ordering::SeqCst).is_null() {
-            let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(nav_proc), hmod, 0) };
-            if hook.is_null() {
-                moonblast_log!("overlay: keyboard hook install failed");
-            } else {
-                HOOK.store(hook, Ordering::SeqCst);
-                moonblast_log!("overlay: keyboard hook armed");
-            }
-        }
-        if HOOK_MOUSE.load(Ordering::SeqCst).is_null() {
-            let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hmod, 0) };
-            if hook.is_null() {
-                moonblast_log!("overlay: mouse hook install failed");
-            } else {
-                HOOK_MOUSE.store(hook, Ordering::SeqCst);
-                moonblast_log!("overlay: mouse hook armed");
-            }
-        }
+        arm_nav();
+        arm_mouse_hook();
     } else {
-        let hook = HOOK.swap(std::ptr::null_mut(), Ordering::SeqCst);
-        if !hook.is_null() {
-            unsafe {
-                UnhookWindowsHookEx(hook);
-            }
-            moonblast_log!("overlay: keyboard hook released");
+        disarm_nav();
+        disarm_mouse_hook();
+    }
+}
+
+/// Nav input: global hotkeys first (focus-independent), low-level keyboard hook
+/// only as a fallback. The hook is deaf while a Chromium/WebView2 window has
+/// focus, which is exactly the "arrows sometimes don't work" symptom.
+fn arm_nav() {
+    if register_nav_hotkeys() {
+        NAV_VIA_HOTKEYS.store(true, Ordering::SeqCst);
+        moonblast_log!("overlay: nav hotkeys registered");
+        return;
+    }
+    let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
+    let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(nav_proc), hmod, 0) };
+    if hook.is_null() {
+        moonblast_log!("overlay: nav input unavailable (hotkeys + hook both failed)");
+    } else {
+        HOOK.store(hook, Ordering::SeqCst);
+        moonblast_log!("overlay: nav hotkeys taken; using keyboard-hook fallback");
+    }
+}
+
+fn disarm_nav() {
+    if NAV_VIA_HOTKEYS.swap(false, Ordering::SeqCst) {
+        unregister_nav_hotkeys();
+        moonblast_log!("overlay: nav hotkeys unregistered");
+    }
+    let hook = HOOK.swap(std::ptr::null_mut(), Ordering::SeqCst);
+    if !hook.is_null() {
+        unsafe {
+            UnhookWindowsHookEx(hook);
         }
-        let hook = HOOK_MOUSE.swap(std::ptr::null_mut(), Ordering::SeqCst);
-        if !hook.is_null() {
-            unsafe {
-                UnhookWindowsHookEx(hook);
-            }
-            moonblast_log!("overlay: mouse hook released");
+        moonblast_log!("overlay: keyboard hook released");
+    }
+}
+
+fn arm_mouse_hook() {
+    if !HOOK_MOUSE.load(Ordering::SeqCst).is_null() {
+        return;
+    }
+    let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
+    let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hmod, 0) };
+    if hook.is_null() {
+        moonblast_log!("overlay: mouse hook install failed");
+    } else {
+        HOOK_MOUSE.store(hook, Ordering::SeqCst);
+        moonblast_log!("overlay: mouse hook armed");
+    }
+}
+
+fn disarm_mouse_hook() {
+    let hook = HOOK_MOUSE.swap(std::ptr::null_mut(), Ordering::SeqCst);
+    if !hook.is_null() {
+        unsafe {
+            UnhookWindowsHookEx(hook);
+        }
+        moonblast_log!("overlay: mouse hook released");
+    }
+}
+
+/// Register the nav keys as global hotkeys. All-or-nothing: a partial success is
+/// rolled back so the hook fallback is unambiguous.
+fn register_nav_hotkeys() -> bool {
+    for (id, vk) in NAV_HOTKEYS {
+        if unsafe { RegisterHotKey(std::ptr::null_mut(), id, 0, vk) } == 0 {
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            moonblast_log!("overlay: nav RegisterHotKey(vk=0x{vk:02X}) failed (err={err})");
+            unregister_nav_hotkeys();
+            return false;
         }
     }
+    true
+}
+
+fn unregister_nav_hotkeys() {
+    for (id, _) in NAV_HOTKEYS {
+        unsafe {
+            UnregisterHotKey(std::ptr::null_mut(), id);
+        }
+    }
+}
+
+fn nav_key_for_hotkey(id: i32) -> Option<&'static str> {
+    NAV_HOTKEYS
+        .iter()
+        .find(|(hid, _)| *hid == id)
+        .and_then(|(_, vk)| nav_key_name(*vk))
 }
 
 /// Store a physical-pixel rect for the hook's hit test.
