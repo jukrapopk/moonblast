@@ -1,14 +1,7 @@
+import { Fragment } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  ArrowsOut,
-  ArrowsIn,
-  X,
-  Power,
-  Moon,
-  ArrowClockwise,
-  GameController,
-} from "@phosphor-icons/react";
 import { Modal } from "./ui/Modal";
+import { powerItems, type PowerItemId } from "./ui/powerItems";
 
 interface PowerMenuProps {
   open: boolean;
@@ -70,45 +63,30 @@ export function PowerMenu({
     }
   }
 
+  // Rows come from the shared definition; this context supplies the actions.
+  const actions: Record<PowerItemId, () => void> = {
+    fullscreen: onToggleFullscreen,
+    immersive: onToggleImmersive,
+    close: () => void run("close_app"),
+    sleep: () => void run("system_power", { action: "sleep" }),
+    reboot: () => void run("system_power", { action: "reboot" }),
+    shutdown: () => void run("system_power", { action: "shutdown" }),
+  };
+
   return (
     <Modal open={open} onClose={onClose} title="Power">
       <div className="space-y-1">
-        {!immersive && (
-          <MenuItem
-            icon={fullscreen ? <ArrowsIn size={18} weight="bold" /> : <ArrowsOut size={18} weight="bold" />}
-            label={fullscreen ? "Windowed" : "Fullscreen"}
-            onClick={onToggleFullscreen}
-          />
-        )}
-        <MenuItem
-          icon={<GameController size={18} weight="bold" />}
-          label={immersive ? "Exit Immersive Mode" : "Immersive Mode"}
-          onClick={onToggleImmersive}
-        />
-        <MenuItem
-          icon={<X size={18} weight="bold" />}
-          label="Close Moonblast"
-          onClick={() => run("close_app")}
-        />
-
-        <Divider />
-
-        <MenuItem
-          icon={<Moon size={18} weight="bold" />}
-          label="Sleep"
-          onClick={() => run("system_power", { action: "sleep" })}
-        />
-        <MenuItem
-          icon={<ArrowClockwise size={18} weight="bold" />}
-          label="Reboot"
-          onClick={() => run("system_power", { action: "reboot" })}
-        />
-        <MenuItem
-          icon={<Power size={18} weight="bold" />}
-          label="Shutdown"
-          danger
-          onClick={() => run("system_power", { action: "shutdown" })}
-        />
+        {powerItems({ variant: "launcher", immersive, fullscreen }).map((item) => (
+          <Fragment key={item.id}>
+            <MenuItem
+              icon={item.icon}
+              label={item.label}
+              danger={item.danger}
+              onClick={actions[item.id]}
+            />
+            {item.dividerAfter && <Divider />}
+          </Fragment>
+        ))}
       </div>
     </Modal>
   );

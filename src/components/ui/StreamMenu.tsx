@@ -14,9 +14,11 @@ import {
   Plugs,
   Power,
   Sliders,
+  X,
   XCircle,
 } from "@phosphor-icons/react";
 import { useSettings } from "../../settings/SettingsContext";
+import { powerItems } from "./powerItems";
 
 /** Mirror of Rust's `overlay::StreamToggles` (Moonlight's live stream state). */
 interface StreamToggles {
@@ -88,6 +90,8 @@ export function StreamMenu() {
   // Where the *keyboard* is. Hovering the flyout never moves it here.
   const [zone, setZone] = useState<"list" | "flyout">("list");
   const [flash, setFlash] = useState<string | null>(null);
+  // Which list the window shows: the floating menu, or the centred Power view.
+  const [view, setView] = useState<"menu" | "power">("menu");
   const [toggles, setToggles] = useState<StreamToggles>({
     stats: false,
     fullscreen: true,
@@ -162,8 +166,22 @@ export function StreamMenu() {
     { id: "power", kind: "action", label: "Power", icon: <Power size={19} weight="bold" /> },
   ];
 
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
+  // The Power view reuses the row machinery verbatim: its rows are plain
+  // actions from the shared definition, so they map onto the same `Item` shape.
+  const powerRows: Item[] = powerItems({ variant: "overlay" }).map((p) => ({
+    id: p.id,
+    kind: "action",
+    label: p.label,
+    icon: p.icon,
+    danger: p.danger,
+    dividerAfter: p.dividerAfter,
+  }));
+  const rows = view === "power" ? powerRows : items;
+
+  const itemsRef = useRef(rows);
+  itemsRef.current = rows;
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const indexRef = useRef(index);
   indexRef.current = index;
   const openSubRef = useRef(openSub);
@@ -177,6 +195,8 @@ export function StreamMenu() {
   const runRef = useRef<(i: number) => void>(() => {});
   const activateRef = useRef<(i: number) => void>(() => {});
   const runOptionRef = useRef<(i: number) => void>(() => {});
+  const openPowerRef = useRef<() => void>(() => {});
+  const runPowerRef = useRef<(id: string) => Promise<void>>(async () => {});
 
   // Flash a transient status message.
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,6 +217,11 @@ export function StreamMenu() {
       const item = itemsRef.current[i];
       if (!item) return;
       try {
+        // The Power view's rows are owned by Rust directly.
+        if (viewRef.current === "power") {
+          await runPowerRef.current(item.id);
+          return;
+        }
         if (item.kind === "toggle" && item.setting === "show_floating_menu") {
           const next = !showFloatingRef.current;
           update((s) => ({
@@ -219,7 +244,7 @@ export function StreamMenu() {
             await invoke("stream_menu_end_session");
             break;
           case "power":
-            await invoke("open_power_menu");
+            openPowerRef.current();
             break;
         }
       } catch (e) {
@@ -260,6 +285,38 @@ export function StreamMenu() {
   }, []);
   activateRef.current = activate;
 
+  /** Swap the window to the centred Power view. */
+  const openPowerView = useCallback(() => {
+    setView("power");
+    setIndex(0);
+    setOpenSub(null);
+    setZone("list");
+    void invoke("stream_menu_center", { centered: true }).catch(() => {});
+  }, []);
+  openPowerRef.current = openPowerView;
+
+  /**
+   * The Power view's actions — system rows only, all owned by Rust.
+   */
+  const runPower = useCallback(async (id: string) => {
+    switch (id) {
+      case "sleep":
+        await invoke("system_power", { action: "sleep" });
+        break;
+      case "reboot":
+        await invoke("system_power", { action: "reboot" });
+        break;
+      case "shutdown":
+        await invoke("system_power", { action: "shutdown" });
+        break;
+      default:
+        return;
+    }
+    // The machine is going down — take the overlay with it.
+    void invoke("stream_menu_hide").catch(() => {});
+  }, []);
+  runPowerRef.current = runPower;
+
   // The flyout follows the highlighted list row — by hover (mouse) and by
   // arrows (keyboard). While the keyboard is inside the flyout, leave it alone.
   useEffect(() => {
@@ -283,8 +340,10 @@ export function StreamMenu() {
         else if (key === "enter" || key === "space") runOptionRef.current(optionIndexRef.current);
         return;
       }
+      // The Power view has no trigger-button target, so its list floors at 0.
+      const floor = viewRef.current === "power" ? 0 : -1;
       if (key === "up") {
-        setIndex((v) => Math.max(-1, v - 1));
+        setIndex((v) => Math.max(floor, v - 1));
       } else if (key === "down") {
         setIndex((v) => Math.min(list.length - 1, v + 1));
       } else if (key === "right") {
@@ -295,9 +354,10 @@ export function StreamMenu() {
           setZone("flyout");
         }
       } else if (key === "enter" || key === "space") {
-        // Default target is the button → toggles the menu off.
+        // Default target is the button → toggles the menu off. In the Power view
+        // a bare -1 just means nothing is selected (the scrim was hovered).
         if (indexRef.current < 0) {
-          void invoke("stream_menu_hide");
+          if (viewRef.current === "menu") void invoke("stream_menu_hide");
           return;
         }
         const item = list[indexRef.current];
@@ -319,6 +379,8 @@ export function StreamMenu() {
       setOpenSub(null);
       setOptionIndex(0);
       setZone("list");
+      // Rust clears its centred flag on hide, so every summon starts on the menu.
+      setView("menu");
       refreshToggles();
       void emit("menu-focus", { on: true }).catch(() => {});
     });
@@ -344,6 +406,13 @@ export function StreamMenu() {
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const appliedSize = useRef({ w: 0, h: 0 });
   useEffect(() => {
+    // The Power view is monitor-sized (its scrim fills the screen) and Rust owns
+    // that size. Reset the guard on the way in/out so returning to the menu
+    // re-measures and shrinks the window back down to the panel.
+    if (view === "power") {
+      appliedSize.current = { w: 0, h: 0 };
+      return;
+    }
     const apply = () => {
       const root = rootRef.current;
       const list = listRef.current;
@@ -392,80 +461,115 @@ export function StreamMenu() {
     if (listRef.current) observer.observe(listRef.current);
     if (flyoutRef.current) observer.observe(flyoutRef.current);
     return () => observer.disconnect();
-  }, [openSub]);
+  }, [openSub, view]);
 
   // Tell the button window whether it is the current target, so it can show its
   // active ring (Rust clears it when the menu hides).
   useEffect(() => {
-    void emit("menu-focus", { on: index < 0 }).catch(() => {});
-  }, [index]);
+    void emit("menu-focus", { on: view === "menu" && index < 0 }).catch(() => {});
+  }, [index, view]);
 
   const subItem = openSub ? items.find((it) => it.id === openSub) : undefined;
 
-  return (
-    <div ref={rootRef} className="flex w-max items-start gap-1.5 p-1.5">
-      {/* List column. */}
-      <div
-        ref={listRef}
-        className="relative flex w-[288px] shrink-0 flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl"
-      >
-        <div className="space-y-0.5 p-1.5">
-          {items.map((item, i) => {
-            const selected = i === index;
-            return (
-              <Fragment key={item.id}>
-                <button
-                  type="button"
-                  ref={(el) => {
-                    rowRefs.current[i] = el;
-                  }}
-                  onMouseEnter={() => {
-                    setZone("list");
-                    setIndex(i);
-                  }}
-                  onClick={() => activateRef.current(i)}
-                  className={`flex w-full items-center gap-3 rounded-xl py-2.5 pr-3 pl-3 text-left transition-colors ${
-                    selected ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"
+  // The list column is identical in both views — only what surrounds it differs.
+  const listColumn = (
+    <div
+      ref={listRef}
+      className="relative flex w-[288px] shrink-0 flex-col overflow-hidden rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl"
+    >
+      {/* Power view only: the launcher modal's header, so the two read alike. */}
+      {view === "power" && (
+        <div className="flex items-center justify-between px-3 pt-2 pb-0.5">
+          <h2 className="text-lg font-semibold tracking-tight text-(--color-text)">Power</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => void invoke("stream_menu_hide")}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface-2) hover:text-(--color-text)"
+          >
+            <X size={20} weight="bold" />
+          </button>
+        </div>
+      )}
+      <div className="space-y-0.5 p-1.5">
+        {rows.map((item, i) => {
+          const selected = i === index;
+          return (
+            <Fragment key={item.id}>
+              <button
+                type="button"
+                ref={(el) => {
+                  rowRefs.current[i] = el;
+                }}
+                onMouseEnter={() => {
+                  setZone("list");
+                  setIndex(i);
+                }}
+                onClick={() => activateRef.current(i)}
+                className={`flex w-full items-center gap-3 rounded-xl py-2.5 pr-3 pl-3 text-left transition-colors ${
+                  selected ? "bg-(--color-accent-soft)" : "hover:bg-(--color-surface-2)"
+                }`}
+              >
+                <span
+                  className={
+                    item.danger
+                      ? "text-(--color-danger)"
+                      : selected
+                        ? "text-(--color-accent)"
+                        : "text-(--color-muted)"
+                  }
+                >
+                  {item.icon}
+                </span>
+                <span
+                  className={`flex-1 text-sm font-medium ${
+                    item.danger ? "text-(--color-danger)" : "text-(--color-text)"
                   }`}
                 >
-                  <span
-                    className={
-                      item.danger
-                        ? "text-(--color-danger)"
-                        : selected
-                          ? "text-(--color-accent)"
-                          : "text-(--color-muted)"
-                    }
-                  >
-                    {item.icon}
-                  </span>
-                  <span
-                    className={`flex-1 text-sm font-medium ${
-                      item.danger ? "text-(--color-danger)" : "text-(--color-text)"
-                    }`}
-                  >
-                    {item.label}
-                  </span>
-                  {item.kind === "toggle" && <Checkbox checked={!!item.checked} />}
-                  {item.kind === "submenu" && (
-                    <CaretRight size={14} weight="bold" className="text-(--color-muted)" />
-                  )}
-                </button>
-                {item.dividerAfter && <div className="mx-3 my-1 h-px bg-(--color-border)" />}
-              </Fragment>
-            );
-          })}
-        </div>
-
-        {/* Errors / confirmations only — no permanent footer. */}
-        {flash && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2">
-            <span className="rounded-full bg-(--color-surface-2) px-3 py-1 text-xs font-medium text-(--color-text) shadow-lg">
-              {flash}
-            </span>
-          </div>
-        )}
+                  {item.label}
+                </span>
+                {item.kind === "toggle" && <Checkbox checked={!!item.checked} />}
+                {item.kind === "submenu" && (
+                  <CaretRight size={14} weight="bold" className="text-(--color-muted)" />
+                )}
+              </button>
+              {item.dividerAfter && <div className="mx-3 my-1 h-px bg-(--color-border)" />}
+            </Fragment>
+          );
+        })}
       </div>
+
+      {/* Errors / confirmations only — no permanent footer. */}
+      {flash && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2">
+          <span className="rounded-full bg-(--color-surface-2) px-3 py-1 text-xs font-medium text-(--color-text) shadow-lg">
+            {flash}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+
+  // Power view: the panel is centred over a full-monitor tinted scrim, so the
+  // window is blown up to the monitor by `stream_menu_center` and the scrim is
+  // what covers the stream. Clicking it dismisses; hovering it drops the row
+  // highlight so nothing looks selected while the pointer is off the panel.
+  if (view === "power") {
+    return (
+      <div
+        ref={rootRef}
+        onMouseEnter={() => setIndex(-1)}
+        onClick={() => void invoke("stream_menu_hide")}
+        className="flex h-full w-full items-center justify-center bg-(--color-overlay)"
+      >
+        <div onClick={(e) => e.stopPropagation()}>{listColumn}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="flex w-max items-start gap-1.5 p-1.5">
+      {listColumn}
 
       {/* Flyout column — any item with `children`. */}
       {subItem && (

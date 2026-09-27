@@ -93,6 +93,9 @@ static APPLIED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 /// The hotkey we want registered (parsed from settings).
 static DESIRED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 static VISIBLE: AtomicBool = AtomicBool::new(false);
+/// Anchor the overlay to the monitor centre instead of the trigger button.
+/// Set by the Power view; cleared on hide so the next summon anchors again.
+static CENTERED: AtomicBool = AtomicBool::new(false);
 static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static HOOK_MOUSE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 /// True while nav is driven by global hotkeys (the preferred path) rather than
@@ -427,6 +430,15 @@ fn hide_now(app: &AppHandle) {
     }
     VISIBLE.store(false, Ordering::SeqCst);
     MENU_RECT_VALID.store(false, Ordering::Relaxed);
+    // Back to button-anchored for the next summon. The Power view blew the
+    // window up to the whole monitor, so restore the seed size too — otherwise
+    // `show_now` would place a full-screen transparent window and swallow the
+    // first click before the webview re-measures.
+    if CENTERED.swap(false, Ordering::SeqCst) {
+        if let Some(win) = app.get_webview_window(LABEL) {
+            let _ = win.set_size(tauri::LogicalSize::new(WIDTH, HEIGHT));
+        }
+    }
     arm_hook(false);
     // The button must not stay highlighted once the menu is gone.
     let _ = app.emit_to(BUTTON_LABEL, "menu-focus", MenuFocus { on: false });
@@ -654,22 +666,25 @@ fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
     // must extend to the right without dragging the list sideways.
     let anchor_w = (WIDTH * scale).round() as i32;
 
-    if let Some((bx, by, bw, bh)) = button_rect(app) {
-        let gap = (10.0 * scale).round() as i32;
-        let mut x = bx + bw / 2 - anchor_w / 2;
-        // Prefer opening just below the button; flip above when it won't fit.
-        let mut y = by + bh + gap;
-        if let Some((mx, my, mw, mh)) = monitor {
-            x = x.clamp(mx, (mx + mw - anchor_w).max(mx));
-            if y + h > my + mh {
-                let above = by - gap - h;
-                y = if above >= my { above } else { (my + mh - h).max(my) };
+    // The Power view is a modal: centre it instead of hanging it off the button.
+    if !CENTERED.load(Ordering::SeqCst) {
+        if let Some((bx, by, bw, bh)) = button_rect(app) {
+            let gap = (10.0 * scale).round() as i32;
+            let mut x = bx + bw / 2 - anchor_w / 2;
+            // Prefer opening just below the button; flip above when it won't fit.
+            let mut y = by + bh + gap;
+            if let Some((mx, my, mw, mh)) = monitor {
+                x = x.clamp(mx, (mx + mw - anchor_w).max(mx));
+                if y + h > my + mh {
+                    let above = by - gap - h;
+                    y = if above >= my { above } else { (my + mh - h).max(my) };
+                }
+                y = y.max(my);
             }
-            y = y.max(my);
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+            set_rect(&MENU_RECT, &MENU_RECT_VALID, x, y, w, h);
+            return;
         }
-        let _ = win.set_position(PhysicalPosition::new(x, y));
-        set_rect(&MENU_RECT, &MENU_RECT_VALID, x, y, w, h);
-        return;
     }
 
     let Some((x, y, rw, rh)) = monitor else {
@@ -1356,16 +1371,30 @@ pub fn stream_menu_end_session(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Bring the launcher forward and open its Power menu (reused by the overlay's
-/// Power item). The overlay is hidden first so it doesn't float over the modal.
+/// Show the overlay centered on the monitor instead of anchored to the button —
+/// used by the Power view, which is a modal with a full-monitor scrim.
+///
+/// The window is blown up to the whole monitor so the frontend can paint a
+/// tinted backdrop behind the centred panel; `hide_now` puts the seed size back
+/// so the next summon is placed before the webview re-measures.
 #[tauri::command]
-pub fn open_power_menu(app: AppHandle) {
-    hide_now(&app);
-    hide_button_now(&app);
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-        let _ = main.set_focus();
+pub fn stream_menu_center(app: AppHandle, centered: bool) {
+    CENTERED.store(centered, Ordering::SeqCst);
+    if !VISIBLE.load(Ordering::SeqCst) {
+        return;
     }
-    let _ = app.emit("request-power-menu", ());
+    let Some(win) = app.get_webview_window(LABEL) else {
+        return;
+    };
+    if !centered {
+        position(&app, &win);
+        return;
+    }
+    if let Some((mx, my, mw, mh)) =
+        stream_monitor_rect(&app).or_else(|| main_monitor_rect(&app))
+    {
+        let _ = win.set_position(PhysicalPosition::new(mx, my));
+        let _ = win.set_size(tauri::PhysicalSize::new(mw as u32, mh as u32));
+        set_rect(&MENU_RECT, &MENU_RECT_VALID, mx, my, mw, mh);
+    }
 }
