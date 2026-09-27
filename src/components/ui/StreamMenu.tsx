@@ -288,7 +288,9 @@ export function StreamMenu() {
   /** Swap the window to the centred Power view. */
   const openPowerView = useCallback(() => {
     setView("power");
-    setIndex(0);
+    // -1 targets the header's X, so the view opens with it focused; Down moves
+    // into the system rows. -2 means "nothing" (the scrim was hovered).
+    setIndex(-1);
     setOpenSub(null);
     setZone("list");
     void invoke("stream_menu_center", { centered: true }).catch(() => {});
@@ -340,10 +342,8 @@ export function StreamMenu() {
         else if (key === "enter" || key === "space") runOptionRef.current(optionIndexRef.current);
         return;
       }
-      // The Power view has no trigger-button target, so its list floors at 0.
-      const floor = viewRef.current === "power" ? 0 : -1;
       if (key === "up") {
-        setIndex((v) => Math.max(floor, v - 1));
+        setIndex((v) => Math.max(-1, v - 1));
       } else if (key === "down") {
         setIndex((v) => Math.min(list.length - 1, v + 1));
       } else if (key === "right") {
@@ -354,20 +354,21 @@ export function StreamMenu() {
           setZone("flyout");
         }
       } else if (key === "enter" || key === "space") {
-        // Default target is the button → toggles the menu off. In the Power view
-        // a bare -1 just means nothing is selected (the scrim was hovered).
-        if (indexRef.current < 0) {
-          if (viewRef.current === "menu") void invoke("stream_menu_hide");
+        const i = indexRef.current;
+        if (i < 0) {
+          // Menu view: -1 is the trigger button → toggles the overlay off.
+          // Power view: -1 is the header's X (dismiss), -2 is "nothing".
+          if (viewRef.current === "menu" || i === -1) void invoke("stream_menu_hide");
           return;
         }
-        const item = list[indexRef.current];
+        const item = list[i];
         if (item?.kind === "submenu") {
           setOpenSub(item.id);
           setOptionIndex(0);
           setZone("flyout");
           return;
         }
-        runRef.current(indexRef.current);
+        runRef.current(i);
       } else if (key === "escape") {
         if (openSubRef.current) setOpenSub(null);
         else void invoke("stream_menu_hide");
@@ -484,8 +485,13 @@ export function StreamMenu() {
           <button
             type="button"
             aria-label="Close"
+            onMouseEnter={() => setIndex(-1)}
             onClick={() => void invoke("stream_menu_hide")}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-(--color-muted) transition hover:bg-(--color-surface-2) hover:text-(--color-text)"
+            className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
+              index === -1
+                ? "bg-(--color-accent-soft) text-(--color-accent)"
+                : "text-(--color-muted) hover:bg-(--color-surface-2) hover:text-(--color-text)"
+            }`}
           >
             <X size={20} weight="bold" />
           </button>
@@ -552,13 +558,14 @@ export function StreamMenu() {
 
   // Power view: the panel is centred over a full-monitor tinted scrim, so the
   // window is blown up to the monitor by `stream_menu_center` and the scrim is
-  // what covers the stream. Clicking it dismisses; hovering it drops the row
-  // highlight so nothing looks selected while the pointer is off the panel.
+  // what covers the stream. Clicking it dismisses; hovering it clears the
+  // target (-2 = nothing) so no row or the X looks focused while the pointer is
+  // off the panel. -1 targets the X, 0.. the system rows.
   if (view === "power") {
     return (
       <div
         ref={rootRef}
-        onMouseEnter={() => setIndex(-1)}
+        onMouseEnter={() => setIndex(-2)}
         onClick={() => void invoke("stream_menu_hide")}
         className="flex h-full w-full items-center justify-center bg-(--color-overlay)"
       >
