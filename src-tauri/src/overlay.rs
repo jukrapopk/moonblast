@@ -341,19 +341,19 @@ fn available(app: &AppHandle) -> bool {
 // Show / hide / toggle
 // ---------------------------------------------------------------------------
 
-/// Called once a stream starts. Brings the floating menu up when the user has
-/// it enabled; otherwise nothing is shown until the summon hotkey. Runs on a
+/// Called once a stream starts. Offers the trigger button when the user has the
+/// floating menu enabled, so there's a visible way in beyond the hotkey — but
+/// deliberately does **not** open the menu: it would cover the stream the user
+/// just launched. The menu arrives on a click or on the summon hotkey. Runs on a
 /// short delay so Moonlight's own window exists and owns the foreground first.
-pub fn maybe_autoshow(app: &AppHandle) {
+pub fn on_stream_started(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(700));
         if !has_active_stream(&app) {
             return;
         }
-        if auto_show_enabled(&app) {
-            show_now(&app);
-        }
+        reconcile_button(&app);
     });
 }
 
