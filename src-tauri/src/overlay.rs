@@ -90,6 +90,12 @@ struct MenuKey {
     key: String,
 }
 
+/// Sent to the button window to (un)highlight it as the menu's current target.
+#[derive(Clone, serde::Serialize)]
+struct MenuFocus {
+    on: bool,
+}
+
 #[derive(Clone, serde::Serialize)]
 pub struct ActiveStreamInfo {
     host: String,
@@ -284,6 +290,8 @@ fn hide_now(app: &AppHandle) {
     VISIBLE.store(false, Ordering::SeqCst);
     MENU_RECT_VALID.store(false, Ordering::Relaxed);
     arm_hook(false);
+    // The button must not stay highlighted once the menu is gone.
+    let _ = app.emit_to(BUTTON_LABEL, "menu-focus", MenuFocus { on: false });
     moonblast_log!("overlay: hidden");
 }
 

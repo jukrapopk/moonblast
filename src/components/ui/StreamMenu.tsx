@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   ArrowsIn,
   ChartLineUp,
@@ -34,7 +34,8 @@ export function StreamMenu() {
   const { settings, update } = useSettings();
   const showFloating = settings.moonlight.show_floating_menu;
 
-  const [index, setIndex] = useState(0);
+  // -1 = the trigger button itself (the default target); 0.. = a list row.
+  const [index, setIndex] = useState(-1);
   const [flash, setFlash] = useState<string | null>(null);
 
   const items: Item[] = [
@@ -120,23 +121,34 @@ export function StreamMenu() {
     const onKey = (key: string) => {
       const count = itemsRef.current.length;
       if (key === "up") {
-        setIndex((i) => (i - 1 + count) % count);
+        setIndex((i) => Math.max(-1, i - 1));
       } else if (key === "down") {
-        setIndex((i) => (i + 1) % count);
+        setIndex((i) => Math.min(count - 1, i + 1));
       } else if (key === "enter" || key === "space") {
-        runRef.current(indexRef.current);
+        // Default target is the button → toggles the menu off.
+        if (indexRef.current < 0) void invoke("stream_menu_hide");
+        else runRef.current(indexRef.current);
       } else if (key === "escape") {
         void invoke("stream_menu_hide");
       }
     };
     const unKeys = listen<{ key: string }>("menu-key", (e) => onKey(e.payload.key));
-    const unShown = listen("menu-shown", () => setIndex(0));
+    const unShown = listen("menu-shown", () => {
+      setIndex(-1);
+      void emit("menu-focus", { on: true }).catch(() => {});
+    });
     return () => {
       void unKeys.then((f) => f());
       void unShown.then((f) => f());
       if (flashTimer.current) clearTimeout(flashTimer.current);
     };
   }, []);
+
+  // Tell the button window whether it is the current target, so it can show its
+  // active ring (Rust clears it when the menu hides).
+  useEffect(() => {
+    void emit("menu-focus", { on: index < 0 }).catch(() => {});
+  }, [index]);
 
   return (
     <div className="flex h-full w-full p-1.5">

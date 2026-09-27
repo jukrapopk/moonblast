@@ -1,6 +1,8 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { MoonblastMark } from "./MoonblastMark";
 
 interface DragState {
   startX: number;
@@ -9,62 +11,6 @@ interface DragState {
   winY: number;
   scale: number;
   moved: boolean;
-}
-
-/** Inline Moonblast mark. Deliberately an inline `<svg>` (not an `<img>`) so
- *  there is no separate image layer in this tiny transparent window. */
-function MoonblastMark() {
-  const stroke = "rgb(179,214,229)";
-  return (
-    <svg
-      viewBox="0 0 1000 1000"
-      className="h-6 w-6"
-      aria-hidden="true"
-      style={{
-        fillRule: "evenodd",
-        clipRule: "evenodd",
-        strokeLinecap: "round",
-        strokeLinejoin: "round",
-        strokeMiterlimit: 1.5,
-      }}
-    >
-      <g transform="matrix(1.26435,0,0,1.26435,-132.175,-132.175)">
-        <circle cx="500" cy="500" r="172.756" fill={stroke} />
-      </g>
-      <g transform="matrix(2.43731,0,0,2.43731,-718.656,-718.656)">
-        <path
-          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
-          fill="none"
-          stroke={stroke}
-          strokeWidth="56.35"
-        />
-      </g>
-      <g transform="matrix(-2.43731,0,0,2.43731,1718.66,-718.656)">
-        <path
-          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
-          fill="none"
-          stroke={stroke}
-          strokeWidth="56.35"
-        />
-      </g>
-      <g transform="matrix(-2.43731,2.98485e-16,-2.98485e-16,-2.43731,1718.66,1718.7)">
-        <path
-          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
-          fill="none"
-          stroke={stroke}
-          strokeWidth="56.35"
-        />
-      </g>
-      <g transform="matrix(2.43731,-2.98485e-16,-2.98485e-16,-2.43731,-718.656,1718.7)">
-        <path
-          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
-          fill="none"
-          stroke={stroke}
-          strokeWidth="56.35"
-        />
-      </g>
-    </svg>
-  );
 }
 
 /**
@@ -79,6 +25,15 @@ function MoonblastMark() {
 export function StreamButton() {
   const drag = useRef<DragState | null>(null);
   const followPending = useRef(false);
+  // True while the open menu's current target is the button itself (its default
+  // state) — shows the accent ring. The menu drives it; Rust clears it on hide.
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    const un = listen<{ on: boolean }>("menu-focus", (e) => setFocused(e.payload.on));
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
 
   function scheduleFollow() {
     if (followPending.current) return;
@@ -135,10 +90,22 @@ export function StreamButton() {
       onPointerCancel={onPointerUp}
       className="flex h-full w-full cursor-grab items-center justify-center active:cursor-grabbing"
     >
-      <div className="group flex aspect-square h-full items-center justify-center rounded-full bg-(--color-surface-2) p-0.5">
+      <div
+        className={`group flex aspect-square h-full items-center justify-center rounded-full bg-(--color-surface-2) p-0.5 text-[#b3d6e5] transition-shadow duration-150 ${
+          // Tint the whole circle while the button is the menu's target (a huge
+          // inset shadow = a tint layer, painted under the ring/logo).
+          focused ? "[box-shadow:inset_0_0_0_100px_var(--color-accent-soft)]" : ""
+        }`}
+      >
         {/* The highlight ring is drawn 2px inside the circle (inner element at
          *  40px) so nothing sits on the outer edge — no clipping artifacts. */}
-        <div className="flex h-full w-full items-center justify-center rounded-full ring-1 ring-inset ring-transparent transition-colors duration-150 group-hover:ring-(--color-accent) group-active:ring-(--color-accent)">
+        <div
+          className={`flex h-full w-full items-center justify-center rounded-full ring-1 ring-inset transition-colors duration-150 ${
+            focused
+              ? "ring-(--color-accent)"
+              : "ring-transparent group-hover:ring-(--color-accent) group-active:ring-(--color-accent)"
+          }`}
+        >
           <MoonblastMark />
         </div>
       </div>
