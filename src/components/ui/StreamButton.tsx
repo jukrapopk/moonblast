@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 
@@ -11,23 +11,75 @@ interface DragState {
   moved: boolean;
 }
 
+/** Inline Moonblast mark. Deliberately an inline `<svg>` (not an `<img>`) so
+ *  there is no separate image layer in this tiny transparent window. */
+function MoonblastMark() {
+  const stroke = "rgb(179,214,229)";
+  return (
+    <svg
+      viewBox="0 0 1000 1000"
+      className="h-6 w-6"
+      aria-hidden="true"
+      style={{
+        fillRule: "evenodd",
+        clipRule: "evenodd",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        strokeMiterlimit: 1.5,
+      }}
+    >
+      <g transform="matrix(1.26435,0,0,1.26435,-132.175,-132.175)">
+        <circle cx="500" cy="500" r="172.756" fill={stroke} />
+      </g>
+      <g transform="matrix(2.43731,0,0,2.43731,-718.656,-718.656)">
+        <path
+          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+          fill="none"
+          stroke={stroke}
+          strokeWidth="56.35"
+        />
+      </g>
+      <g transform="matrix(-2.43731,0,0,2.43731,1718.66,-718.656)">
+        <path
+          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+          fill="none"
+          stroke={stroke}
+          strokeWidth="56.35"
+        />
+      </g>
+      <g transform="matrix(-2.43731,2.98485e-16,-2.98485e-16,-2.43731,1718.66,1718.7)">
+        <path
+          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+          fill="none"
+          stroke={stroke}
+          strokeWidth="56.35"
+        />
+      </g>
+      <g transform="matrix(2.43731,-2.98485e-16,-2.98485e-16,-2.43731,-718.656,1718.7)">
+        <path
+          d="M500,327.244C580.348,327.244 647.958,382.215 667.241,456.568"
+          fill="none"
+          stroke={stroke}
+          strokeWidth="56.35"
+        />
+      </g>
+    </svg>
+  );
+}
+
 /**
  * Contents of the `stream-button` window — a small, draggable, always-on-top
- * handle (Moonblast logo) that opens the floating menu (Parsec-style). It never
- * takes focus (`focusable(false)`), so it can sit over a stream without
- * disturbing input.
+ * handle that opens the floating menu (Parsec-style). It never takes focus
+ * (`focusable(false)`), so it can sit over a stream without disturbing input.
  *
- * Drag is done in JS: we track the *absolute* cursor delta from the press and
- * translate the window by the same amount, so the window moving under the
- * cursor can't feed back into the delta. A press that doesn't move past a small
- * threshold counts as a click and toggles the menu.
+ * Baseline for debugging: no ring / hover / press / transition effects — just
+ * the circle and the logo. Effects get added back one at a time once the
+ * rendering artifact is understood.
  */
 export function StreamButton() {
   const drag = useRef<DragState | null>(null);
-  const [active, setActive] = useState(false);
-  // Coalesce follow requests so a fast drag doesn't queue one IPC per move —
-  // Rust re-reads the button's live position, so the last request wins.
   const followPending = useRef(false);
+
   function scheduleFollow() {
     if (followPending.current) return;
     followPending.current = true;
@@ -50,7 +102,6 @@ export function StreamButton() {
       scale,
       moved: false,
     };
-    setActive(true);
   }
 
   async function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -62,14 +113,12 @@ export function StreamButton() {
     await getCurrentWindow().setPosition(
       new PhysicalPosition(Math.round(d.winX + dx), Math.round(d.winY + dy)),
     );
-    // Drag the open menu along with the button so it stays attached.
     scheduleFollow();
   }
 
   function onPointerUp() {
     const d = drag.current;
     drag.current = null;
-    setActive(false);
     if (!d) return;
     if (d.moved) scheduleFollow();
     else void invoke("stream_button_click").catch(() => {});
@@ -77,8 +126,8 @@ export function StreamButton() {
 
   return (
     // The wrapper fills the window (it owns the drag handlers); the visual is a
-    // square-aspect circle centered inside. `aspect-square h-full` keeps it a
-    // circle even if Windows clamps the window wider than tall.
+    // circle inside. No OS region clip anymore — the window is a plain
+    // transparent square and the circle is pure CSS.
     <div
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -86,14 +135,8 @@ export function StreamButton() {
       onPointerCancel={onPointerUp}
       className="flex h-full w-full cursor-grab items-center justify-center active:cursor-grabbing"
     >
-      <div
-        className={`flex aspect-square h-full items-center justify-center rounded-full border border-(--color-border) bg-(--color-surface-2) transition ${
-          active ? "scale-95" : "hover:border-(--color-accent)"
-        }`}
-      >
-        {/* Transparent vector logo — the bundled icon.png has a white
-         *  background and read as a blob on the dark circle. */}
-        <img src="/moonblast.svg" alt="Moonblast" draggable={false} className="h-6 w-6" />
+      <div className="flex aspect-square h-full items-center justify-center rounded-full bg-(--color-surface-2)">
+        <MoonblastMark />
       </div>
     </div>
   );
