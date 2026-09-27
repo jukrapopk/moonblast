@@ -237,14 +237,6 @@ pub fn init(app: AppHandle) {
         *d = desired;
     }
     std::thread::spawn(thread_main);
-    // UI-work gate: surface the trigger button at startup too (no stream).
-    if MENU_ALWAYS_AVAILABLE {
-        let app = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(1200));
-            show_button_now(&app);
-        });
-    }
     moonblast_log!("overlay: hotkey thread started");
 }
 
@@ -328,13 +320,10 @@ fn active_stream_full(app: &AppHandle) -> Option<(String, String, u32)> {
     None
 }
 
-/// TEMP UI-work gate: when `true`, the floating menu behaves as if a stream is
-/// always running — summonable anywhere, never auto-hiding. Flip to `false`
-/// (or delete this const and the `||` below) for production.
-const MENU_ALWAYS_AVAILABLE: bool = true;
-
+/// Everything the overlay offers is gated on a live stream Moonblast launched:
+/// `StreamState` holds the child we spawned, and `try_wait` tells us it's alive.
 fn has_active_stream(app: &AppHandle) -> bool {
-    MENU_ALWAYS_AVAILABLE || active_stream_full(app).is_some()
+    active_stream_full(app).is_some()
 }
 
 fn auto_show_enabled(app: &AppHandle) -> bool {
