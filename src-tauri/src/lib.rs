@@ -39,7 +39,6 @@ mod shell;
 mod theme;
 mod wifi;
 mod audio;
-mod brightness;
 mod mediakeys;
 mod osd;
 
@@ -2394,7 +2393,6 @@ fn suppress_shell(hidden: bool) {
         let _ = Command::new("explorer.exe").spawn();
     }
     mediakeys::set_active(hidden);
-    brightness::set_immersive_watch(hidden);
 }
 
 /// Minimize every visible top-level window except our own, so nothing shows
@@ -2473,47 +2471,6 @@ async fn exit_immersive() -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-/// Read the brightness of a display (`kind` tells the frontend whether it's
-/// WMI-internal, DDC/CI-external, or unsupported). No polling — called on
-/// modal open / monitor switch.
-#[tauri::command]
-async fn display_brightness(device_name: Option<String>) -> Result<brightness::Brightness, String> {
-    tauri::async_runtime::spawn_blocking(move || brightness::get_for(device_name.as_deref()))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Set a display's brightness. `min`/`max` are passed back only so the OSD can
-/// normalise its bar; `kind` dispatches to the WMI or DDC/CI path.
-#[tauri::command]
-async fn set_display_brightness(
-    app: AppHandle,
-    device_name: Option<String>,
-    value: u32,
-    min: u32,
-    max: u32,
-    kind: String,
-) -> Result<(), String> {
-    let name = device_name.clone();
-    let kind_for_set = kind.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        brightness::set_for(name.as_deref(), value, &kind_for_set)
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    if result.is_ok() && kind != "none" {
-        osd::show_brightness(&app, value, min, max);
-    }
-    result
-}
-
-/// Enable/disable the brightness change-watch while the Display modal is open
-/// (keeps its slider live). The watch also runs in Immersive Mode for the OSD.
-#[tauri::command]
-fn set_modal_brightness_watch(on: bool) {
-    brightness::set_modal_watch(on);
 }
 
 #[derive(serde::Serialize)]
@@ -3047,16 +3004,13 @@ pub fn run() {
         .setup(|app| {
             app.manage(settings::SettingsState::load(app.handle()));
             app.manage(StreamState::default());
-            // Arm the volume-key handler's app handle so it can show the OSD
-            // once Immersive Mode suppresses Explorer (which is what normally
-            // handles the hardware volume keys + flyout). The OSD window itself
-            // is created lazily when the hook first activates (see
-            // `mediakeys::set_active`), so users who never enter Immersive Mode
-            // don't pay for a second webview.
+            // Arm the volume-key handler's app handle so it can emit
+            // `volume-key` once Immersive Mode suppresses Explorer (which is
+            // what normally handles the hardware volume keys + flyout). The
+            // OSD window itself is created lazily when the hook first activates
+            // (see `mediakeys::set_active`), so users who never enter Immersive
+            // Mode don't pay for a second webview.
             mediakeys::init(app.handle().clone());
-            // Watches the internal panel's brightness for hardware-key changes
-            // (no push API exists) so the OSD + Display modal stay live.
-            brightness::init(app.handle().clone());
             // Drop any stale `HKCU\...\Run\Moonblast` from the previous build
             // that had a Start with Windows toggle — otherwise upgrading
             // users would briefly see two Moonblast.exe processes at
@@ -3144,9 +3098,6 @@ pub fn run() {
             booted_as_shell,
             enter_immersive,
             exit_immersive,
-            display_brightness,
-            set_display_brightness,
-            set_modal_brightness_watch,
             battery,
             wifi_current,
             wifi_scan,

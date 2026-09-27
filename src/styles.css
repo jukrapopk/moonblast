@@ -77,7 +77,7 @@ body,
 }
 
 /* Volume OSD window: the window itself is transparent with rounded corners —
- * only the inner card rendered by Osd should paint. */
+ * only the inner card rendered by VolumeOsd should paint. */
 html[data-window="osd"],
 html[data-window="osd"] body,
 html[data-window="osd"] #root {
