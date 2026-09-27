@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
-import logo from "../../../src-tauri/icons/icon.png";
 
 interface DragState {
   startX: number;
@@ -77,6 +76,9 @@ export function StreamButton() {
   }
 
   return (
+    // The wrapper fills the window (it owns the drag handlers); the visual is a
+    // square-aspect circle centered inside. `aspect-square h-full` keeps it a
+    // circle even if Windows clamps the window wider than tall.
     <div
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -85,16 +87,13 @@ export function StreamButton() {
       className="flex h-full w-full cursor-grab items-center justify-center active:cursor-grabbing"
     >
       <div
-        className={`flex h-11 w-11 items-center justify-center rounded-full border border-(--color-border) bg-(--color-surface-2) shadow-2xl transition ${
+        className={`flex aspect-square h-full items-center justify-center rounded-full border border-(--color-border) bg-(--color-surface-2) transition ${
           active ? "scale-95" : "hover:border-(--color-accent)"
         }`}
       >
-        <img
-          src={logo}
-          alt="Moonblast"
-          draggable={false}
-          className="h-6 w-6 rounded-full object-contain"
-        />
+        {/* Transparent vector logo — the bundled icon.png has a white
+         *  background and read as a blob on the dark circle. */}
+        <img src="/moonblast.svg" alt="Moonblast" draggable={false} className="h-6 w-6" />
       </div>
     </div>
   );

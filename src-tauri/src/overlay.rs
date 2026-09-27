@@ -295,7 +295,9 @@ fn hide_now(app: &AppHandle) {
 // ---------------------------------------------------------------------------
 
 pub const BUTTON_LABEL: &str = "stream-button";
-const BUTTON_SIZE: f64 = 56.0;
+/// Sized to the button itself — the window isn't click-through, so any extra
+/// transparent margin would swallow clicks meant for the game underneath.
+const BUTTON_SIZE: f64 = 44.0;
 const BUTTON_MARGIN: f64 = 16.0;
 
 static BUTTON_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -307,6 +309,9 @@ fn ensure_button_window(app: &AppHandle) -> bool {
     match WebviewWindowBuilder::new(app, BUTTON_LABEL, WebviewUrl::App("index.html".into()))
         .title("Moonblast Menu Button")
         .inner_size(BUTTON_SIZE, BUTTON_SIZE)
+        // Windows otherwise clamps a fresh window to SM_CXMINTRACK (136px),
+        // which turned the button into a wide pill.
+        .min_inner_size(BUTTON_SIZE, BUTTON_SIZE)
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
@@ -317,7 +322,10 @@ fn ensure_button_window(app: &AppHandle) -> bool {
         .visible(false)
         .build()
     {
-        Ok(_) => {
+        Ok(win) => {
+            let _ = win.set_min_size(Some(tauri::LogicalSize::new(BUTTON_SIZE, BUTTON_SIZE)));
+            let _ = win.set_size(tauri::LogicalSize::new(BUTTON_SIZE, BUTTON_SIZE));
+            apply_circle_region(&win);
             moonblast_log!("overlay: button window created");
             true
         }
@@ -328,6 +336,46 @@ fn ensure_button_window(app: &AppHandle) -> bool {
     }
 }
 
+/// Clip the button window to a circle (`SetWindowRgn`). A plain rectangular
+/// window would keep a hot square around the round button — its corners would
+/// swallow clicks meant for the game. A circular region makes the hit area a
+/// circle too, and lets corner clicks fall through.
+fn apply_circle_region(win: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Graphics::Gdi::{CreateEllipticRgn, DeleteObject, SetWindowRgn};
+    let Ok(hwnd) = win.hwnd() else {
+        return;
+    };
+    let Ok(size) = win.inner_size() else {
+        return;
+    };
+    let w = size.width as i32;
+    let h = size.height as i32;
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    // A circle of diameter min(w, h), centered. Normally w == h, but if Windows
+    // clamped the window to a wider minimum this still yields a circle whose
+    // center matches the centered CSS circle.
+    let d = w.min(h);
+    let x0 = (w - d) / 2;
+    let y0 = (h - d) / 2;
+    let hrgn = unsafe { CreateEllipticRgn(x0, y0, x0 + d, y0 + d) };
+    if hrgn.is_null() {
+        moonblast_log!("overlay: CreateEllipticRgn failed");
+        return;
+    }
+    // On success the system owns the region; on failure we must free it.
+    if unsafe { SetWindowRgn(hwnd.0 as _, hrgn, 1) } == 0 {
+        let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        moonblast_log!("overlay: SetWindowRgn failed (err={err}, {w}x{h})");
+        unsafe {
+            DeleteObject(hrgn);
+        }
+    } else {
+        moonblast_log!("overlay: button circle region applied ({w}x{h})");
+    }
+}
+
 /// Default resting spot: top-center of the stream's monitor. Only applied when
 /// the button is shown; the user's drag keeps its position for the session.
 fn position_button(app: &AppHandle, win: &tauri::WebviewWindow) {
@@ -335,15 +383,23 @@ fn position_button(app: &AppHandle, win: &tauri::WebviewWindow) {
         .get_webview_window("main")
         .and_then(|m| m.scale_factor().ok())
         .unwrap_or(1.0);
-    let size = (BUTTON_SIZE * scale).round() as i32;
     let margin = (BUTTON_MARGIN * scale).round() as i32;
     let Some((x, y, rw, _rh)) = stream_monitor_rect(app).or_else(|| main_monitor_rect(app)) else {
         return;
     };
-    let px = x + ((rw - size) / 2).max(0);
+    // Use the window's real size (Windows may have clamped it), so the circle
+    // still ends up centered on the monitor.
+    let (w, h) = win
+        .outer_size()
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or_else(|_| {
+            let s = (BUTTON_SIZE * scale).round() as i32;
+            (s, s)
+        });
+    let px = x + ((rw - w) / 2).max(0);
     let py = y + margin;
     let _ = win.set_position(PhysicalPosition::new(px, py));
-    set_rect(&BUTTON_RECT, &BUTTON_RECT_VALID, px, py, size, size);
+    set_rect(&BUTTON_RECT, &BUTTON_RECT_VALID, px, py, w, h);
 }
 
 fn show_button_now(app: &AppHandle) {
@@ -352,6 +408,9 @@ fn show_button_now(app: &AppHandle) {
     }
     if let Some(win) = app.get_webview_window(BUTTON_LABEL) {
         position_button(app, &win);
+        // Re-assert the circular region (its size follows the window, e.g. on a
+        // DPI change).
+        apply_circle_region(&win);
         let _ = win.show();
         let _ = win.set_always_on_top(true);
     }
