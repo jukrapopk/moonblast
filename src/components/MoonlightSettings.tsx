@@ -7,6 +7,7 @@ import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import type { HdrStatus } from "./SettingsView";
 import { Prompt } from "./ui/Prompt";
+import { HotkeyInput } from "./ui/HotkeyInput";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
 import { Segmented } from "./ui/Segmented";
@@ -63,6 +64,11 @@ export function MoonlightSettings() {
   function set<K extends keyof typeof m>(key: K, value: (typeof m)[K]) {
     update((s) => ({ ...s, moonlight: { ...s.moonlight, [key]: value } }));
   }
+
+  // Floating menu (`overlay.rs`) — stored in the Moonlight streaming prefs and
+  // surfaced in its own group at the top of this page.
+  const showFloatingMenu = m.show_floating_menu;
+  const floatingMenuHotkey = m.floating_menu_hotkey;
 
   const [detected, setDetected] = useState<ClientDisplay | null>(null);
   useEffect(() => {
@@ -158,6 +164,24 @@ export function MoonlightSettings() {
         transition={{ duration: 0.2 }}
         className="space-y-6"
       >
+        <Section title="Floating Menu">
+          <Row
+            label="Show floating menu"
+            description="Floats over the stream when it starts"
+          >
+            <Toggle
+              checked={showFloatingMenu}
+              onChange={(v) => set("show_floating_menu", v)}
+            />
+          </Row>
+          <Row label="Shortcut" description="Summons the menu while streaming">
+            <HotkeyInput
+              value={floatingMenuHotkey}
+              onChange={(v) => set("floating_menu_hotkey", v)}
+            />
+          </Row>
+        </Section>
+
         <Section title="Video">
           <Row label="Aspect ratio">
             {/* `data-first-content` marks the target for the Moonlight

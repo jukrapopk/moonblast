@@ -67,6 +67,12 @@ export interface Settings {
     mouse_buttons_swap: boolean;
     reverse_scroll_direction: boolean;
     capture_system_keys: string;
+    /** Auto-show the in-stream floating menu when a stream starts. The summon
+     *  hotkey always works regardless of this value. */
+    show_floating_menu: boolean;
+    /** Global shortcut that summons the floating menu (canonical, e.g.
+     *  "Ctrl+Shift+F10"). */
+    floating_menu_hotkey: string;
   };
   fullscreen: { suppress_explorer: boolean; auto_fullscreen: boolean; auto_immersive: boolean };
   customization: { show_time: boolean; show_date: boolean; show_display: boolean; show_wifi: boolean; show_battery: boolean; show_audio: boolean; show_bluetooth: boolean };
@@ -115,6 +121,8 @@ const DEFAULT_SETTINGS: Settings = {
     mouse_buttons_swap: false,
     reverse_scroll_direction: false,
     capture_system_keys: "never",
+    show_floating_menu: true,
+    floating_menu_hotkey: "Ctrl+Shift+F10",
   },
   fullscreen: { suppress_explorer: false, auto_fullscreen: false, auto_immersive: false },
   customization: { show_time: true, show_date: true, show_display: true, show_wifi: true, show_battery: true, show_audio: true, show_bluetooth: true },

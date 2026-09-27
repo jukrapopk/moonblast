@@ -266,6 +266,7 @@ export default function App() {
   const setShowBattery = useSettingsField("customization", "show_battery");
   const setShowAudio = useSettingsField("customization", "show_audio");
 
+
   // Appearance — ThemeProvider observes settings.appearance via the
   // SettingsContext, so writing here triggers a re-apply on the next
   // render. The inline bootstrap script in index.html reads

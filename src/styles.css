@@ -80,7 +80,13 @@ body,
  * only the inner card rendered by VolumeOsd should paint. */
 html[data-window="osd"],
 html[data-window="osd"] body,
-html[data-window="osd"] #root {
+html[data-window="osd"] #root,
+html[data-window="stream-menu"],
+html[data-window="stream-menu"] body,
+html[data-window="stream-menu"] #root,
+html[data-window="stream-button"],
+html[data-window="stream-button"] body,
+html[data-window="stream-button"] #root {
   background: transparent;
 }
 

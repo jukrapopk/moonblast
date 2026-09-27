@@ -73,6 +73,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_floating_menu_hotkey() -> String {
+    "Ctrl+Shift+F10".to_string()
+}
+
 impl Default for Customization {
     fn default() -> Self {
         Self {
@@ -185,6 +189,17 @@ pub struct MoonlightStreaming {
     pub mouse_buttons_swap: bool,
     pub reverse_scroll_direction: bool,
     pub capture_system_keys: String, // "never" | "fullscreen" | "always"
+
+    // In-stream floating menu (`overlay.rs`). Surfaced in Moonlight → Settings.
+    /// Auto-show the floating menu when a stream starts. The summon hotkey is
+    /// always registered regardless of this value, so the menu can still be
+    /// called up when this is `false`.
+    #[serde(default = "default_true")]
+    pub show_floating_menu: bool,
+    /// Global shortcut that summons/toggles the floating menu, canonical form
+    /// (e.g. `"Ctrl+Shift+F10"`). Parsed in `overlay.rs`.
+    #[serde(default = "default_floating_menu_hotkey")]
+    pub floating_menu_hotkey: String,
 }
 
 impl Default for MoonlightStreaming {
@@ -220,6 +235,8 @@ impl Default for MoonlightStreaming {
             mouse_buttons_swap: false,
             reverse_scroll_direction: false,
             capture_system_keys: "never".to_string(),
+            show_floating_menu: true,
+            floating_menu_hotkey: default_floating_menu_hotkey(),
         }
     }
 }
@@ -340,6 +357,9 @@ pub fn update_settings(
     }
     let _ = save_settings(&app, &settings);
     let _ = app.emit("settings-changed", &settings);
+    // Apply any change to the floating-menu summon hotkey. Idempotent — a
+    // no-op unless the spec actually changed.
+    crate::overlay::on_settings_changed(&app, &settings);
     settings
 }
 

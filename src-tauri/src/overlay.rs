@@ -1,0 +1,969 @@
+//! The in-stream **floating menu** — a second, always-on-top Tauri window
+//! (`stream-menu`) that floats over a running Moonlight stream, Parsec-style.
+//!
+//! Unlike the volume OSD (`osd.rs`), this window is **interactive** (it has
+//! buttons) but must **never steal focus** from the stream, because Moonlight
+//! captures the keyboard/pointer and forwards them to the host game. So:
+//!
+//! - The window is `focusable(false)` (`WS_EX_NOACTIVATE`) — it can receive
+//!   mouse clicks but never becomes the foreground window.
+//! - Because it can't hold keyboard focus, its own React UI can't receive key
+//!   events. While it is visible we install a temporary `WH_KEYBOARD_LL` hook
+//!   that swallows the navigation keys (arrows / Enter / Escape) and forwards
+//!   them to the webview as `menu-key` events. That hook works here because the
+//!   foreground window is Moonlight (native Qt), *not* a Chromium/WebView2
+//!   window — the LL-hook deafness described in `mediakeys.rs` only bites when
+//!   a Chromium-family window is focused.
+//! - The summon hotkey is a `RegisterHotKey` global shortcut (works regardless
+//!   of which window is focused), armed for the whole app lifetime so it can
+//!   always bring the menu up even when `show_floating_menu` is off.
+//!
+//! Actions either run as Rust commands (Disconnect / End Session, which reuse
+//! the stream teardown) or inject Moonlight's own `Ctrl+Alt+Shift+<key>`
+//! shortcuts via `SendInput` (Moonlight is still the foreground window, so the
+//! injected chord lands on it).
+
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VK_CONTROL, VK_MENU, VK_SHIFT,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, PeekMessageW,
+    PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW, TranslateMessage,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
+    WM_SYSKEYUP,
+};
+
+use crate::moonblast_log;
+
+/// Window label; the frontend branches on it to render `StreamMenu` instead of
+/// the launcher, and the capability file lists it for event access.
+pub const LABEL: &str = "stream-menu";
+
+/// Fallback hotkey when settings hold an unparseable spec.
+const DEFAULT_HOTKEY: &str = "Ctrl+Shift+F10";
+
+const WIDTH: f64 = 300.0;
+const HEIGHT: f64 = 620.0;
+
+/// Global-hotkey id for the summon shortcut (0x0000–0xBFFF).
+const HK_MENU: i32 = 0x2100;
+
+/// Thread messages for the dedicated hotkey/hook thread.
+const WM_APP_MENU_HOOK: u32 = WM_APP + 20; // wParam: 1 arm hook, 0 disarm
+const WM_APP_MENU_NAV: u32 = WM_APP + 21; // wParam: VK forwarded to the webview
+const WM_APP_MENU_RELOAD: u32 = WM_APP + 22; // re-register the summon hotkey
+
+static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
+static STARTED: AtomicBool = AtomicBool::new(false);
+static THREAD_ID: AtomicU32 = AtomicU32::new(0);
+/// The currently-registered hotkey as `(modifiers, vk)`.
+static APPLIED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
+/// The hotkey we want registered (parsed from settings).
+static DESIRED: Mutex<Option<(u32, u32)>> = Mutex::new(None);
+static VISIBLE: AtomicBool = AtomicBool::new(false);
+static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static WATCHING: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, serde::Serialize)]
+struct MenuKey {
+    key: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct ActiveStreamInfo {
+    host: String,
+    app: String,
+}
+
+fn app_handle() -> Option<AppHandle> {
+    APP.lock().ok().and_then(|g| g.clone())
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+/// Store the app handle and start the hotkey/hook thread. Called once from
+/// `setup`. Idempotent.
+pub fn init(app: AppHandle) {
+    if let Ok(mut g) = APP.lock() {
+        *g = Some(app.clone());
+    }
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let desired = {
+        let state = app.state::<crate::settings::SettingsState>();
+        let guard = state.0.lock().unwrap();
+        parse_hotkey(&guard.moonlight.floating_menu_hotkey)
+            .or_else(|_| parse_hotkey(DEFAULT_HOTKEY))
+            .ok()
+    };
+    if let Ok(mut d) = DESIRED.lock() {
+        *d = desired;
+    }
+    std::thread::spawn(thread_main);
+    // UI-work gate: surface the trigger button at startup too (no stream).
+    if MENU_ALWAYS_AVAILABLE {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1200));
+            show_button_now(&app);
+        });
+    }
+    moonblast_log!("overlay: hotkey thread started");
+}
+
+/// Re-apply the summon hotkey after a settings write. No-op unless the spec
+/// actually changed.
+pub fn on_settings_changed(_app: &AppHandle, settings: &crate::settings::Settings) {
+    let parsed = parse_hotkey(&settings.moonlight.floating_menu_hotkey)
+        .or_else(|_| parse_hotkey(DEFAULT_HOTKEY))
+        .ok();
+    let changed = {
+        let mut desired = match DESIRED.lock() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        if *desired == parsed {
+            false
+        } else {
+            *desired = parsed;
+            true
+        }
+    };
+    if changed {
+        reload_hotkey();
+    }
+}
+
+fn reload_hotkey() {
+    let tid = THREAD_ID.load(Ordering::SeqCst);
+    if tid != 0 {
+        unsafe {
+            PostThreadMessageW(tid, WM_APP_MENU_RELOAD, 0, 0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Availability
+// ---------------------------------------------------------------------------
+
+/// The host + app + local PID of a live stream, if any.
+fn active_stream_full(app: &AppHandle) -> Option<(String, String, u32)> {
+    let state = app.try_state::<crate::StreamState>()?;
+    let mut map = state.0.lock().ok()?;
+    for (key, active) in map.iter_mut() {
+        if let Ok(None) = active.child.try_wait() {
+            if let Some((host, app_name)) = key.split_once('\u{1f}') {
+                return Some((host.to_string(), app_name.to_string(), active.child.id()));
+            }
+        }
+    }
+    None
+}
+
+/// TEMP UI-work gate: when `true`, the floating menu behaves as if a stream is
+/// always running — summonable anywhere, never auto-hiding. Flip to `false`
+/// (or delete this const and the `||` below) for production.
+const MENU_ALWAYS_AVAILABLE: bool = true;
+
+fn has_active_stream(app: &AppHandle) -> bool {
+    MENU_ALWAYS_AVAILABLE || active_stream_full(app).is_some()
+}
+
+fn auto_show_enabled(app: &AppHandle) -> bool {
+    let state = app.state::<crate::settings::SettingsState>();
+    let guard = state.0.lock().unwrap();
+    guard.moonlight.show_floating_menu
+}
+
+/// The hotkey / auto-show are only meaningful while a stream is running.
+fn available(app: &AppHandle) -> bool {
+    has_active_stream(app)
+}
+
+// ---------------------------------------------------------------------------
+// Show / hide / toggle
+// ---------------------------------------------------------------------------
+
+/// Called once a stream starts. Always offers the trigger button; opens the
+/// full menu too when the user has auto-show enabled. Runs on a short delay so
+/// Moonlight's own window exists and owns the foreground first.
+pub fn maybe_autoshow(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(700));
+        if !has_active_stream(&app) {
+            return;
+        }
+        show_button_now(&app);
+        if auto_show_enabled(&app) {
+            show_now(&app);
+        }
+    });
+}
+
+/// Request a toggle from a Tauri command (runs on the main thread, where
+/// window creation would deadlock — so hop to a worker).
+pub fn request_toggle(app: AppHandle) {
+    std::thread::spawn(move || toggle_now(&app));
+}
+
+/// Request a show from a Tauri command.
+pub fn request_show(app: AppHandle) {
+    std::thread::spawn(move || show_now(&app));
+}
+
+/// Request a hide from a Tauri command.
+pub fn request_hide(app: AppHandle) {
+    std::thread::spawn(move || hide_now(&app));
+}
+
+/// Hide both the menu and the trigger button (stream teardown).
+pub fn request_hide_all(app: AppHandle) {
+    std::thread::spawn(move || {
+        hide_now(&app);
+        hide_button_now(&app);
+    });
+}
+
+fn toggle_now(app: &AppHandle) {
+    if VISIBLE.load(Ordering::SeqCst) {
+        hide_now(app);
+    } else if available(app) {
+        show_now(app);
+    } else {
+        moonblast_log!("overlay: summon ignored (no active stream)");
+    }
+}
+
+fn show_now(app: &AppHandle) {
+    if !ensure_window(app) {
+        return;
+    }
+    if let Some(win) = app.get_webview_window(LABEL) {
+        position(app, &win);
+        let _ = win.show();
+        // Re-assert topmost in case another topmost window grabbed z-order.
+        let _ = win.set_always_on_top(true);
+    }
+    VISIBLE.store(true, Ordering::SeqCst);
+    arm_hook(true);
+    let _ = app.emit_to(LABEL, "menu-shown", ());
+    start_watch(app.clone());
+    moonblast_log!("overlay: shown");
+}
+
+fn hide_now(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(LABEL) {
+        let _ = win.hide();
+    }
+    VISIBLE.store(false, Ordering::SeqCst);
+    arm_hook(false);
+    moonblast_log!("overlay: hidden");
+}
+
+// ---------------------------------------------------------------------------
+// Floating trigger button (`stream-button`) — a small, draggable, always-on-top
+// handle that opens the menu (Parsec-style). Same non-focus-stealing rules as
+// the menu, but it stays put while streaming so there's a visible affordance
+// beyond the hotkey.
+// ---------------------------------------------------------------------------
+
+pub const BUTTON_LABEL: &str = "stream-button";
+const BUTTON_SIZE: f64 = 56.0;
+const BUTTON_MARGIN: f64 = 16.0;
+
+static BUTTON_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+fn ensure_button_window(app: &AppHandle) -> bool {
+    if app.get_webview_window(BUTTON_LABEL).is_some() {
+        return true;
+    }
+    match WebviewWindowBuilder::new(app, BUTTON_LABEL, WebviewUrl::App("index.html".into()))
+        .title("Moonblast Menu Button")
+        .inner_size(BUTTON_SIZE, BUTTON_SIZE)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .resizable(false)
+        .focusable(false)
+        .visible(false)
+        .build()
+    {
+        Ok(_) => {
+            moonblast_log!("overlay: button window created");
+            true
+        }
+        Err(e) => {
+            moonblast_log!("overlay: button window creation failed: {e}");
+            false
+        }
+    }
+}
+
+/// Default resting spot: top-center of the stream's monitor. Only applied when
+/// the button is shown; the user's drag keeps its position for the session.
+fn position_button(app: &AppHandle, win: &tauri::WebviewWindow) {
+    let scale = app
+        .get_webview_window("main")
+        .and_then(|m| m.scale_factor().ok())
+        .unwrap_or(1.0);
+    let size = (BUTTON_SIZE * scale).round() as i32;
+    let margin = (BUTTON_MARGIN * scale).round() as i32;
+    let Some((x, y, rw, _rh)) = stream_monitor_rect(app).or_else(|| main_monitor_rect(app)) else {
+        return;
+    };
+    let px = x + ((rw - size) / 2).max(0);
+    let _ = win.set_position(PhysicalPosition::new(px, y + margin));
+}
+
+fn show_button_now(app: &AppHandle) {
+    if !ensure_button_window(app) {
+        return;
+    }
+    if let Some(win) = app.get_webview_window(BUTTON_LABEL) {
+        position_button(app, &win);
+        let _ = win.show();
+        let _ = win.set_always_on_top(true);
+    }
+    BUTTON_VISIBLE.store(true, Ordering::SeqCst);
+    start_watch(app.clone());
+    moonblast_log!("overlay: button shown");
+}
+
+fn hide_button_now(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(BUTTON_LABEL) {
+        let _ = win.hide();
+    }
+    BUTTON_VISIBLE.store(false, Ordering::SeqCst);
+}
+
+/// Once anything is visible, hide the menu + button automatically if the
+/// stream ends (the user quit Moonlight directly, connection dropped, …).
+fn start_watch(app: AppHandle) {
+    if WATCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_millis(1000));
+            if !VISIBLE.load(Ordering::SeqCst) && !BUTTON_VISIBLE.load(Ordering::SeqCst) {
+                break;
+            }
+            if !has_active_stream(&app) {
+                hide_now(&app);
+                hide_button_now(&app);
+                break;
+            }
+        }
+        WATCHING.store(false, Ordering::SeqCst);
+    });
+}
+
+fn arm_hook(arm: bool) {
+    let tid = THREAD_ID.load(Ordering::SeqCst);
+    if tid != 0 {
+        unsafe {
+            PostThreadMessageW(tid, WM_APP_MENU_HOOK, if arm { 1 } else { 0 }, 0);
+        }
+    }
+}
+
+/// Create the window if it doesn't exist yet. Must not run on the main thread.
+fn ensure_window(app: &AppHandle) -> bool {
+    if app.get_webview_window(LABEL).is_some() {
+        return true;
+    }
+    match WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
+        .title("Moonblast Stream Menu")
+        .inner_size(WIDTH, HEIGHT)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .resizable(false)
+        // Never takes focus — the stream keeps keyboard + pointer capture.
+        .focusable(false)
+        .visible(false)
+        .build()
+    {
+        Ok(_) => {
+            moonblast_log!("overlay: window created");
+            true
+        }
+        Err(e) => {
+            moonblast_log!("overlay: window creation failed: {e}");
+            false
+        }
+    }
+}
+
+/// Place the menu. It "spawns from" the trigger button when that's up (anchored
+/// to it, flipping above/below to stay on-screen); otherwise it centers on the
+/// stream's monitor.
+fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
+    let scale = app
+        .get_webview_window("main")
+        .and_then(|m| m.scale_factor().ok())
+        .unwrap_or(1.0);
+    let w = (WIDTH * scale).round() as i32;
+    let h = (HEIGHT * scale).round() as i32;
+    let monitor = stream_monitor_rect(app).or_else(|| main_monitor_rect(app));
+
+    if let Some((bx, by, bw, bh)) = button_rect(app) {
+        let gap = (10.0 * scale).round() as i32;
+        let mut x = bx + bw / 2 - w / 2;
+        // Prefer opening just below the button; flip above when it won't fit.
+        let mut y = by + bh + gap;
+        if let Some((mx, my, mw, mh)) = monitor {
+            x = x.clamp(mx, (mx + mw - w).max(mx));
+            if y + h > my + mh {
+                let above = by - gap - h;
+                y = if above >= my { above } else { (my + mh - h).max(my) };
+            }
+            y = y.max(my);
+        }
+        let _ = win.set_position(PhysicalPosition::new(x, y));
+        return;
+    }
+
+    let Some((x, y, rw, rh)) = monitor else {
+        return;
+    };
+    let px = x + ((rw - w) / 2).max(0);
+    let py = y + ((rh - h) / 2).max(0);
+    let _ = win.set_position(PhysicalPosition::new(px, py));
+}
+
+/// Rect of the trigger button when it's currently showing.
+fn button_rect(app: &AppHandle) -> Option<(i32, i32, i32, i32)> {
+    if !BUTTON_VISIBLE.load(Ordering::SeqCst) {
+        return None;
+    }
+    let win = app.get_webview_window(BUTTON_LABEL)?;
+    let p = win.outer_position().ok()?;
+    let s = win.outer_size().ok()?;
+    Some((p.x, p.y, s.width as i32, s.height as i32))
+}
+
+/// `(x, y, width, height)` of the monitor the active stream lives on.
+fn stream_monitor_rect(app: &AppHandle) -> Option<(i32, i32, i32, i32)> {
+    let (_, _, pid) = active_stream_full(app)?;
+    let hwnd = hwnd_for_pid(pid)?;
+    let hmon = unsafe { MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTONEAREST) };
+    if hmon.is_null() {
+        return None;
+    }
+    let mut mi: MONITORINFO = unsafe { std::mem::zeroed() };
+    mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if unsafe { GetMonitorInfoW(hmon, &mut mi) } == 0 {
+        return None;
+    }
+    let r = mi.rcMonitor;
+    Some((r.left, r.top, r.right - r.left, r.bottom - r.top))
+}
+
+fn main_monitor_rect(app: &AppHandle) -> Option<(i32, i32, i32, i32)> {
+    let main = app.get_webview_window("main")?;
+    let m = main.current_monitor().ok().flatten()?;
+    let p = m.position();
+    let s = m.size();
+    Some((p.x, p.y, s.width as i32, s.height as i32))
+}
+
+/// Top-level visible window owned by `pid`, if any.
+fn hwnd_for_pid(pid: u32) -> Option<isize> {
+    let mut found = None;
+    crate::for_each_visible_window(|hwnd, owner| {
+        if owner == pid {
+            found = Some(hwnd);
+            false
+        } else {
+            true
+        }
+    });
+    found
+}
+
+// ---------------------------------------------------------------------------
+// Hotkey thread (message loop + LL keyboard hook)
+// ---------------------------------------------------------------------------
+
+fn thread_main() {
+    unsafe {
+        // The thread needs a message queue for both the hook and WM_HOTKEY.
+        let mut msg: MSG = std::mem::zeroed();
+        PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
+        THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
+    }
+    apply_hotkey();
+
+    loop {
+        let mut msg: MSG = unsafe { std::mem::zeroed() };
+        let r = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
+        if r <= 0 {
+            break;
+        }
+        match msg.message {
+            WM_HOTKEY if msg.wParam as i32 == HK_MENU => {
+                if let Some(app) = app_handle() {
+                    toggle_now(&app);
+                }
+            }
+            WM_APP_MENU_NAV => {
+                if let (Some(app), Some(name)) =
+                    (app_handle(), nav_key_name(msg.wParam as u32))
+                {
+                    let _ = app.emit_to(LABEL, "menu-key", MenuKey { key: name.into() });
+                }
+            }
+            WM_APP_MENU_HOOK => set_hook(msg.wParam == 1),
+            WM_APP_MENU_RELOAD => apply_hotkey(),
+            _ => unsafe {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            },
+        }
+    }
+
+    set_hook(false);
+    unregister_hotkey();
+    THREAD_ID.store(0, Ordering::SeqCst);
+    moonblast_log!("overlay: hotkey thread exiting");
+}
+
+/// Unregister the applied hotkey (if any) and register the desired one.
+fn apply_hotkey() {
+    let desired = DESIRED.lock().ok().and_then(|g| *g);
+    let mut applied = match APPLIED.lock() {
+        Ok(a) => a,
+        Err(_) => return,
+    };
+    if *applied == desired {
+        return;
+    }
+    if applied.is_some() {
+        unsafe {
+            UnregisterHotKey(std::ptr::null_mut(), HK_MENU);
+        }
+    }
+    *applied = None;
+    if let Some((mods, vk)) = desired {
+        let ok = unsafe {
+            RegisterHotKey(std::ptr::null_mut(), HK_MENU, mods | MOD_NOREPEAT, vk)
+        };
+        if ok != 0 {
+            *applied = Some((mods, vk));
+            moonblast_log!("overlay: hotkey registered (mods=0x{mods:04X}, vk=0x{vk:02X})");
+        } else {
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            moonblast_log!("overlay: RegisterHotKey failed (err={err})");
+        }
+    }
+}
+
+fn unregister_hotkey() {
+    if let Ok(mut applied) = APPLIED.lock() {
+        if applied.is_some() {
+            unsafe {
+                UnregisterHotKey(std::ptr::null_mut(), HK_MENU);
+            }
+            *applied = None;
+        }
+    }
+}
+
+fn set_hook(arm: bool) {
+    if arm {
+        if HOOK.load(Ordering::SeqCst).is_null() {
+            let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
+            let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(nav_proc), hmod, 0) };
+            if hook.is_null() {
+                moonblast_log!("overlay: keyboard hook install failed");
+            } else {
+                HOOK.store(hook, Ordering::SeqCst);
+                moonblast_log!("overlay: keyboard hook armed");
+            }
+        }
+    } else {
+        let hook = HOOK.swap(std::ptr::null_mut(), Ordering::SeqCst);
+        if !hook.is_null() {
+            unsafe {
+                UnhookWindowsHookEx(hook);
+            }
+            moonblast_log!("overlay: keyboard hook released");
+        }
+    }
+}
+
+/// Maps a nav virtual key to the string the webview understands.
+fn nav_key_name(vk: u32) -> Option<&'static str> {
+    Some(match vk {
+        0x26 => "up",
+        0x28 => "down",
+        0x25 => "left",
+        0x27 => "right",
+        0x0D => "enter",
+        0x1B => "escape",
+        0x20 => "space",
+        _ => return None,
+    })
+}
+
+/// Low-level hook callback: swallow the nav keys (both down and up, so the
+/// game never sees a stuck key) and forward the key-downs to the menu thread.
+unsafe extern "system" fn nav_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let msg = wparam as u32;
+        let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+        if down || up {
+            let kb = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
+            if nav_key_name(kb.vkCode).is_some() {
+                if down {
+                    let tid = THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        unsafe {
+                            PostThreadMessageW(tid, WM_APP_MENU_NAV, kb.vkCode as WPARAM, 0);
+                        }
+                    }
+                }
+                return 1;
+            }
+        }
+    }
+    unsafe { CallNextHookEx(HOOK.load(Ordering::SeqCst), code, wparam, lparam) }
+}
+
+// ---------------------------------------------------------------------------
+// Hotkey parsing
+// ---------------------------------------------------------------------------
+
+fn parse_hotkey(spec: &str) -> Result<(u32, u32), String> {
+    let mut mods = 0u32;
+    let mut vk: Option<u32> = None;
+    for part in spec.split('+') {
+        let p = part.trim().to_ascii_lowercase();
+        if p.is_empty() {
+            continue;
+        }
+        match p.as_str() {
+            "ctrl" | "control" => mods |= MOD_CONTROL,
+            "alt" => mods |= MOD_ALT,
+            "shift" => mods |= MOD_SHIFT,
+            "win" | "super" | "meta" => mods |= MOD_WIN,
+            other => {
+                if vk.is_some() {
+                    return Err("Shortcut can only contain one key".into());
+                }
+                vk = Some(vk_for_name(other).ok_or_else(|| format!("Unknown key '{other}'"))?);
+            }
+        }
+    }
+    let vk = vk.ok_or_else(|| "Shortcut needs a key".to_string())?;
+    if mods == 0 {
+        return Err("Shortcut needs at least one modifier (Ctrl/Alt/Shift/Win)".into());
+    }
+    if mods == (MOD_CONTROL | MOD_ALT | MOD_SHIFT) {
+        return Err("Ctrl+Alt+Shift is reserved by Moonlight".into());
+    }
+    Ok((mods, vk))
+}
+
+fn vk_for_name(name: &str) -> Option<u32> {
+    // F1..F24
+    if let Some(rest) = name.strip_prefix('f') {
+        if let Ok(n) = rest.parse::<u32>() {
+            if (1..=24).contains(&n) {
+                return Some(0x70 + (n - 1));
+            }
+        }
+    }
+    if name.len() == 1 {
+        let c = name.chars().next().unwrap();
+        if c.is_ascii_alphabetic() {
+            return Some(c.to_ascii_uppercase() as u32);
+        }
+        if c.is_ascii_digit() {
+            return Some(c as u32);
+        }
+    }
+    Some(match name {
+        "space" | "spacebar" => 0x20,
+        "tab" => 0x09,
+        "enter" | "return" => 0x0D,
+        "escape" | "esc" => 0x1B,
+        "backspace" => 0x08,
+        "insert" | "ins" => 0x2D,
+        "delete" | "del" => 0x2E,
+        "home" => 0x24,
+        "end" => 0x23,
+        "pageup" | "pgup" => 0x21,
+        "pagedown" | "pgdn" => 0x22,
+        "up" => 0x26,
+        "down" => 0x28,
+        "left" => 0x25,
+        "right" => 0x27,
+        "minus" | "-" => 0xBD,
+        "equal" | "=" => 0xBB,
+        "comma" | "," => 0xBC,
+        "period" | "." => 0xBE,
+        "slash" | "/" => 0xBF,
+        "backslash" | "\\" => 0xDC,
+        "semicolon" | ";" => 0xBA,
+        "quote" | "'" => 0xDE,
+        "bracketleft" | "[" => 0xDB,
+        "bracketright" | "]" => 0xDD,
+        "grave" | "`" => 0xC0,
+        _ => return None,
+    })
+}
+
+/// Validate + normalize a spec from the frontend. Returns the canonical form.
+pub fn validate_hotkey(spec: &str) -> Result<String, String> {
+    parse_hotkey(spec)?;
+    Ok(canonical_hotkey(spec))
+}
+
+fn canonical_hotkey(spec: &str) -> String {
+    let mut mods: Vec<&str> = Vec::new();
+    let mut key = String::new();
+    for part in spec.split('+') {
+        let p = part.trim().to_ascii_lowercase();
+        if p.is_empty() {
+            continue;
+        }
+        match p.as_str() {
+            "ctrl" | "control" => {
+                if !mods.contains(&"Ctrl") {
+                    mods.push("Ctrl")
+                }
+            }
+            "alt" => {
+                if !mods.contains(&"Alt") {
+                    mods.push("Alt")
+                }
+            }
+            "shift" => {
+                if !mods.contains(&"Shift") {
+                    mods.push("Shift")
+                }
+            }
+            "win" | "super" | "meta" => {
+                if !mods.contains(&"Win") {
+                    mods.push("Win")
+                }
+            }
+            other => {
+                key = display_key_name(other);
+            }
+        }
+    }
+    let mut out = mods.join("+");
+    if !out.is_empty() {
+        out.push('+');
+    }
+    out.push_str(&key);
+    out
+}
+
+fn display_key_name(lower: &str) -> String {
+    if lower.len() == 1 {
+        return lower.to_ascii_uppercase();
+    }
+    if let Some(rest) = lower.strip_prefix('f') {
+        if rest.parse::<u32>().is_ok() {
+            return format!("F{rest}");
+        }
+    }
+    match lower {
+        "space" | "spacebar" => "Space",
+        "tab" => "Tab",
+        "enter" | "return" => "Enter",
+        "escape" | "esc" => "Escape",
+        "backspace" => "Backspace",
+        "insert" | "ins" => "Insert",
+        "delete" | "del" => "Delete",
+        "home" => "Home",
+        "end" => "End",
+        "pageup" | "pgup" => "PageUp",
+        "pagedown" | "pgdn" => "PageDown",
+        "up" => "Up",
+        "down" => "Down",
+        "left" => "Left",
+        "right" => "Right",
+        "minus" | "-" => "Minus",
+        "equal" | "=" => "Equal",
+        "comma" | "," => "Comma",
+        "period" | "." => "Period",
+        "slash" | "/" => "Slash",
+        "backslash" | "\\" => "Backslash",
+        "semicolon" | ";" => "Semicolon",
+        "quote" | "'" => "Quote",
+        "bracketleft" | "[" => "BracketLeft",
+        "bracketright" | "]" => "BracketRight",
+        "grave" | "`" => "Grave",
+        other => other,
+    }
+    .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Moonlight key injection
+// ---------------------------------------------------------------------------
+
+/// VK for one of Moonlight's `Ctrl+Alt+Shift+<key>` shortcuts.
+fn chord_vk(key: &str) -> Option<u16> {
+    Some(match key.to_ascii_lowercase().as_str() {
+        "q" => 0x51,
+        "z" => 0x5A,
+        "x" => 0x58,
+        "s" => 0x53,
+        "m" => 0x4D,
+        "v" => 0x56,
+        "d" => 0x44,
+        _ => return None,
+    })
+}
+
+fn key_input(vk: u16, up: bool) -> INPUT {
+    let mut input: INPUT = unsafe { std::mem::zeroed() };
+    input.r#type = INPUT_KEYBOARD;
+    input.Anonymous.ki = KEYBDINPUT {
+        wVk: vk,
+        wScan: 0,
+        dwFlags: if up { KEYEVENTF_KEYUP } else { 0 },
+        time: 0,
+        dwExtraInfo: 0,
+    };
+    input
+}
+
+/// Inject Moonlight's `Ctrl+Alt+Shift+<vk>` chord into the foreground window.
+fn send_chord(vk: u16) {
+    let seq = [VK_CONTROL, VK_MENU, VK_SHIFT, vk];
+    let mut inputs: Vec<INPUT> = Vec::with_capacity(seq.len() * 2);
+    for &v in &seq {
+        inputs.push(key_input(v, false));
+    }
+    for &v in seq.iter().rev() {
+        inputs.push(key_input(v, true));
+    }
+    unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tauri commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn stream_menu_toggle(app: AppHandle) {
+    request_toggle(app);
+}
+
+#[tauri::command]
+pub fn stream_menu_show(app: AppHandle) {
+    request_show(app);
+}
+
+#[tauri::command]
+pub fn stream_menu_hide(app: AppHandle) {
+    request_hide(app);
+}
+
+/// Clicked the floating trigger button → toggle the menu.
+#[tauri::command]
+pub fn stream_button_click(app: AppHandle) {
+    request_toggle(app);
+}
+
+#[tauri::command]
+pub fn stream_menu_active(app: AppHandle) -> Option<ActiveStreamInfo> {
+    active_stream_full(&app).map(|(host, app, _pid)| ActiveStreamInfo { host, app })
+}
+
+/// Validate a hotkey spec without persisting it (used by the capture field).
+#[tauri::command]
+pub fn validate_floating_menu_hotkey(spec: String) -> Result<String, String> {
+    validate_hotkey(&spec)
+}
+
+#[tauri::command]
+pub fn stream_menu_key(app: AppHandle, key: String) -> Result<(), String> {
+    let vk = chord_vk(&key).ok_or_else(|| format!("Unknown shortcut '{key}'"))?;
+    // Defensive: make sure Moonlight (not something else) owns the foreground
+    // before we inject, so the chord can't leak to another window.
+    if let Some((_, _, pid)) = active_stream_full(&app) {
+        if let Some(hwnd) = hwnd_for_pid(pid) {
+            unsafe {
+                SetForegroundWindow(hwnd as _);
+            }
+        }
+    }
+    send_chord(vk);
+    Ok(())
+}
+
+/// Client-only disconnect: kills the local streaming window but leaves the
+/// game running on the host (Parsec-style "Disconnect").
+#[tauri::command]
+pub fn stream_menu_disconnect(app: AppHandle) -> Result<(), String> {
+    let (host, app_name, _) =
+        active_stream_full(&app).ok_or_else(|| "No active stream".to_string())?;
+    let state = app.state::<crate::settings::SettingsState>();
+    let streams = app.state::<crate::StreamState>();
+    crate::quit_stream_inner(&app, &state, &streams, &host, &app_name, false);
+    hide_now(&app);
+    hide_button_now(&app);
+    Ok(())
+}
+
+/// End session: stops the app on the host *and* kills the local stream window.
+#[tauri::command]
+pub fn stream_menu_end_session(app: AppHandle) -> Result<(), String> {
+    let (host, app_name, _) =
+        active_stream_full(&app).ok_or_else(|| "No active stream".to_string())?;
+    let state = app.state::<crate::settings::SettingsState>();
+    let streams = app.state::<crate::StreamState>();
+    crate::quit_stream_inner(&app, &state, &streams, &host, &app_name, true);
+    hide_now(&app);
+    hide_button_now(&app);
+    Ok(())
+}
+
+/// Bring the launcher forward and open its Power menu (reused by the overlay's
+/// Power item). The overlay is hidden first so it doesn't float over the modal.
+#[tauri::command]
+pub fn open_power_menu(app: AppHandle) {
+    hide_now(&app);
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+    let _ = app.emit("request-power-menu", ());
+}

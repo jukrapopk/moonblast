@@ -41,6 +41,7 @@ mod wifi;
 mod audio;
 mod mediakeys;
 mod osd;
+mod overlay;
 
 pub use shell::run_shell_stub;
 
@@ -183,7 +184,7 @@ fn validate_moonlight_dir(path: String) -> bool {
 }
 
 /// Resolve the Moonlight executable from the configured install folder.
-fn moonlight_exe(state: &State<'_, settings::SettingsState>) -> Option<std::path::PathBuf> {
+fn moonlight_exe(state: &settings::SettingsState) -> Option<std::path::PathBuf> {
     let settings = state.0.lock().ok()?;
     let folder = settings.integrations.moonlight_folder.clone()?;
     for name in ["moonlight.exe", "moonlight-qt.exe"] {
@@ -1579,6 +1580,7 @@ fn pid_has_visible_window(pid: u32) -> bool {
 /// host+app is already running (no duplicate window).
 #[tauri::command]
 fn moonlight_stream(
+    handle: AppHandle,
     host: String,
     app: String,
     state: State<'_, settings::SettingsState>,
@@ -1655,6 +1657,9 @@ fn moonlight_stream(
     let pid = child.id();
     map.insert(key, ActiveStream { child });
     moonblast_log!("moonlight_stream: spawned child pid={pid}");
+    // Float the in-stream menu over the stream after it comes up, if the
+    // user has auto-show enabled. No-op when disabled.
+    crate::overlay::maybe_autoshow(&handle);
     Ok(true)
 }
 
@@ -1668,63 +1673,84 @@ fn moonlight_stream(
 /// returns immediately regardless of CLI or child teardown latency.
 #[tauri::command]
 fn moonlight_quit(
+    handle: AppHandle,
     host: String,
     app: String,
     streams: State<'_, StreamState>,
     state: State<'_, settings::SettingsState>,
 ) -> Result<(), String> {
-    let key = format!("{host}\u{1f}{app}");
-    moonblast_log!("moonlight_quit: start (host={host}, app={app}, key={key})");
+    quit_stream_inner(&handle, &state, &streams, &host, &app, true);
+    Ok(())
+}
+
+/// Shared stream teardown. `quit_host` = `true` asks the host to stop the
+/// running app (`moonlight quit <host>`) *and* kills the local window;
+/// `false` (the floating menu's "Disconnect") only kills the local window,
+/// leaving the game running on the host.
+pub(crate) fn quit_stream_inner(
+    app: &AppHandle,
+    state: &settings::SettingsState,
+    streams: &StreamState,
+    host: &str,
+    app_name: &str,
+    quit_host: bool,
+) {
+    let key = format!("{host}\u{1f}{app_name}");
+    moonblast_log!("quit_stream: start (host={host}, app={app_name}, quit_host={quit_host})");
     // Pop the entry from the map FIRST so a second `moonlight_quit` /
     // `moonlight_stream` call against the same key can proceed immediately
     // instead of blocking on the mutex while moonlight.exe exits (Qt +
     // WebRTC teardown takes 1-5 s on its own).
     let active = streams.0.lock().unwrap().remove(&key);
     moonblast_log!(
-        "moonlight_quit: stream entry {}",
+        "quit_stream: stream entry {}",
         if active.is_some() { "found" } else { "absent" }
     );
 
     // Fire the host-side quit on a dedicated thread so it doesn't block the
     // IPC. The thread runs `moonlight quit <host>` with CREATE_NO_WINDOW
     // (so no Qt dialog flashes) and bounds its own wait to 8 s.
-    if let Some(exe) = moonlight_exe(&state) {
-        let host_for_thread = host.clone();
-        std::thread::spawn(move || {
-            moonblast_log!("moonlight quit: spawning CLI");
-            let mut child = match cmd::spawn_detached(&exe, &["quit", &host_for_thread]) {
-                Ok(c) => c,
-                Err(e) => {
-                    moonblast_log!("moonlight quit: spawn error: {e}");
-                    return;
+    if quit_host {
+        if let Some(exe) = moonlight_exe(state) {
+            let host_for_thread = host.to_string();
+            std::thread::spawn(move || {
+                moonblast_log!("moonlight quit: spawning CLI");
+                let mut child = match cmd::spawn_detached(&exe, &["quit", &host_for_thread]) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        moonblast_log!("moonlight quit: spawn error: {e}");
+                        return;
+                    }
+                };
+                match bounded_wait(&mut child, std::time::Duration::from_secs(8)) {
+                    Some(status) => {
+                        moonblast_log!("moonlight quit: CLI exited ({status:?})");
+                    }
+                    None => {
+                        moonblast_log!("moonlight quit: CLI timed out, killed");
+                    }
                 }
-            };
-            match bounded_wait(&mut child, std::time::Duration::from_secs(8)) {
-                Some(status) => {
-                    moonblast_log!("moonlight quit: CLI exited ({status:?})");
-                }
-                None => {
-                    moonblast_log!("moonlight quit: CLI timed out, killed");
-                }
-            }
-        });
-    } else {
-        moonblast_log!("moonlight_quit: Moonlight executable not found, skipping host quit");
+            });
+        } else {
+            moonblast_log!("quit_stream: Moonlight executable not found, skipping host quit");
+        }
     }
 
     // Kill the local streaming window immediately. The host-side quit
     // runs in parallel on its own thread.
     if let Some(mut active) = active {
         let pid = active.child.id();
-        moonblast_log!("moonlight_quit: killing child pid={pid}");
+        moonblast_log!("quit_stream: killing child pid={pid}");
         let _ = active.child.kill();
         match bounded_wait(&mut active.child, std::time::Duration::from_secs(5)) {
-            Some(status) => moonblast_log!("moonlight_quit: child reaped (status={status:?})"),
-            None => moonblast_log!("moonlight_quit: child still unreaped after bounded_wait"),
+            Some(status) => moonblast_log!("quit_stream: child reaped (status={status:?})"),
+            None => moonblast_log!("quit_stream: child still unreaped after bounded_wait"),
         }
     }
-    moonblast_log!("moonlight_quit: done");
-    Ok(())
+    // Take the floating menu + trigger button down with the stream (they'd
+    // otherwise linger over the desktop until the watcher notices).
+    crate::overlay::request_hide_all(app.clone());
+    moonblast_log!("quit_stream: done");
 }
 
 /// Poll `try_wait` until the child exits or the deadline elapses. On
@@ -3011,6 +3037,10 @@ pub fn run() {
             // (see `mediakeys::set_active`), so users who never enter Immersive
             // Mode don't pay for a second webview.
             mediakeys::init(app.handle().clone());
+            // Start the floating-menu hotkey thread. It registers the summon
+            // shortcut for the whole app lifetime so the menu can be summoned
+            // even when `show_floating_menu` is off.
+            overlay::init(app.handle().clone());
             // Drop any stale `HKCU\...\Run\Moonblast` from the previous build
             // that had a Start with Windows toggle — otherwise upgrading
             // users would briefly see two Moonblast.exe processes at
@@ -3128,6 +3158,16 @@ pub fn run() {
             moonlight_pair,
             moonlight_stream,
             moonlight_quit,
+            overlay::stream_menu_toggle,
+            overlay::stream_menu_show,
+            overlay::stream_menu_hide,
+            overlay::stream_button_click,
+            overlay::stream_menu_active,
+            overlay::stream_menu_key,
+            overlay::stream_menu_disconnect,
+            overlay::stream_menu_end_session,
+            overlay::validate_floating_menu_hotkey,
+            overlay::open_power_menu,
             discover_hosts,
             moonlight_paired_hosts,
             moonlight_forget,

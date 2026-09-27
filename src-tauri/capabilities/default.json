@@ -1,11 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and the volume OSD overlay",
-  "windows": ["main", "osd"],
+  "description": "Capability for the main window, the volume OSD overlay, the in-stream floating menu, and its draggable trigger button",
+  "windows": ["main", "osd", "stream-menu", "stream-button"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor",
     "dialog:allow-open",
     "opener:default"
   ]
