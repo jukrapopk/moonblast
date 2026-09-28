@@ -87,6 +87,17 @@ html[data-window="overlay"] #root {
   background: transparent;
 }
 
+/* Status notch: trim the font's internal leading so the text hugs the top
+ * edge. Segoe UI's ascent leaves ~2.5px above the cap at 12px with
+ * `leading-none` — `py-0` alone can't remove it because it's inside the line
+ * box, not padding. Trimming the card's spans (the card is a flex row, so each
+ * item needs it) makes the row exactly cap→baseline. No-op on runtimes without
+ * `text-box-trim`, which just falls back to the previous look. */
+html[data-window="overlay"] .notch > span {
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+}
+
 /* Hide the OS cursor while the user is driving with the keyboard or
  * gamepad. `hideCursor()` (src/input/cursorHider.ts) sets the
  * `data-cursor-hidden` attribute on <body>; the first `mousemove`
