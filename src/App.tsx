@@ -266,6 +266,19 @@ export default function App() {
   const setShowBattery = useSettingsField("customization", "show_battery");
   const setShowAudio = useSettingsField("customization", "show_audio");
 
+  const setOverlayEnabled = useSettingsField("overlay", "enabled");
+  const setOverlayShowTime = useSettingsField("overlay", "show_time");
+  const setOverlayShowBattery = useSettingsField("overlay", "show_battery");
+  const setOverlayShowBatteryUsage = useSettingsField("overlay", "show_battery_usage");
+
+  // Create / show / hide the always-on-top status overlay window. Fires once
+  // settings hydrate and again on every toggle; Rust owns the window lifecycle
+  // (see overlay.rs).
+  useEffect(() => {
+    if (!ready) return;
+    void invoke("apply_overlay", { enabled: settings.overlay.enabled }).catch(() => {});
+  }, [ready, settings.overlay.enabled]);
+
   // Appearance — ThemeProvider observes settings.appearance via the
   // SettingsContext, so writing here triggers a re-apply on the next
   // render. The inline bootstrap script in index.html reads
@@ -450,6 +463,14 @@ export default function App() {
                 windowsAccent={windowsAccent}
                 onSetAccent={setAccent}
                 onSetCustomAccent={setCustomAccent}
+                overlayEnabled={settings.overlay.enabled}
+                overlayShowTime={settings.overlay.show_time}
+                overlayShowBattery={settings.overlay.show_battery}
+                overlayShowBatteryUsage={settings.overlay.show_battery_usage}
+                onToggleOverlayEnabled={setOverlayEnabled}
+                onToggleOverlayShowTime={setOverlayShowTime}
+                onToggleOverlayShowBattery={setOverlayShowBattery}
+                onToggleOverlayShowBatteryUsage={setOverlayShowBatteryUsage}
               />
             </motion.div>
           )}

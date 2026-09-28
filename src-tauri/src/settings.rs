@@ -18,6 +18,32 @@ pub struct Settings {
     pub app_shortcuts: Vec<AppShortcut>,
     pub customization: Customization,
     pub appearance: Appearance,
+    pub overlay: Overlay,
+}
+
+/// The always-on-top status overlay ("notch"). Persisted so `overlay.rs`
+/// can recreate the window at boot, before the UI hydrates. Every field
+/// is optional in old `settings.json` files (the container-level
+/// `#[serde(default)]` on `Settings` fills them from `Default`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Overlay {
+    /// Off by default — the overlay is opt-in.
+    pub enabled: bool,
+    pub show_time: bool,
+    pub show_battery: bool,
+    /// Power draw in watts. Only meaningful on battery hardware.
+    pub show_battery_usage: bool,
+}
+
+impl Default for Overlay {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            show_time: true,
+            show_battery: true,
+            show_battery_usage: false,
+        }
+    }
 }
 
 /// Color theme + accent color. `theme` selects the light/dark surface
@@ -257,6 +283,7 @@ impl Default for Settings {
             app_shortcuts: Vec::new(),
             customization: Customization::default(),
             appearance: Appearance::default(),
+            overlay: Overlay::default(),
         }
     }
 }

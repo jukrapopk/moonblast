@@ -46,3 +46,17 @@ export function useBattery(enabled = true): {
   });
   return { status, refresh: read };
 }
+
+/**
+ * Battery power draw in watts, for the status overlay's "battery usage"
+ * readout. `null` when the system has no battery or the OS reports no rate.
+ * Same read cadence as `useBattery` (5s poll + focus/visibility refresh).
+ */
+export function useBatteryPower(enabled = true): number | null {
+  const [watts, setWatts] = useState<number | null>(null);
+  useDebouncedRead<number | null>("battery_power", setWatts, {
+    pollIntervalMs: 5_000,
+    enabled,
+  });
+  return watts;
+}

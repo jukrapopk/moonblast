@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and the volume OSD overlay",
-  "windows": ["main", "osd"],
+  "description": "Capability for the main window, the volume OSD and the status overlay",
+  "windows": ["main", "osd", "overlay"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

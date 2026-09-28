@@ -41,6 +41,7 @@ mod wifi;
 mod audio;
 mod mediakeys;
 mod osd;
+mod overlay;
 
 pub use shell::run_shell_stub;
 
@@ -2550,6 +2551,45 @@ fn battery() -> Option<BatteryStatus> {
     Some(status)
 }
 
+/// Battery power draw in watts, for the status overlay's "battery usage"
+/// readout. `None` when the system has no battery or the OS reports no rate.
+/// Read via `CallNtPowerInformation(SystemBatteryState)`, which
+/// `GetSystemPowerStatus` (used by `battery`) doesn't provide.
+#[tauri::command]
+fn battery_power() -> Option<f64> {
+    use windows_sys::Win32::System::Power::{
+        CallNtPowerInformation, SystemBatteryState, BATTERY_UNKNOWN_RATE, SYSTEM_BATTERY_STATE,
+    };
+    let mut state: SYSTEM_BATTERY_STATE = unsafe { std::mem::zeroed() };
+    let status = unsafe {
+        CallNtPowerInformation(
+            SystemBatteryState,
+            std::ptr::null(),
+            0,
+            &mut state as *mut _ as *mut std::ffi::c_void,
+            std::mem::size_of::<SYSTEM_BATTERY_STATE>() as u32,
+        )
+    };
+    // NTSTATUS 0 = STATUS_SUCCESS.
+    if status != 0 || state.BatteryPresent == 0 {
+        return None;
+    }
+    if state.Rate == BATTERY_UNKNOWN_RATE {
+        return None;
+    }
+    // `Rate` is in milliwatts; some drivers report a signed value (negative
+    // while charging). Expose it as-is — the overlay renders the magnitude.
+    Some((state.Rate as i32 as f64) / 1000.0)
+}
+
+/// Create/show or hide the persistent status overlay window. Runs on a spawned
+/// thread because Tauri window creation deadlocks on the main thread on
+/// Windows (same constraint as `osd.rs`).
+#[tauri::command]
+fn apply_overlay(app: AppHandle, enabled: bool) {
+    std::thread::spawn(move || overlay::apply(&app, enabled));
+}
+
 /// Current WiFi connection for the chip in the TopBar. Returns `None` when
 /// the system has no WiFi adapter, so the UI can simply skip rendering the
 /// chip (same pattern as the battery command).
@@ -2983,6 +3023,14 @@ pub fn run() {
                     kill_all_streams(&streams);
                 }
                 suppress_shell(false);
+                // Tauri exits only once *every* window is closed. The status
+                // overlay is a second window, so a plain window close (Alt+F4
+                // outside Immersive) would otherwise leave the process running
+                // with just the notch. Tear the overlay down so the app exits
+                // the way it always did.
+                if let Some(win) = window.app_handle().get_webview_window(overlay::LABEL) {
+                    let _ = win.destroy();
+                }
             } else if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 moonblast_log!("window event: CloseRequested (immersive={})", EXPLORER_KILLED.load(Ordering::SeqCst));
                 // Only intercept Alt+F4 / taskbar-Close while in Immersive
@@ -3073,6 +3121,19 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+            // Recreate the status overlay at boot if the user left it enabled —
+            // otherwise it wouldn't appear until React hydrates and fires
+            // `apply_overlay`. Spawned off-thread (window creation deadlocks
+            // on the main thread).
+            let want_overlay = {
+                let state = app.state::<settings::SettingsState>();
+                let guard = state.0.lock().unwrap();
+                guard.overlay.enabled
+            };
+            if want_overlay {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || overlay::apply(&handle, true));
+            }
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -3099,6 +3160,8 @@ pub fn run() {
             enter_immersive,
             exit_immersive,
             battery,
+            battery_power,
+            apply_overlay,
             wifi_current,
             wifi_scan,
             wifi_connect,

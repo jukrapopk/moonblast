@@ -968,6 +968,14 @@ export function SettingsView({
   windowsAccent,
   onSetAccent,
   onSetCustomAccent,
+  overlayEnabled,
+  overlayShowTime,
+  overlayShowBattery,
+  overlayShowBatteryUsage,
+  onToggleOverlayEnabled,
+  onToggleOverlayShowTime,
+  onToggleOverlayShowBattery,
+  onToggleOverlayShowBatteryUsage,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -1005,6 +1013,14 @@ export function SettingsView({
   windowsAccent: string | null;
   onSetAccent: (id: string) => void;
   onSetCustomAccent: (hex: string | null) => void;
+  overlayEnabled: boolean;
+  overlayShowTime: boolean;
+  overlayShowBattery: boolean;
+  overlayShowBatteryUsage: boolean;
+  onToggleOverlayEnabled: (v: boolean) => void;
+  onToggleOverlayShowTime: (v: boolean) => void;
+  onToggleOverlayShowBattery: (v: boolean) => void;
+  onToggleOverlayShowBatteryUsage: (v: boolean) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
   // Battery hardware presence — one-shot read on mount. `undefined`
@@ -1105,6 +1121,36 @@ export function SettingsView({
         onOpenDisplay={onOpenDisplay}
         hasBattery={hasBattery}
       />
+
+      <Section title="Notch Overlay">
+        <Row
+          label="Enable overlay"
+          description="Thin status notch pinned to the top of the screen, always on top."
+        >
+          <Toggle checked={overlayEnabled} onChange={onToggleOverlayEnabled} />
+        </Row>
+        <Row label="Show time">
+          <Toggle
+            checked={overlayShowTime}
+            onChange={onToggleOverlayShowTime}
+            disabled={!overlayEnabled}
+          />
+        </Row>
+        <Row label="Show battery">
+          <Toggle
+            checked={overlayShowBattery}
+            onChange={onToggleOverlayShowBattery}
+            disabled={!overlayEnabled}
+          />
+        </Row>
+        <Row label="Show battery usage (W)">
+          <Toggle
+            checked={overlayShowBatteryUsage}
+            onChange={onToggleOverlayShowBatteryUsage}
+            disabled={!overlayEnabled}
+          />
+        </Row>
+      </Section>
 
       <Section title="Integrations">
         <TailscaleRow />

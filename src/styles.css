@@ -76,11 +76,14 @@ body,
    * is the standard Windows app behavior and avoids mid-frame flicker. */
 }
 
-/* Volume OSD window: the window itself is transparent with rounded corners —
- * only the inner card rendered by VolumeOsd should paint. */
+/* Volume OSD + status overlay windows: the window itself is transparent with
+ * rounded corners — only the inner content should paint. */
 html[data-window="osd"],
 html[data-window="osd"] body,
-html[data-window="osd"] #root {
+html[data-window="osd"] #root,
+html[data-window="overlay"],
+html[data-window="overlay"] body,
+html[data-window="overlay"] #root {
   background: transparent;
 }
 
