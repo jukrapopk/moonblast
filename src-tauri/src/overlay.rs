@@ -1,9 +1,10 @@
 //! The persistent always-on-top status overlay (the "notch").
 //!
-//! A second, frameless, transparent, topmost Tauri window pinned to the
-//! top-center of the launcher's monitor. While `settings.overlay.enabled` is
-//! on it shows a thin status notch (time / battery / battery usage). Like the
-//! volume OSD (`osd.rs`) it:
+//! A second, frameless, transparent, topmost Tauri window spanning the top
+//! edge of the launcher's monitor. While `settings.overlay.enabled` is on it
+//! shows a thin status notch (time / battery / power draw) aligned left /
+//! center / right by CSS inside the window (so changing position is a single
+//! DOM move, never a window jump). Like the volume OSD (`osd.rs`) it:
 //! - never takes focus (`focusable(false)`), so it can't steal a stream's
 //!   keyboard focus,
 //! - stays out of Alt+Tab / the taskbar (`skip_taskbar`) and is click-through,
@@ -28,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
 use crate::moonblast_log;
 
@@ -41,9 +42,12 @@ pub const LABEL: &str = "overlay";
 /// double-build the same label).
 static APPLY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Initial window width. The window is resized to **span the monitor** on
+/// show, so the notch's left / center / right alignment is plain CSS inside it
+/// (`StatusOverlay`) and a position change never moves the window.
+const WIDTH: f64 = 300.0;
 /// Clears the notch card; extra space below it is transparent, so this only
 /// needs to be tall enough for the tallest padding/type combination.
-const WIDTH: f64 = 300.0;
 const HEIGHT: f64 = 32.0;
 
 /// Autohide watcher poll interval.
@@ -56,8 +60,10 @@ const HOTSPOT_H: f64 = 90.0;
 /// Current autohide timeout (0 = off). Read by the watcher each tick so a
 /// timeout change is picked up without restarting it.
 static AUTOHIDE_MS: AtomicU64 = AtomicU64::new(0);
-/// `0` = left, `1` = center, `2` = right. Read by `position` so the watcher's
-/// `show` (which has no settings access) places the notch correctly.
+/// `0` = left, `1` = center, `2` = right. Read by `cursor_in_hotspot` so the
+/// autohide reveal zone follows the notch along the top edge. The window's own
+/// placement doesn't depend on it — alignment is CSS inside the monitor-wide
+/// window.
 static POSITION: AtomicU8 = AtomicU8::new(1);
 static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
 static WATCHER_STOP: AtomicBool = AtomicBool::new(false);
@@ -127,6 +133,9 @@ pub fn ensure_window(app: &AppHandle) {
 /// docs); callers spawn a thread.
 pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str) {
     let _guard = APPLY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Recorded for the autohide hotspot. On-screen alignment is pure CSS
+    // inside the monitor-wide window, so a position change never moves the
+    // window — one clean DOM move instead of a window jump.
     POSITION.store(position_code(position), Ordering::SeqCst);
     if !enabled {
         stop_watcher();
@@ -136,30 +145,15 @@ pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str) {
     ensure_window(app);
     if autohide_ms == 0 {
         stop_watcher();
-        // Re-place even if already visible so a position change is applied.
-        position_if_visible(app);
         show(app);
         return;
     }
     AUTOHIDE_MS.store(autohide_ms, Ordering::SeqCst);
     if WATCHER_RUNNING.load(Ordering::SeqCst) {
-        position_if_visible(app);
         return; // already watching; the timeout above was just refreshed
     }
     hide(app); // start hidden until the cursor comes near
     start_watcher(app.clone());
-}
-
-/// Re-place the window if it's currently shown. `show` is a no-op when the
-/// notch is already visible, so a position change while visible needs its own
-/// re-place or the window would stay where it was.
-fn position_if_visible(app: &AppHandle) {
-    if !VISIBLE.load(Ordering::SeqCst) {
-        return;
-    }
-    if let Some(win) = app.get_webview_window(LABEL) {
-        position(app, &win);
-    }
 }
 
 /// Show the notch (no-op if already visible), re-asserting topmost.
@@ -268,30 +262,15 @@ fn monitor_metrics(app: &AppHandle) -> Option<(f64, f64, f64, f64)> {
     ))
 }
 
-/// Top edge of the launcher's monitor, aligned by `POSITION` (left / center /
-/// right), flush with the top so the notch hangs from the top of the screen.
+/// Span the launcher's monitor along its top edge, flush with the top so the
+/// notch hangs from the top of the screen. The card's left / center / right
+/// alignment is CSS inside this full-width window.
 fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
-    let main = app.get_webview_window("main");
-    let monitor = main
-        .as_ref()
-        .and_then(|m| m.current_monitor().ok().flatten())
-        .or_else(|| {
-            main.as_ref()
-                .and_then(|m| m.primary_monitor().ok().flatten())
-        })
-        .or_else(|| win.current_monitor().ok().flatten());
-    let Some(m) = monitor else {
+    let Some((mx, my, mw, scale)) = monitor_metrics(app) else {
         return;
     };
-    let scale = m.scale_factor();
-    let w = (WIDTH * scale).round() as i32;
-    let left = m.position().x;
-    let width = m.size().width as i32;
-    let x = match POSITION.load(Ordering::SeqCst) {
-        0 => left,
-        2 => left + (width - w).max(0),
-        _ => left + ((width - w) / 2).max(0),
-    };
-    let y = m.position().y;
-    let _ = win.set_position(PhysicalPosition::new(x, y));
+    let width = mw.round().max(1.0) as u32;
+    let height = (HEIGHT * scale).round().max(1.0) as u32;
+    let _ = win.set_size(PhysicalSize::new(width, height));
+    let _ = win.set_position(PhysicalPosition::new(mx as i32, my as i32));
 }
