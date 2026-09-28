@@ -972,10 +972,12 @@ export function SettingsView({
   overlayShowTime,
   overlayShowBattery,
   overlayShowBatteryUsage,
+  overlayAutohide,
   onToggleOverlayEnabled,
   onToggleOverlayShowTime,
   onToggleOverlayShowBattery,
   onToggleOverlayShowBatteryUsage,
+  onSetOverlayAutohide,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -1017,10 +1019,12 @@ export function SettingsView({
   overlayShowTime: boolean;
   overlayShowBattery: boolean;
   overlayShowBatteryUsage: boolean;
+  overlayAutohide: string;
   onToggleOverlayEnabled: (v: boolean) => void;
   onToggleOverlayShowTime: (v: boolean) => void;
   onToggleOverlayShowBattery: (v: boolean) => void;
   onToggleOverlayShowBatteryUsage: (v: boolean) => void;
+  onSetOverlayAutohide: (v: string) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
   // Battery hardware presence — one-shot read on mount. `undefined`
@@ -1128,6 +1132,22 @@ export function SettingsView({
           description="Thin status notch pinned to the top of the screen, always on top."
         >
           <Toggle checked={overlayEnabled} onChange={onToggleOverlayEnabled} />
+        </Row>
+        <Row
+          label="Autohide"
+          description="Hide the notch and reveal it when the cursor reaches the top-center area."
+        >
+          <Segmented
+            variant="value"
+            disabled={!overlayEnabled}
+            options={[
+              { id: "off", label: "Off" },
+              { id: "3s", label: "3s" },
+              { id: "10s", label: "10s" },
+            ]}
+            value={overlayAutohide}
+            onChange={onSetOverlayAutohide}
+          />
         </Row>
         <PreferenceGroup title="Status">
           <Row label="Show time">

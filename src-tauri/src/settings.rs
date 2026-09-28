@@ -26,6 +26,7 @@ pub struct Settings {
 /// is optional in old `settings.json` files (the container-level
 /// `#[serde(default)]` on `Settings` fills them from `Default`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Overlay {
     /// Off by default — the overlay is opt-in.
     pub enabled: bool,
@@ -33,6 +34,9 @@ pub struct Overlay {
     pub show_battery: bool,
     /// Power draw in watts. Only meaningful on battery hardware.
     pub show_battery_usage: bool,
+    /// `"off"` | `"3s"` | `"10s"` — hide the notch and reveal it when the
+    /// cursor reaches the top-center hotspot.
+    pub autohide: String,
 }
 
 impl Default for Overlay {
@@ -42,6 +46,7 @@ impl Default for Overlay {
             show_time: true,
             show_battery: true,
             show_battery_usage: false,
+            autohide: "off".to_string(),
         }
     }
 }

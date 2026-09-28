@@ -12,6 +12,11 @@ interface SegmentedProps<T extends string> {
   onChange: (value: T) => void;
   /** "tabs" = pill tab bar; "value" = compact picker with check marks */
   variant?: "tabs" | "value";
+  /**
+   * Renders as off (like `Toggle`) when the group isn't applicable — the
+   * stored value is preserved, it just can't be changed.
+   */
+  disabled?: boolean;
 }
 
 export function Segmented<T extends string>({
@@ -19,6 +24,7 @@ export function Segmented<T extends string>({
   value,
   onChange,
   variant = "tabs",
+  disabled = false,
 }: SegmentedProps<T>) {
   const tabs = variant === "tabs";
   return (
@@ -30,7 +36,8 @@ export function Segmented<T extends string>({
       }
     >
       {options.map((o) => {
-        const active = o.id === value;
+        // Disabled reads as off — visual only, the stored value is untouched.
+        const active = !disabled && o.id === value;
         const base = "font-medium transition-colors";
         const style = tabs
           ? `rounded-full px-5 py-1.5 text-base ${base} ${
@@ -40,7 +47,12 @@ export function Segmented<T extends string>({
               active ? "bg-(--color-accent) text-white" : "text-(--color-muted) focus-visible:text-(--color-text)"
             }`;
         return (
-          <button key={o.id} onClick={() => onChange(o.id)} className={style}>
+          <button
+            key={o.id}
+            onClick={() => onChange(o.id)}
+            disabled={disabled}
+            className={`${style} ${disabled ? "cursor-not-allowed" : ""}`}
+          >
             {!tabs && active && <Check size={14} weight="bold" />}
             {o.label}
           </button>

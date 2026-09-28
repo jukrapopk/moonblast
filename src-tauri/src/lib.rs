@@ -2582,12 +2582,14 @@ fn battery_power() -> Option<f64> {
     Some((state.Rate as i32 as f64) / 1000.0)
 }
 
-/// Create/show or hide the persistent status overlay window. Runs on a spawned
-/// thread because Tauri window creation deadlocks on the main thread on
-/// Windows (same constraint as `osd.rs`).
+/// Create/show or hide the persistent status overlay window and (dis)arm its
+/// autohide cursor watcher. Runs on a spawned thread because Tauri window
+/// creation deadlocks on the main thread on Windows (same constraint as
+/// `osd.rs`).
 #[tauri::command]
-fn apply_overlay(app: AppHandle, enabled: bool) {
-    std::thread::spawn(move || overlay::apply(&app, enabled));
+fn apply_overlay(app: AppHandle, enabled: bool, autohide: String) {
+    let ms = overlay::autohide_ms(&autohide);
+    std::thread::spawn(move || overlay::apply(&app, enabled, ms));
 }
 
 /// Current WiFi connection for the chip in the TopBar. Returns `None` when
@@ -3125,14 +3127,15 @@ pub fn run() {
             // otherwise it wouldn't appear until React hydrates and fires
             // `apply_overlay`. Spawned off-thread (window creation deadlocks
             // on the main thread).
-            let want_overlay = {
+            let (want_overlay, overlay_autohide) = {
                 let state = app.state::<settings::SettingsState>();
                 let guard = state.0.lock().unwrap();
-                guard.overlay.enabled
+                (guard.overlay.enabled, guard.overlay.autohide.clone())
             };
             if want_overlay {
+                let ms = overlay::autohide_ms(&overlay_autohide);
                 let handle = app.handle().clone();
-                std::thread::spawn(move || overlay::apply(&handle, true));
+                std::thread::spawn(move || overlay::apply(&handle, true, ms));
             }
             Ok(())
         })

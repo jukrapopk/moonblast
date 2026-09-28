@@ -270,14 +270,18 @@ export default function App() {
   const setOverlayShowTime = useSettingsField("overlay", "show_time");
   const setOverlayShowBattery = useSettingsField("overlay", "show_battery");
   const setOverlayShowBatteryUsage = useSettingsField("overlay", "show_battery_usage");
+  const setOverlayAutohide = useSettingsField("overlay", "autohide");
 
-  // Create / show / hide the always-on-top status overlay window. Fires once
-  // settings hydrate and again on every toggle; Rust owns the window lifecycle
-  // (see overlay.rs).
+  // Create / show / hide the always-on-top status overlay window and
+  // (dis)arm its autohide watcher. Fires once settings hydrate and again on
+  // every toggle; Rust owns the window lifecycle (see overlay.rs).
   useEffect(() => {
     if (!ready) return;
-    void invoke("apply_overlay", { enabled: settings.overlay.enabled }).catch(() => {});
-  }, [ready, settings.overlay.enabled]);
+    void invoke("apply_overlay", {
+      enabled: settings.overlay.enabled,
+      autohide: settings.overlay.autohide,
+    }).catch(() => {});
+  }, [ready, settings.overlay.enabled, settings.overlay.autohide]);
 
   // Appearance — ThemeProvider observes settings.appearance via the
   // SettingsContext, so writing here triggers a re-apply on the next
@@ -467,10 +471,12 @@ export default function App() {
                 overlayShowTime={settings.overlay.show_time}
                 overlayShowBattery={settings.overlay.show_battery}
                 overlayShowBatteryUsage={settings.overlay.show_battery_usage}
+                overlayAutohide={settings.overlay.autohide}
                 onToggleOverlayEnabled={setOverlayEnabled}
                 onToggleOverlayShowTime={setOverlayShowTime}
                 onToggleOverlayShowBattery={setOverlayShowBattery}
                 onToggleOverlayShowBatteryUsage={setOverlayShowBatteryUsage}
+                onSetOverlayAutohide={setOverlayAutohide}
               />
             </motion.div>
           )}
