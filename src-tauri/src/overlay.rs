@@ -31,7 +31,9 @@ static APPLY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Generous enough for the widest readout (time + battery + watts); the
 /// transparent area around the notch is invisible.
 const WIDTH: f64 = 300.0;
-const HEIGHT: f64 = 40.0;
+/// Clears the notch card; extra space below it is transparent, so this only
+/// needs to be tall enough for the tallest padding/type combination.
+const HEIGHT: f64 = 32.0;
 
 /// Create the overlay window (hidden) if it doesn't exist yet. Idempotent.
 pub fn ensure_window(app: &AppHandle) {

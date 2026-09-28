@@ -47,7 +47,7 @@ export function StatusOverlay() {
   return (
     <div className="flex h-full w-full items-start justify-center">
       {parts.length > 0 && (
-        <div className="flex items-center gap-2 rounded-b-2xl border border-t-0 border-(--color-border) bg-(--color-surface-2) px-3.5 py-1.5 text-[13px] font-medium text-(--color-text) shadow-lg">
+        <div className="flex items-center gap-2 rounded-b-lg border border-t-0 border-(--color-border) bg-(--color-surface-2) px-2 py-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg">
           {parts.map((part, i) => (
             <Fragment key={i}>
               {i > 0 && <span className="text-(--color-muted)">·</span>}
