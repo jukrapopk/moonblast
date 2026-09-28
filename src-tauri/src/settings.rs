@@ -37,6 +37,9 @@ pub struct Overlay {
     /// `"off"` | `"3s"` | `"10s"` — hide the notch and reveal it when the
     /// cursor reaches the top-center hotspot.
     pub autohide: String,
+    /// `"left"` | `"center"` | `"right"` — which end of the top edge the
+    /// notch hangs from.
+    pub position: String,
 }
 
 impl Default for Overlay {
@@ -47,6 +50,7 @@ impl Default for Overlay {
             show_battery: true,
             show_battery_usage: false,
             autohide: "off".to_string(),
+            position: "center".to_string(),
         }
     }
 }

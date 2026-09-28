@@ -271,6 +271,7 @@ export default function App() {
   const setOverlayShowBattery = useSettingsField("overlay", "show_battery");
   const setOverlayShowBatteryUsage = useSettingsField("overlay", "show_battery_usage");
   const setOverlayAutohide = useSettingsField("overlay", "autohide");
+  const setOverlayPosition = useSettingsField("overlay", "position");
 
   // Create / show / hide the always-on-top status overlay window and
   // (dis)arm its autohide watcher. Fires once settings hydrate and again on
@@ -280,8 +281,9 @@ export default function App() {
     void invoke("apply_overlay", {
       enabled: settings.overlay.enabled,
       autohide: settings.overlay.autohide,
+      position: settings.overlay.position,
     }).catch(() => {});
-  }, [ready, settings.overlay.enabled, settings.overlay.autohide]);
+  }, [ready, settings.overlay.enabled, settings.overlay.autohide, settings.overlay.position]);
 
   // Appearance — ThemeProvider observes settings.appearance via the
   // SettingsContext, so writing here triggers a re-apply on the next
@@ -472,11 +474,13 @@ export default function App() {
                 overlayShowBattery={settings.overlay.show_battery}
                 overlayShowBatteryUsage={settings.overlay.show_battery_usage}
                 overlayAutohide={settings.overlay.autohide}
+                overlayPosition={settings.overlay.position}
                 onToggleOverlayEnabled={setOverlayEnabled}
                 onToggleOverlayShowTime={setOverlayShowTime}
                 onToggleOverlayShowBattery={setOverlayShowBattery}
                 onToggleOverlayShowBatteryUsage={setOverlayShowBatteryUsage}
                 onSetOverlayAutohide={setOverlayAutohide}
+                onSetOverlayPosition={setOverlayPosition}
               />
             </motion.div>
           )}

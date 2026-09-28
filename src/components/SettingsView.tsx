@@ -973,11 +973,13 @@ export function SettingsView({
   overlayShowBattery,
   overlayShowBatteryUsage,
   overlayAutohide,
+  overlayPosition,
   onToggleOverlayEnabled,
   onToggleOverlayShowTime,
   onToggleOverlayShowBattery,
   onToggleOverlayShowBatteryUsage,
   onSetOverlayAutohide,
+  onSetOverlayPosition,
 }: {
   moonlightEnabled: boolean;
   onToggleMoonlight: (v: boolean) => void;
@@ -1020,11 +1022,13 @@ export function SettingsView({
   overlayShowBattery: boolean;
   overlayShowBatteryUsage: boolean;
   overlayAutohide: string;
+  overlayPosition: string;
   onToggleOverlayEnabled: (v: boolean) => void;
   onToggleOverlayShowTime: (v: boolean) => void;
   onToggleOverlayShowBattery: (v: boolean) => void;
   onToggleOverlayShowBatteryUsage: (v: boolean) => void;
   onSetOverlayAutohide: (v: string) => void;
+  onSetOverlayPosition: (v: string) => void;
 }) {
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
   // Battery hardware presence — one-shot read on mount. `undefined`
@@ -1135,7 +1139,7 @@ export function SettingsView({
         </Row>
         <Row
           label="Autohide"
-          description="Hide the notch and reveal it when the cursor reaches the top-center area."
+          description="Hide the notch; reveal it when the cursor nears the top of the screen."
         >
           <Segmented
             variant="value"
@@ -1147,6 +1151,19 @@ export function SettingsView({
             ]}
             value={overlayAutohide}
             onChange={onSetOverlayAutohide}
+          />
+        </Row>
+        <Row label="Position" description="Which end of the top edge the notch hangs from.">
+          <Segmented
+            variant="value"
+            disabled={!overlayEnabled}
+            options={[
+              { id: "left", label: "Left" },
+              { id: "center", label: "Center" },
+              { id: "right", label: "Right" },
+            ]}
+            value={overlayPosition}
+            onChange={onSetOverlayPosition}
           />
         </Row>
         <PreferenceGroup title="Status">

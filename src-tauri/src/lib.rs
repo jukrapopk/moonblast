@@ -2587,9 +2587,9 @@ fn battery_power() -> Option<f64> {
 /// creation deadlocks on the main thread on Windows (same constraint as
 /// `osd.rs`).
 #[tauri::command]
-fn apply_overlay(app: AppHandle, enabled: bool, autohide: String) {
+fn apply_overlay(app: AppHandle, enabled: bool, autohide: String, position: String) {
     let ms = overlay::autohide_ms(&autohide);
-    std::thread::spawn(move || overlay::apply(&app, enabled, ms));
+    std::thread::spawn(move || overlay::apply(&app, enabled, ms, &position));
 }
 
 /// Current WiFi connection for the chip in the TopBar. Returns `None` when
@@ -3127,15 +3127,19 @@ pub fn run() {
             // otherwise it wouldn't appear until React hydrates and fires
             // `apply_overlay`. Spawned off-thread (window creation deadlocks
             // on the main thread).
-            let (want_overlay, overlay_autohide) = {
+            let (want_overlay, overlay_autohide, overlay_position) = {
                 let state = app.state::<settings::SettingsState>();
                 let guard = state.0.lock().unwrap();
-                (guard.overlay.enabled, guard.overlay.autohide.clone())
+                (
+                    guard.overlay.enabled,
+                    guard.overlay.autohide.clone(),
+                    guard.overlay.position.clone(),
+                )
             };
             if want_overlay {
                 let ms = overlay::autohide_ms(&overlay_autohide);
                 let handle = app.handle().clone();
-                std::thread::spawn(move || overlay::apply(&handle, true, ms));
+                std::thread::spawn(move || overlay::apply(&handle, true, ms, &overlay_position));
             }
             Ok(())
         })

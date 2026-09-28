@@ -14,12 +14,17 @@ import { useBattery, useBatteryPower } from "../../hooks/useBattery";
  */
 export function StatusOverlay() {
   const { settings } = useSettings();
-  const { enabled, show_time, show_battery, show_battery_usage } = settings.overlay;
+  const { enabled, show_time, show_battery, show_battery_usage, position } = settings.overlay;
   const now = useTime();
   const { status: battery } = useBattery(enabled && show_battery);
   const watts = useBatteryPower(enabled && show_battery_usage);
 
   if (!enabled) return null;
+
+  // The window is pinned to the left / center / right of the top edge (Rust
+  // does the positioning); the card aligns to the matching side inside it.
+  const justify =
+    position === "left" ? "justify-start" : position === "right" ? "justify-end" : "justify-center";
 
   const parts: ReactNode[] = [];
   if (show_time) {
@@ -45,7 +50,7 @@ export function StatusOverlay() {
   }
 
   return (
-    <div className="flex h-full w-full items-start justify-center">
+    <div className={`flex h-full w-full items-start ${justify}`}>
       {parts.length > 0 && (
         <div className="flex items-center gap-2 rounded-b-lg border border-t-0 border-(--color-border) bg-(--color-surface-2) px-2 py-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg">
           {parts.map((part, i) => (
