@@ -905,7 +905,7 @@ function PreferenceGroup({
   children,
 }: {
   title: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   onIconClick?: () => void;
   children: ReactNode;
 }) {
@@ -1129,27 +1129,29 @@ export function SettingsView({
         >
           <Toggle checked={overlayEnabled} onChange={onToggleOverlayEnabled} />
         </Row>
-        <Row label="Show time">
-          <Toggle
-            checked={overlayShowTime}
-            onChange={onToggleOverlayShowTime}
-            disabled={!overlayEnabled}
-          />
-        </Row>
-        <Row label="Show battery">
-          <Toggle
-            checked={overlayShowBattery}
-            onChange={onToggleOverlayShowBattery}
-            disabled={!overlayEnabled}
-          />
-        </Row>
-        <Row label="Show battery usage (W)">
-          <Toggle
-            checked={overlayShowBatteryUsage}
-            onChange={onToggleOverlayShowBatteryUsage}
-            disabled={!overlayEnabled}
-          />
-        </Row>
+        <PreferenceGroup title="Status">
+          <Row label="Show time">
+            <Toggle
+              checked={overlayShowTime}
+              onChange={onToggleOverlayShowTime}
+              disabled={!overlayEnabled}
+            />
+          </Row>
+          <Row label="Show battery">
+            <Toggle
+              checked={overlayShowBattery}
+              onChange={onToggleOverlayShowBattery}
+              disabled={!overlayEnabled}
+            />
+          </Row>
+          <Row label="Show battery usage (W)">
+            <Toggle
+              checked={overlayShowBatteryUsage}
+              onChange={onToggleOverlayShowBatteryUsage}
+              disabled={!overlayEnabled}
+            />
+          </Row>
+        </PreferenceGroup>
       </Section>
 
       <Section title="Integrations">
