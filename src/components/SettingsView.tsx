@@ -1172,7 +1172,13 @@ export function SettingsView({
         </Row>
         <Row
           label="Autohide"
-          description="Hide the notch; reveal it when the cursor nears the top of the screen."
+          description={
+            <>
+              Hide the notch; reveal it when the cursor nears the top of the screen.
+              <br />
+              Won't work during a stream — Moonlight captures the cursor and covers the notch.
+            </>
+          }
         >
           <Segmented
             variant="value"

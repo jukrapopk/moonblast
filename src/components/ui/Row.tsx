@@ -2,7 +2,8 @@ import { type ReactNode } from "react";
 
 interface RowProps {
   label: string;
-  description?: string;
+  /** Plain text (or a node, when the caller needs an explicit line break). */
+  description?: ReactNode;
   children?: ReactNode;
 }
 

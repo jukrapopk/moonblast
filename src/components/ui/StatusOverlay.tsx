@@ -60,7 +60,7 @@ export function StatusOverlay() {
     <div className={`flex h-full w-full items-start ${justify}`}>
       {parts.length > 0 && (
         <div
-          className="notch flex items-center gap-2 rounded-b-lg border-x border-b border-(--color-border) bg-(--color-surface-2) px-2 pt-[3px] pb-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg"
+          className="notch flex items-center gap-2 rounded-b-lg border-x border-b border-(--color-border) bg-(--color-surface-2) px-2 pt-[3.25px] pb-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg"
           style={{
             transform: `scale(${clampedScale})`,
             transformOrigin: origin,
