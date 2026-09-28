@@ -14,17 +14,24 @@ import { useBattery, useBatteryPower } from "../../hooks/useBattery";
  */
 export function StatusOverlay() {
   const { settings } = useSettings();
-  const { enabled, show_time, show_battery, show_battery_usage, position } = settings.overlay;
+  const { enabled, show_time, show_battery, show_battery_usage, scale, opacity, position } =
+    settings.overlay;
   const now = useTime();
   const { status: battery } = useBattery(enabled && show_battery);
   const watts = useBatteryPower(enabled && show_battery_usage);
 
   if (!enabled) return null;
 
-  // The window is pinned to the left / center / right of the top edge (Rust
-  // does the positioning); the card aligns to the matching side inside it.
+  // The window spans the top edge of the monitor; the card aligns to the
+  // chosen side inside it. Scaling around the matching corner keeps the notch
+  // flush with that side, and Rust sized the window tall enough for `scale`.
   const justify =
     position === "left" ? "justify-start" : position === "right" ? "justify-end" : "justify-center";
+  const origin = position === "left" ? "top left" : position === "right" ? "top right" : "top center";
+  // Clamp to the same ranges `overlay.rs` enforces so a hand-edited
+  // settings.json can't scale the card bigger than the window Rust sized.
+  const clampedScale = Math.min(2, Math.max(0.5, scale));
+  const clampedOpacity = Math.min(1, Math.max(0.1, opacity));
 
   const parts: ReactNode[] = [];
   if (show_time) {
@@ -52,7 +59,14 @@ export function StatusOverlay() {
   return (
     <div className={`flex h-full w-full items-start ${justify}`}>
       {parts.length > 0 && (
-        <div className="flex items-center gap-2 rounded-b-lg border border-t-0 border-(--color-border) bg-(--color-surface-2) px-2 py-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg">
+        <div
+          className="flex items-center gap-2 rounded-b-lg border border-t-0 border-(--color-border) bg-(--color-surface-2) px-2 py-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg"
+          style={{
+            transform: `scale(${clampedScale})`,
+            transformOrigin: origin,
+            opacity: clampedOpacity,
+          }}
+        >
           {parts.map((part, i) => (
             <Fragment key={i}>
               {i > 0 && <span className="text-(--color-muted)">·</span>}

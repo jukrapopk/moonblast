@@ -270,6 +270,8 @@ export default function App() {
   const setOverlayShowTime = useSettingsField("overlay", "show_time");
   const setOverlayShowBattery = useSettingsField("overlay", "show_battery");
   const setOverlayShowBatteryUsage = useSettingsField("overlay", "show_battery_usage");
+  const setOverlayScale = useSettingsField("overlay", "scale");
+  const setOverlayOpacity = useSettingsField("overlay", "opacity");
   const setOverlayAutohide = useSettingsField("overlay", "autohide");
   const setOverlayPosition = useSettingsField("overlay", "position");
 
@@ -282,8 +284,15 @@ export default function App() {
       enabled: settings.overlay.enabled,
       autohide: settings.overlay.autohide,
       position: settings.overlay.position,
+      scale: settings.overlay.scale,
     }).catch(() => {});
-  }, [ready, settings.overlay.enabled, settings.overlay.autohide, settings.overlay.position]);
+  }, [
+    ready,
+    settings.overlay.enabled,
+    settings.overlay.autohide,
+    settings.overlay.position,
+    settings.overlay.scale,
+  ]);
 
   // Appearance — ThemeProvider observes settings.appearance via the
   // SettingsContext, so writing here triggers a re-apply on the next
@@ -473,12 +482,16 @@ export default function App() {
                 overlayShowTime={settings.overlay.show_time}
                 overlayShowBattery={settings.overlay.show_battery}
                 overlayShowBatteryUsage={settings.overlay.show_battery_usage}
+                overlayScale={settings.overlay.scale}
+                overlayOpacity={settings.overlay.opacity}
                 overlayAutohide={settings.overlay.autohide}
                 overlayPosition={settings.overlay.position}
                 onToggleOverlayEnabled={setOverlayEnabled}
                 onToggleOverlayShowTime={setOverlayShowTime}
                 onToggleOverlayShowBattery={setOverlayShowBattery}
                 onToggleOverlayShowBatteryUsage={setOverlayShowBatteryUsage}
+                onSetOverlayScale={setOverlayScale}
+                onSetOverlayOpacity={setOverlayOpacity}
                 onSetOverlayAutohide={setOverlayAutohide}
                 onSetOverlayPosition={setOverlayPosition}
               />

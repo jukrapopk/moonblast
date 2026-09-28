@@ -10,6 +10,7 @@ import { ColorPickerModal } from "./ui/ColorPickerModal";
 import { Row } from "./ui/Row";
 import { Section } from "./ui/Section";
 import { Select } from "./ui/Select";
+import { Slider } from "./ui/Slider";
 import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
@@ -972,12 +973,16 @@ export function SettingsView({
   overlayShowTime,
   overlayShowBattery,
   overlayShowBatteryUsage,
+  overlayScale,
+  overlayOpacity,
   overlayAutohide,
   overlayPosition,
   onToggleOverlayEnabled,
   onToggleOverlayShowTime,
   onToggleOverlayShowBattery,
   onToggleOverlayShowBatteryUsage,
+  onSetOverlayScale,
+  onSetOverlayOpacity,
   onSetOverlayAutohide,
   onSetOverlayPosition,
 }: {
@@ -1021,12 +1026,16 @@ export function SettingsView({
   overlayShowTime: boolean;
   overlayShowBattery: boolean;
   overlayShowBatteryUsage: boolean;
+  overlayScale: number;
+  overlayOpacity: number;
   overlayAutohide: string;
   overlayPosition: string;
   onToggleOverlayEnabled: (v: boolean) => void;
   onToggleOverlayShowTime: (v: boolean) => void;
   onToggleOverlayShowBattery: (v: boolean) => void;
   onToggleOverlayShowBatteryUsage: (v: boolean) => void;
+  onSetOverlayScale: (v: number) => void;
+  onSetOverlayOpacity: (v: number) => void;
   onSetOverlayAutohide: (v: string) => void;
   onSetOverlayPosition: (v: string) => void;
 }) {
@@ -1136,6 +1145,30 @@ export function SettingsView({
           description="Thin status notch pinned to the top of the screen, always on top."
         >
           <Toggle checked={overlayEnabled} onChange={onToggleOverlayEnabled} />
+        </Row>
+        <Row label="Scale" description={`${Math.round(overlayScale * 100)}%`}>
+          <Slider
+            label="Overlay scale"
+            value={Math.min(2, Math.max(0.5, overlayScale))}
+            onChange={onSetOverlayScale}
+            min={0.5}
+            max={2}
+            step={0.05}
+            disabled={!overlayEnabled}
+            className="w-44"
+          />
+        </Row>
+        <Row label="Opacity" description={`${Math.round(overlayOpacity * 100)}%`}>
+          <Slider
+            label="Overlay opacity"
+            value={Math.min(1, Math.max(0.1, overlayOpacity))}
+            onChange={onSetOverlayOpacity}
+            min={0.1}
+            max={1}
+            step={0.05}
+            disabled={!overlayEnabled}
+            className="w-44"
+          />
         </Row>
         <Row
           label="Autohide"

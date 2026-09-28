@@ -2,9 +2,10 @@
 //!
 //! A second, frameless, transparent, topmost Tauri window spanning the top
 //! edge of the launcher's monitor. While `settings.overlay.enabled` is on it
-//! shows a thin status notch (time / battery / power draw) aligned left /
+//! shows a thin status notch (time / battery / power draw), aligned left /
 //! center / right by CSS inside the window (so changing position is a single
-//! DOM move, never a window jump). Like the volume OSD (`osd.rs`) it:
+//! DOM move, never a window jump) and scaled / dimmed by the `scale` /
+//! `opacity` settings. Like the volume OSD (`osd.rs`) it:
 //! - never takes focus (`focusable(false)`), so it can't steal a stream's
 //!   keyboard focus,
 //! - stays out of Alt+Tab / the taskbar (`skip_taskbar`) and is click-through,
@@ -46,9 +47,16 @@ static APPLY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// show, so the notch's left / center / right alignment is plain CSS inside it
 /// (`StatusOverlay`) and a position change never moves the window.
 const WIDTH: f64 = 300.0;
-/// Clears the notch card; extra space below it is transparent, so this only
-/// needs to be tall enough for the tallest padding/type combination.
+/// Clears the notch card at scale 1; extra space below it is transparent, so
+/// this only needs to be tall enough for the tallest padding/type combination.
+/// The window height is multiplied by the user's scale so a larger notch isn't
+/// clipped.
 const HEIGHT: f64 = 32.0;
+
+/// Allowed notch scale range, clamped Rust-side so a bad `settings.json` can't
+/// ask for an absurd window height. Mirrors the SettingsView slider.
+const MIN_SCALE: f64 = 0.5;
+const MAX_SCALE: f64 = 2.0;
 
 /// Autohide watcher poll interval.
 const AUTOHIDE_POLL_MS: u64 = 120;
@@ -65,6 +73,10 @@ static AUTOHIDE_MS: AtomicU64 = AtomicU64::new(0);
 /// placement doesn't depend on it — alignment is CSS inside the monitor-wide
 /// window.
 static POSITION: AtomicU8 = AtomicU8::new(1);
+/// Notch scale, stored as `f64` bits (atomics only hold integers). Read by
+/// `position` so the window is tall enough for the scaled card. Initialized to
+/// `1.0` (`0x3FF0_0000_0000_0000`).
+static SCALE_BITS: AtomicU64 = AtomicU64::new(0x3FF0_0000_0000_0000);
 static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
 static WATCHER_STOP: AtomicBool = AtomicBool::new(false);
 /// Whether the notch is currently shown — lets `show`/`hide` be no-ops when
@@ -131,18 +143,23 @@ pub fn ensure_window(app: &AppHandle) {
 /// hands visibility to the cursor watcher (starting hidden). `position` is
 /// `"left"` | `"center"` | `"right"`. Must run off the main thread (see module
 /// docs); callers spawn a thread.
-pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str) {
+pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str, scale: f64) {
     let _guard = APPLY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Recorded for the autohide hotspot. On-screen alignment is pure CSS
     // inside the monitor-wide window, so a position change never moves the
     // window — one clean DOM move instead of a window jump.
     POSITION.store(position_code(position), Ordering::SeqCst);
+    SCALE_BITS.store(scale.clamp(MIN_SCALE, MAX_SCALE).to_bits(), Ordering::SeqCst);
     if !enabled {
         stop_watcher();
         hide(app);
         return;
     }
     ensure_window(app);
+    // A scale change resizes the window (height only, never lateral), so apply
+    // it live when the notch is already up. Position changes are CSS-only and
+    // don't need this, but re-placing is idempotent.
+    reposition_if_visible(app);
     if autohide_ms == 0 {
         stop_watcher();
         show(app);
@@ -166,6 +183,19 @@ fn show(app: &AppHandle) {
         let _ = win.show();
         // Re-assert topmost in case another topmost window grabbed z-order.
         let _ = win.set_always_on_top(true);
+    }
+}
+
+/// Re-place the (monitor-wide) window if it's currently shown. Position
+/// changes don't need it — alignment is CSS inside the window — but a **scale**
+/// change resizes the window, and that must land without waiting for the next
+/// show.
+fn reposition_if_visible(app: &AppHandle) {
+    if !VISIBLE.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(win) = app.get_webview_window(LABEL) {
+        position(app, &win);
     }
 }
 
@@ -266,11 +296,12 @@ fn monitor_metrics(app: &AppHandle) -> Option<(f64, f64, f64, f64)> {
 /// notch hangs from the top of the screen. The card's left / center / right
 /// alignment is CSS inside this full-width window.
 fn position(app: &AppHandle, win: &tauri::WebviewWindow) {
-    let Some((mx, my, mw, scale)) = monitor_metrics(app) else {
+    let Some((mx, my, mw, dpi)) = monitor_metrics(app) else {
         return;
     };
+    let ui = f64::from_bits(SCALE_BITS.load(Ordering::SeqCst)).clamp(MIN_SCALE, MAX_SCALE);
     let width = mw.round().max(1.0) as u32;
-    let height = (HEIGHT * scale).round().max(1.0) as u32;
+    let height = (HEIGHT * ui * dpi).round().max(1.0) as u32;
     let _ = win.set_size(PhysicalSize::new(width, height));
     let _ = win.set_position(PhysicalPosition::new(mx as i32, my as i32));
 }

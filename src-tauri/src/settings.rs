@@ -34,6 +34,13 @@ pub struct Overlay {
     pub show_battery: bool,
     /// Power draw in watts. Only meaningful on battery hardware.
     pub show_battery_usage: bool,
+    /// Notch scale, `0.5`–`2.0` (1.0 = design size). Drives the CSS scale in
+    /// the frontend *and* the overlay window's height, so a larger notch
+    /// isn't clipped.
+    pub scale: f64,
+    /// Notch opacity, `0.1`–`1.0`. Applied to the card only (the window is
+    /// transparent), so a dim notch still reads over a bright stream.
+    pub opacity: f64,
     /// `"off"` | `"3s"` | `"10s"` — hide the notch and reveal it when the
     /// cursor reaches the top-center hotspot.
     pub autohide: String,
@@ -49,6 +56,8 @@ impl Default for Overlay {
             show_time: true,
             show_battery: true,
             show_battery_usage: false,
+            scale: 1.0,
+            opacity: 1.0,
             autohide: "off".to_string(),
             position: "center".to_string(),
         }
