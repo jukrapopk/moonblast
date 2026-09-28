@@ -2582,10 +2582,10 @@ fn battery_power() -> Option<f64> {
     Some((state.Rate as i32 as f64) / 1000.0)
 }
 
-/// Create/show or hide the persistent status overlay window and (dis)arm its
-/// autohide cursor watcher. Runs on a spawned thread because Tauri window
-/// creation deadlocks on the main thread on Windows (same constraint as
-/// `osd.rs`).
+/// Create/show or destroy the persistent status overlay window and (dis)arm
+/// its autohide cursor watcher. Disabling destroys the window so no WebView2
+/// lingers. Runs on a spawned thread because Tauri window creation deadlocks
+/// on the main thread on Windows (same constraint as `osd.rs`).
 #[tauri::command]
 fn apply_overlay(app: AppHandle, enabled: bool, autohide: String, position: String, scale: f64) {
     let ms = overlay::autohide_ms(&autohide);

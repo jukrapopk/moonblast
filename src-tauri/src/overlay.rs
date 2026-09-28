@@ -9,8 +9,9 @@
 //! - never takes focus (`focusable(false)`), so it can't steal a stream's
 //!   keyboard focus,
 //! - stays out of Alt+Tab / the taskbar (`skip_taskbar`) and is click-through,
-//! - is created lazily the first time the user enables it, then hidden /
-//!   re-shown on later toggles so we don't rebuild the webview each time.
+//! - is created lazily the first time the user enables it and **destroyed when
+//!   they disable it**, so a disabled overlay holds no WebView2 / React tree
+//!   at all (autohide merely hides / re-shows the live window).
 //!
 //! **Autohide.** With `overlay.autohide` set to a duration the notch starts
 //! hidden and a watcher thread reveals it while the cursor is inside the
@@ -77,8 +78,14 @@ static POSITION: AtomicU8 = AtomicU8::new(1);
 /// `position` so the window is tall enough for the scaled card. Initialized to
 /// `1.0` (`0x3FF0_0000_0000_0000`).
 static SCALE_BITS: AtomicU64 = AtomicU64::new(0x3FF0_0000_0000_0000);
-static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
-static WATCHER_STOP: AtomicBool = AtomicBool::new(false);
+/// Bumped whenever a watcher starts *or* stops. A watcher exits as soon as it
+/// sees a generation other than its own, so an off→on toggle can start a fresh
+/// watcher immediately instead of waiting for the old thread to notice a shared
+/// stop flag — which is racy when the toggle lands inside one poll interval.
+static WATCHER_GEN: AtomicU64 = AtomicU64::new(0);
+/// True while the watcher for the current generation is alive; lets `apply`
+/// refresh the timeout without spawning a second watcher.
+static WATCHER_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Whether the notch is currently shown — lets `show`/`hide` be no-ops when
 /// the state hasn't changed.
 static VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -152,7 +159,7 @@ pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str, s
     SCALE_BITS.store(scale.clamp(MIN_SCALE, MAX_SCALE).to_bits(), Ordering::SeqCst);
     if !enabled {
         stop_watcher();
-        hide(app);
+        destroy(app);
         return;
     }
     ensure_window(app);
@@ -166,11 +173,30 @@ pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str, s
         return;
     }
     AUTOHIDE_MS.store(autohide_ms, Ordering::SeqCst);
-    if WATCHER_RUNNING.load(Ordering::SeqCst) {
+    if WATCHER_ACTIVE.load(Ordering::SeqCst) {
         return; // already watching; the timeout above was just refreshed
     }
     hide(app); // start hidden until the cursor comes near
     start_watcher(app.clone());
+}
+
+/// Tear the overlay window down entirely, releasing the WebView2 (and its
+/// renderer process) rather than parking a hidden one for the rest of the
+/// session. Called when the user disables the overlay.
+fn destroy(app: &AppHandle) {
+    VISIBLE.store(false, Ordering::SeqCst);
+    let Some(win) = app.get_webview_window(LABEL) else {
+        return;
+    };
+    let _ = win.destroy();
+    // `destroy` only *posts* to the event loop; wait for the window to actually
+    // leave the manager so a quick re-enable can't observe the stale window and
+    // skip recreation. Bounded, so a wedged event loop can't hang the caller.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while app.get_webview_window(LABEL).is_some() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    moonblast_log!("overlay: window destroyed");
 }
 
 /// Show the notch (no-op if already visible), re-asserting topmost.
@@ -209,23 +235,18 @@ fn hide(app: &AppHandle) {
     }
 }
 
-/// Bring up the single autohide watcher while one isn't already running.
+/// Bring up a fresh autohide watcher, superseding any still winding down.
 fn start_watcher(app: AppHandle) {
-    if WATCHER_RUNNING.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    WATCHER_STOP.store(false, Ordering::SeqCst);
+    let gen = WATCHER_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    WATCHER_ACTIVE.store(true, Ordering::SeqCst);
     std::thread::spawn(move || {
         let mut last_inside = now_ms();
-        loop {
-            if WATCHER_STOP.load(Ordering::SeqCst) {
-                break;
-            }
+        while WATCHER_GEN.load(Ordering::SeqCst) == gen {
             if cursor_in_hotspot(&app) {
                 last_inside = now_ms();
                 // Re-check: a concurrent `stop_watcher` (autohide turned off)
                 // must not be undone by a late `show`.
-                if !WATCHER_STOP.load(Ordering::SeqCst) {
+                if WATCHER_GEN.load(Ordering::SeqCst) == gen {
                     show(&app);
                 }
             } else {
@@ -238,13 +259,19 @@ fn start_watcher(app: AppHandle) {
             }
             std::thread::sleep(Duration::from_millis(AUTOHIDE_POLL_MS));
         }
-        WATCHER_RUNNING.store(false, Ordering::SeqCst);
+        // Only clear the flag if no newer watcher has already taken over.
+        if WATCHER_GEN.load(Ordering::SeqCst) == gen {
+            WATCHER_ACTIVE.store(false, Ordering::SeqCst);
+        }
     });
 }
 
 fn stop_watcher() {
     AUTOHIDE_MS.store(0, Ordering::SeqCst);
-    WATCHER_STOP.store(true, Ordering::SeqCst);
+    // Invalidate any running watcher *and* let the next `start_watcher` run
+    // immediately, instead of waiting for the old thread to exit.
+    WATCHER_GEN.fetch_add(1, Ordering::SeqCst);
+    WATCHER_ACTIVE.store(false, Ordering::SeqCst);
 }
 
 /// Whether the cursor is inside the notch hotspot (at the top of the launcher's
