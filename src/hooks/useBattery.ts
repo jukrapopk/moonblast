@@ -48,7 +48,7 @@ export function useBattery(enabled = true): {
 }
 
 /**
- * Battery power draw in watts, for the status overlay's "battery usage"
+ * Battery power draw in watts, for the status overlay's "power draw"
  * readout. `null` when the system has no battery or the OS reports no rate.
  * Same read cadence as `useBattery` (5s poll + focus/visibility refresh).
  */

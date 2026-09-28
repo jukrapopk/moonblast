@@ -2551,7 +2551,7 @@ fn battery() -> Option<BatteryStatus> {
     Some(status)
 }
 
-/// Battery power draw in watts, for the status overlay's "battery usage"
+/// Battery power draw in watts, for the status overlay's "power draw"
 /// readout. `None` when the system has no battery or the OS reports no rate.
 /// Read via `CallNtPowerInformation(SystemBatteryState)`, which
 /// `GetSystemPowerStatus` (used by `battery`) doesn't provide.

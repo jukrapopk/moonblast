@@ -1157,20 +1157,26 @@ export function SettingsView({
               disabled={!overlayEnabled}
             />
           </Row>
-          <Row label="Show battery">
-            <Toggle
-              checked={overlayShowBattery}
-              onChange={onToggleOverlayShowBattery}
-              disabled={!overlayEnabled}
-            />
-          </Row>
-          <Row label="Show battery usage (W)">
-            <Toggle
-              checked={overlayShowBatteryUsage}
-              onChange={onToggleOverlayShowBatteryUsage}
-              disabled={!overlayEnabled}
-            />
-          </Row>
+          {/* Battery rows only make sense on battery hardware — same gate as
+           *  the Preferences → Battery group. */}
+          {hasBattery === true && (
+            <Row label="Show battery">
+              <Toggle
+                checked={overlayShowBattery}
+                onChange={onToggleOverlayShowBattery}
+                disabled={!overlayEnabled}
+              />
+            </Row>
+          )}
+          {hasBattery === true && (
+            <Row label="Show power draw">
+              <Toggle
+                checked={overlayShowBatteryUsage}
+                onChange={onToggleOverlayShowBatteryUsage}
+                disabled={!overlayEnabled}
+              />
+            </Row>
+          )}
         </PreferenceGroup>
       </Section>
 

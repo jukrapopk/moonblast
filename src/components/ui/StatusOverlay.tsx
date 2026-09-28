@@ -7,10 +7,10 @@ import { useBattery, useBatteryPower } from "../../hooks/useBattery";
  * Contents of the `overlay` window — the thin always-on-top status notch.
  *
  * Rust owns the window's show/hide lifecycle (see `overlay.rs`); this
- * component only renders the enabled readouts (time / battery / battery
- * usage) and follows the app theme through the shared surface tokens. The
- * notch sits flush with the top of the screen, so it uses bottom-only
- * rounding to read as a notch rather than a floating pill.
+ * component only renders the enabled readouts (time / battery / power draw)
+ * and follows the app theme through the shared surface tokens. The notch sits
+ * flush with the top of the screen, so it uses bottom-only rounding to read as
+ * a notch rather than a floating pill.
  */
 export function StatusOverlay() {
   const { settings } = useSettings();
