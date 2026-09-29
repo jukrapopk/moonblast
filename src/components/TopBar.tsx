@@ -68,10 +68,10 @@ function Status({
   // static `danger` red threshold so the chip never doubles up.
   const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
   // Associated, but Windows says there's no internet — usually a captive
-  // portal waiting for a sign-in. `connectivity === null` means the verdict
-  // couldn't be read at all, which mustn't be dressed up as a problem.
+  // portal waiting for a sign-in. A missing verdict (`null` / `undefined`)
+  // means we don't know, which mustn't be dressed up as a problem.
   const wifiOffline =
-    !!wifi && wifi.connected && wifi.connectivity !== null && wifi.connectivity !== "internet";
+    !!wifi && wifi.connected && !!wifi.connectivity && wifi.connectivity !== "internet";
   return (
     <div className="flex items-center gap-1">
       {showDisplay && (

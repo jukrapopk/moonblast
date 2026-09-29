@@ -722,6 +722,18 @@ pub fn set_radio(on: bool) -> Result<(), String> {
     crate::radio::set_radio(windows::Devices::Radios::RadioKind::WiFi, on)
 }
 
+/// True when Windows already has a profile for `ssid`.
+///
+/// Keyed on the *exit code*, not on output text: netsh exits 1 for "profile
+/// not found" and 0 when it is there. Several parses in this module key on
+/// English labels (`netsh` localizes its output — a known limitation), but this
+/// check is locale-proof.
+fn profile_exists(ssid: &str) -> bool {
+    netsh(&["wlan", "show", "profiles", &format!("name={ssid}")])
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
 /// Delete a saved WiFi profile ("forget" the network). No-op when no
 /// profile exists for the SSID — forgetting is idempotent.
 pub fn forget(ssid: &str) -> Result<(), String> {
@@ -817,6 +829,15 @@ pub fn connect_with_password(ssid: &str, password: &str, auth: &str) -> Result<(
 pub fn connect_open(ssid: &str, auth: Option<&str>) -> Result<(), String> {
     if ssid.is_empty() {
         return Err("empty SSID".into());
+    }
+    // The caller only routes networks here that its scan called "unknown", but
+    // that flag is parsed out of an English label in netsh's output (localized
+    // Windows renders it differently). Double-check before writing: an existing
+    // profile may hold Windows' own settings — auto-connect among them — and
+    // must not be replaced behind the user's back (nor deleted by the
+    // failed-join cleanup below).
+    if profile_exists(ssid) {
+        return connect(ssid);
     }
     let owe = auth.is_some_and(|a| a.eq_ignore_ascii_case("owe"));
     let (auth_xml, encryption) = if owe { ("OWE", "AES") } else { ("open", "none") };

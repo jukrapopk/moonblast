@@ -601,6 +601,26 @@ fn launch_with_timeout<F>(op: F, deadline: std::time::Duration, label: &str) -> 
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,
 {
+    launch_with_timeout_msg(
+        op,
+        deadline,
+        label,
+        "This app needs Windows' desktop shell — exit Immersive Mode to launch it",
+    )
+}
+
+/// Same as `launch_with_timeout`, but with a caller-supplied timeout message —
+/// the default one talks about launching an *app*, which reads oddly when the
+/// user clicked a link (opening a URL in the browser).
+fn launch_with_timeout_msg<F>(
+    op: F,
+    deadline: std::time::Duration,
+    label: &str,
+    timeout_msg: &str,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String> + Send + 'static,
+{
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::spawn(move || {
         let r = op();
@@ -609,14 +629,10 @@ where
     match rx.recv_timeout(deadline) {
         Ok(r) => r,
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            moonblast_log!("launch_app: {label} timed out after {:?} (likely needs desktop shell)", deadline);
-            Err(format!(
-                "This app needs Windows' desktop shell — exit Immersive Mode to launch it"
-            ))
+            moonblast_log!("{label} timed out after {:?} (likely needs desktop shell)", deadline);
+            Err(timeout_msg.to_string())
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err(format!("This app needs Windows' desktop shell — exit Immersive Mode to launch it"))
-        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(timeout_msg.to_string()),
     }
 }
 
@@ -2723,10 +2739,11 @@ async fn wifi_open_portal(url: String) -> Result<(), String> {
         return Err("refusing to open a non-http(s) URL".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        launch_with_timeout(
+        launch_with_timeout_msg(
             move || shell_open(&url),
             std::time::Duration::from_secs(5),
             "wifi_open_portal",
+            "Couldn't open the sign-in page — exit Immersive Mode and try again",
         )
     })
     .await

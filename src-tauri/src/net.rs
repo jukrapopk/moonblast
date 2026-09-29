@@ -174,7 +174,12 @@ fn probe_endpoint() -> (bool, String, String) {
             }
         }
         if let Ok(v) = key.get_value::<String, _>("ActiveWebProbeContent") {
-            content = v;
+            // A present-but-empty value would make an *empty* response body
+            // count as the expected payload — and an empty body is one of the
+            // two shapes a captive portal answers with. Treat it as unset.
+            if !v.trim().is_empty() {
+                content = v;
+            }
         }
         if let Ok(v) = key.get_value::<u32, _>("EnableActiveProbing") {
             enabled = v != 0;
@@ -241,7 +246,7 @@ fn probe_target(probe_url: &str, expected: &str) -> PortalStatus {
         };
     }
 
-    if status == 200 {
+    if status == 200 && !expected.trim().is_empty() {
         let body = response.into_string().unwrap_or_default();
         if body.trim() == expected.trim() {
             return PortalStatus {
@@ -313,6 +318,17 @@ mod tests {
         println!("substituted -> {s:?}");
         assert_eq!(s.state, PortalState::Portal);
         assert_eq!(s.portal_url.as_deref(), Some(url.as_str()));
+    }
+
+    /// An empty expected payload (a registry value someone blanked out) must
+    /// not make an empty response body look like the real internet — an empty
+    /// body is exactly what a captive portal sends.
+    #[test]
+    fn empty_expected_payload_never_reads_as_internet() {
+        let url = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let s = probe_target(&url, "");
+        println!("empty expected -> {s:?}");
+        assert_eq!(s.state, PortalState::Portal);
     }
 
     #[test]
