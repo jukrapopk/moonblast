@@ -6,16 +6,35 @@ import { useEffect, useRef, useState } from "react";
  * keeping the wakeup rate negligible.
  *
  * `now` is held in a ref so callers that pass an inline arrow don't churn
- * the interval on every render — the interval runs forever; it reads the
- * latest `now()` at each tick.
+ * the interval on every render — the interval is visibility-gated and reads
+ * the latest `now()` at each tick.
  */
 export function useTime(now: () => Date = () => new Date()): Date {
   const [t, setT] = useState<Date>(now);
   const nowRef = useRef(now);
   nowRef.current = now;
+  // Tick only while the window is visible: a hidden window's clock isn't on
+  // screen, and Chromium throttles hidden timers regardless. Coming back to
+  // visible snaps the value to now instead of waiting out the interval.
   useEffect(() => {
-    const id = setInterval(() => setT(nowRef.current()), 30_000);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const tick = () => setT(nowRef.current());
+    const sync = () => {
+      const visible = document.visibilityState === "visible";
+      if (visible && id === null) {
+        tick();
+        id = setInterval(tick, 30_000);
+      } else if (!visible && id !== null) {
+        clearInterval(id);
+        id = null;
+      }
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      if (id !== null) clearInterval(id);
+      document.removeEventListener("visibilitychange", sync);
+    };
   }, []);
   return t;
 }

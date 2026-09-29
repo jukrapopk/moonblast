@@ -21,7 +21,10 @@
 //! hook: Windows stops delivering low-level hooks while a Chromium-family
 //! window (i.e. our own WebView2, or a browser) is focused (see
 //! `mediakeys.rs`), and the cursor position is a global, focus-independent
-//! read — a cheap `GetCursorPos` every `AUTOHIDE_POLL_MS` is plenty.
+//! read. The poll is adaptive — fast while the cursor is on or approaching the
+//! notch, backed off otherwise — and the monitor geometry is cached, so a
+//! cursor away from the top edge costs a couple of bare `GetCursorPos` calls a
+//! second rather than a Tauri monitor lookup on every fixed tick.
 //!
 //! Window creation must **not** run on the main thread (Tauri deadlocks there
 //! on Windows — see `WebviewWindowBuilder::build` docs), so callers spawn a
@@ -59,8 +62,21 @@ const HEIGHT: f64 = 32.0;
 const MIN_SCALE: f64 = 0.5;
 const MAX_SCALE: f64 = 2.0;
 
-/// Autohide watcher poll interval.
+/// Autohide watcher poll interval while the cursor is on or approaching the
+/// notch — fast enough that the reveal reads as instant.
 const AUTOHIDE_POLL_MS: u64 = 120;
+/// Poll interval while the cursor is nowhere near the notch. The cursor is
+/// usually far, so this is the steady state: ~2.5 bare `GetCursorPos` calls a
+/// second, against ~8/s when the hotspot was tested on every fixed tick.
+const AUTOHIDE_POLL_IDLE_MS: u64 = 400;
+/// Logical px the hotspot is inflated by to form the "approach" zone that keeps
+/// the fast poll running while the cursor heads for the notch.
+const NEAR_PAD: f64 = 150.0;
+/// How often the watcher re-reads the monitor geometry. `monitor_metrics` walks
+/// the Tauri window manager, so it doesn't belong on the poll path; `POSITION`
+/// is still read every tick, so left / center / right follows instantly and
+/// only a display change waits for this refresh.
+const METRICS_REFRESH_MS: u64 = 2_000;
 /// Hotspot for autohide, in logical px: a wide, shallow strip along the top of
 /// the monitor, tracking the notch's left / center / right position.
 const HOTSPOT_W: f64 = 420.0;
@@ -69,7 +85,7 @@ const HOTSPOT_H: f64 = 90.0;
 /// Current autohide timeout (0 = off). Read by the watcher each tick so a
 /// timeout change is picked up without restarting it.
 static AUTOHIDE_MS: AtomicU64 = AtomicU64::new(0);
-/// `0` = left, `1` = center, `2` = right. Read by `cursor_in_hotspot` so the
+/// `0` = left, `1` = center, `2` = right. Read by `MonitorGeom::probe` so the
 /// autohide reveal zone follows the notch along the top edge. The window's own
 /// placement doesn't depend on it — alignment is CSS inside the monitor-wide
 /// window.
@@ -241,8 +257,17 @@ fn start_watcher(app: AppHandle) {
     WATCHER_ACTIVE.store(true, Ordering::SeqCst);
     std::thread::spawn(move || {
         let mut last_inside = now_ms();
+        let mut monitor = MonitorGeom::read(&app);
+        let mut monitor_at = now_ms();
         while WATCHER_GEN.load(Ordering::SeqCst) == gen {
-            if cursor_in_hotspot(&app) {
+            // Re-read the display geometry only on the slow cadence; `POSITION`
+            // is read inside `probe`, so left / center / right stays instant.
+            if now_ms().saturating_sub(monitor_at) >= METRICS_REFRESH_MS {
+                monitor = MonitorGeom::read(&app);
+                monitor_at = now_ms();
+            }
+            let probe = monitor.map_or(Probe::Far, |m| m.probe());
+            if probe == Probe::Inside {
                 last_inside = now_ms();
                 // Re-check: a concurrent `stop_watcher` (autohide turned off)
                 // must not be undone by a late `show`.
@@ -257,7 +282,17 @@ fn start_watcher(app: AppHandle) {
                     hide(&app);
                 }
             }
-            std::thread::sleep(Duration::from_millis(AUTOHIDE_POLL_MS));
+            // Poll fast only while the notch is hidden and the cursor is
+            // closing in on it — the reveal has to feel instant. Once it's up
+            // there's nothing left to catch (the 3 s / 10 s timeout absorbs
+            // the coarser leave detection) and far away there's nothing to
+            // see, so both back off.
+            let wait = if VISIBLE.load(Ordering::SeqCst) || probe == Probe::Far {
+                AUTOHIDE_POLL_IDLE_MS
+            } else {
+                AUTOHIDE_POLL_MS
+            };
+            std::thread::sleep(Duration::from_millis(wait));
         }
         // Only clear the flag if no newer watcher has already taken over.
         if WATCHER_GEN.load(Ordering::SeqCst) == gen {
@@ -274,27 +309,76 @@ fn stop_watcher() {
     WATCHER_ACTIVE.store(false, Ordering::SeqCst);
 }
 
-/// Whether the cursor is inside the notch hotspot (at the top of the launcher's
-/// monitor, following `POSITION`), in physical pixels.
-fn cursor_in_hotspot(app: &AppHandle) -> bool {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-    let mut pt: POINT = unsafe { std::mem::zeroed() };
-    if unsafe { GetCursorPos(&mut pt) } == 0 {
-        return false;
+/// How close the cursor is to the notch hotspot.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    /// Cursor is inside the reveal hotspot.
+    Inside,
+    /// Cursor is within `NEAR_PAD` of the hotspot — an approach, so keep the
+    /// poll fast.
+    Near,
+    /// Cursor is nowhere near the notch.
+    Far,
+}
+
+/// Cached monitor geometry for the hotspot. `monitor_metrics` walks the Tauri
+/// window manager, so the watcher refreshes this on `METRICS_REFRESH_MS` and
+/// recomposes the rect from the cached values + `POSITION` every tick.
+#[derive(Clone, Copy)]
+struct MonitorGeom {
+    left: f64,
+    top: f64,
+    width: f64,
+    scale: f64,
+}
+
+impl MonitorGeom {
+    fn read(app: &AppHandle) -> Option<Self> {
+        monitor_metrics(app).map(|(left, top, width, scale)| Self {
+            left,
+            top,
+            width,
+            scale,
+        })
     }
-    let Some((mx, my, mw, scale)) = monitor_metrics(app) else {
-        return false;
-    };
-    let hot_w = HOTSPOT_W * scale;
-    let hot_left = match POSITION.load(Ordering::SeqCst) {
-        0 => mx,
-        2 => mx + mw - hot_w,
-        _ => mx + (mw - hot_w) / 2.0,
-    };
-    let x = pt.x as f64;
-    let y = pt.y as f64;
-    x >= hot_left && x <= hot_left + hot_w && y >= my && y <= my + HOTSPOT_H * scale
+
+    /// Where the cursor sits relative to the hotspot (physical px). `Far` when
+    /// the cursor can't be read — e.g. it left the desktop.
+    fn probe(&self) -> Probe {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut pt: POINT = unsafe { std::mem::zeroed() };
+        if unsafe { GetCursorPos(&mut pt) } == 0 {
+            return Probe::Far;
+        }
+        let (x, y) = (pt.x as f64, pt.y as f64);
+        let hot_w = HOTSPOT_W * self.scale;
+        let hot_left = match POSITION.load(Ordering::SeqCst) {
+            0 => self.left,
+            2 => self.left + self.width - hot_w,
+            _ => self.left + (self.width - hot_w) / 2.0,
+        };
+        if contains(x, y, hot_left, self.top, hot_w, HOTSPOT_H * self.scale) {
+            return Probe::Inside;
+        }
+        let pad = NEAR_PAD * self.scale;
+        if contains(
+            x,
+            y,
+            hot_left - pad,
+            self.top - pad,
+            hot_w + 2.0 * pad,
+            HOTSPOT_H * self.scale + 2.0 * pad,
+        ) {
+            return Probe::Near;
+        }
+        Probe::Far
+    }
+}
+
+/// Inclusive point-in-rect test, in physical px.
+fn contains(x: f64, y: f64, left: f64, top: f64, w: f64, h: f64) -> bool {
+    x >= left && x <= left + w && y >= top && y <= top + h
 }
 
 /// `(left, top, width, scale)` of the launcher's monitor, in physical pixels.

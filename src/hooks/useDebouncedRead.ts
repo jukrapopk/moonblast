@@ -12,6 +12,11 @@ import { useFocusRefresh } from "./useFocusRefresh";
  * The caller owns the state; this hook returns a `read` function that
  * updates state via `setValue` and a `refresh` alias bound to the same
  * read. The 2 s collapse window matches `useWifi`'s original behavior.
+ *
+ * The poll is **visibility-gated**: it only runs while the window is
+ * visible, so a hidden surface (the notch under autohide, a minimized
+ * launcher) issues no reads at all — `useFocusRefresh` re-reads when the
+ * window comes back, so the value is fresh on return.
  */
 export function useDebouncedRead<T>(
   command: string,
@@ -74,10 +79,30 @@ export function useDebouncedRead<T>(
     }
   }, [command, collapseMs, setValue, enabled]);
 
+  // Poll only while the window is actually visible. A hidden window — the
+  // overlay notch while autohide has it tucked away, a minimized launcher —
+  // gets Chromium's background timer throttling anyway; stopping outright
+  // makes an unseen chip free. `useFocusRefresh` above re-reads on
+  // `visibilitychange → visible`, so the value is fresh the moment the window
+  // comes back rather than waiting for the next tick.
   useEffect(() => {
     if (!enabled || pollIntervalMs === undefined) return;
-    const id = setInterval(() => void read(), pollIntervalMs);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const sync = () => {
+      const visible = document.visibilityState === "visible";
+      if (visible && id === null) {
+        id = setInterval(() => void read(), pollIntervalMs);
+      } else if (!visible && id !== null) {
+        clearInterval(id);
+        id = null;
+      }
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      if (id !== null) clearInterval(id);
+      document.removeEventListener("visibilitychange", sync);
+    };
   }, [read, pollIntervalMs, enabled]);
 
   useFocusRefresh(() => void read(), [read]);
