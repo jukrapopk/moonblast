@@ -19,6 +19,7 @@
         "minHeight": 480,
         "center": true,
         "decorations": false,
+        "shadow": false,
         "backgroundColor": "#0d1017",
         "visible": false
       }
