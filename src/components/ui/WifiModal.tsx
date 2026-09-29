@@ -311,13 +311,11 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   const [radioBusy, setRadioBusy] = useState(false);
   // Local copy of the radio state so the header toggle reflects a
   // just-performed change immediately. Seeded from the parent's shared
-  // subscription on open, but refreshed with a direct one-shot fetch
-  // (bypassing that subscription's `useDebouncedRead` 2s collapse
-  // window) after every toggle here — mirrors `liveSsid` below, and the
-  // same fix applied to the Bluetooth modal's radio toggle. Without
-  // this, toggling shortly after the modal's open-triggered refresh can
-  // silently collapse with that earlier read and never visually update,
-  // even though the radio itself did flip.
+  // subscription on open, then corrected by the modal's own one-shot read
+  // (below) and re-fetched directly after every toggle here — both bypass
+  // that subscription's `useDebouncedRead` 2s collapse window, so a read the
+  // chip just performed can't swallow this one and leave the switch stale.
+  // Mirrors `liveSsid` below and the Bluetooth modal's radio toggle.
   const [liveRadioOn, setLiveRadioOn] = useState<boolean | null>(radioOn);
   useEffect(() => {
     if (open) setLiveRadioOn(radioOn);
@@ -327,9 +325,10 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   // and Rescan is disabled until the radio comes back on.
   const radioOff = liveRadioOn === false;
   // Local copy of the current SSID so connect/disconnect reflect
-  // immediately. Seeded from the prop on open; re-fetched from the
-  // OS after every connect/disconnect, and synced from the parent
-  // subscription (which refreshes on window focus) while open.
+  // immediately. Seeded from the prop on open, corrected by the modal's own
+  // one-shot read below, re-fetched from the OS after every
+  // connect/disconnect, and synced from the parent subscription (which
+  // refreshes on window focus) while open.
   const [liveSsid, setLiveSsid] = useState<string | null>(currentSsid);
   useEffect(() => {
     if (open) setLiveSsid(currentSsid);
@@ -397,7 +396,22 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   useEffect(() => {
     if (!open) return;
     setError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Authoritative read of the live connection on open. The seed props come
+    // from the TopBar chip's `useWifi` subscription, which collapses reads
+    // inside a 2s window — so opening the modal shortly after a chip read can
+    // seed a stale radio / SSID. This one-shot bypasses that collapse (the
+    // same reason every action below re-fetches rather than trusting the
+    // prop) and writes only on success, so a failed read can't blank the
+    // seed. A `radioOff` flip here is what (re)runs the scan effect below.
+    let cancelled = false;
+    void fetchWifiCurrent().then((c) => {
+      if (cancelled || !c) return;
+      setLiveRadioOn(c.radioOn);
+      setLiveSsid(c.ssid || null);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   /** Common envelope for every wifi action: spin up the per-row busy

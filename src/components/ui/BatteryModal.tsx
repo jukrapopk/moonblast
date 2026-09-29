@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "./Modal";
 import { SectionLabel } from "./SectionLabel";
 import { ErrorBanner } from "./ErrorBanner";
 import { formatDuration } from "./formatDuration";
+import { useVisibleInterval } from "../../hooks/useVisibleInterval";
 import type { BatteryStatus } from "../../hooks/useBattery";
 
 interface BatteryModalProps {
@@ -13,38 +14,36 @@ interface BatteryModalProps {
 
 /**
  * "Battery" modal — opens from the TopBar chip. Read-on-open plus a 2s
- * refresh while open (so the percent / time-remaining tick down live),
- * mirrors the AudioModal/WifiModal vocabulary: STATUS section with a big
- * percent + horizontal fill bar + time-remaining, POWER SOURCE line, no
+ * visibility-gated refresh while open (so the percent / time-remaining tick
+ * down live), mirrors the AudioModal/WifiModal vocabulary: STATUS section with
+ * a big percent + horizontal fill bar + time-remaining, POWER SOURCE line, no
  * footer action.
  */
 export function BatteryModal({ open, onClose }: BatteryModalProps) {
   const [status, setStatus] = useState<BatteryStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setError(null);
-    let cancelled = false;
-    async function read() {
-      try {
-        const s = await invoke<BatteryStatus | null>("battery");
-        if (!cancelled) setStatus(s);
-      } catch (e) {
-        if (!cancelled) setError(String(e));
-      }
+  // Authoritative read for the modal. The component stays mounted at the App
+  // root (only `open` changes), so a late resolve after close just refreshes
+  // the numbers for the next open — no unmount guard needed.
+  const read = useCallback(async () => {
+    try {
+      setStatus(await invoke<BatteryStatus | null>("battery"));
+    } catch (e) {
+      setError(String(e));
     }
-    void read();
-    // Refresh every 2s while the modal is open so the user sees the
-    // percent / time-remaining tick down live. The hook in the TopBar
-    // already handles focus + visibility for the chip; the modal just
-    // wants the numbers to keep moving.
-    const id = setInterval(read, 2_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+  }, []);
+
+  useEffect(() => {
+    if (open) setError(null);
   }, [open]);
+
+  // Read on open, then keep the percent / time-remaining ticking live while
+  // the modal is up. `useVisibleInterval` reads once up front and stops the
+  // 2s tick while the window is hidden, so a modal left open behind a
+  // minimized launcher / a stream issues no IPCs — the same rule every other
+  // timer in the app follows. The TopBar chip keeps its own 5s cadence.
+  useVisibleInterval(read, 2_000, open);
 
   const percent = status?.percent ?? -1;
   const charging = status?.charging ?? false;

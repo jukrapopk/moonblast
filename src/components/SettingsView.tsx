@@ -439,11 +439,11 @@ export function DisplaySettingsModal({
   }, []);
   // Refresh HDR when the window comes back into focus — catches the
   // case where the user toggled HDR in Windows Settings (which doesn't
-  // push a Tauri event). Only runs while the modal is open.
-  useFocusRefresh(() => {
-    if (!open) return;
-    void refreshHdr();
-  }, [open, refreshHdr]);
+  // push a Tauri event). `open` doubles as the `enabled` flag, so the
+  // listeners only exist while the modal is up — and flipping it fires the
+  // initial call, which IS the modal's open-time HDR read (the `[open]`
+  // effect below deliberately doesn't repeat it).
+  useFocusRefresh(() => void refreshHdr(), [refreshHdr], open);
 
   const [displayModes, setDisplayModes] = useState<
     { width: number; height: number; refreshRates: number[] }[] | null | undefined
@@ -488,8 +488,9 @@ export function DisplaySettingsModal({
   useEffect(() => {
     if (!open) return;
     refreshMonitors();
-    refreshHdr();
     refreshDisplay();
+    // HDR is read by the `useFocusRefresh` above — its initial call fires on
+    // this same `open` change, so re-reading here would double the IPC.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

@@ -105,7 +105,10 @@ export function useDebouncedRead<T>(
     };
   }, [read, pollIntervalMs, enabled]);
 
-  useFocusRefresh(() => void read(), [read]);
+  // `enabled` also skips the focus/visibility registration below, so a
+  // suspended chip (hidden in Customization) attaches no listeners at all —
+  // not just "listeners that early-return".
+  useFocusRefresh(() => void read(), [read], enabled);
 
   return read;
 }

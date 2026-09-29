@@ -210,27 +210,32 @@ export default function App() {
   const [displayOpen, setDisplayOpen] = useState(false);
   const [powerOpen, setPowerOpen] = useState(false);
 
-  // Data hooks for the status modals. Live here (not in TopBar) so the
+  // Data hooks for the TopBar status chips. Live here (not in TopBar) so the
   // modals can render at the App root. Each is suspended (no mount/focus
   // reads, no poll timer, no push-event subscription) when its chip is
-  // hidden via Customization — a hidden chip has nothing to refresh, and
-  // every modal below fetches its own live data on open regardless, so
-  // this never affects modal behavior.
+  // hidden via Customization — a hidden chip has nothing to refresh.
   const { current: wifi, refresh: refreshWifi } = useWifi(settings.customization.show_wifi);
-  useEffect(() => {
-    refreshWifi();
-  }, [wifiOpen, refreshWifi]);
   const { status: bluetooth, refresh: refreshBluetooth } = useBluetooth(
     settings.customization.show_bluetooth,
   );
-  useEffect(() => {
-    refreshBluetooth();
-  }, [bluetoothOpen, refreshBluetooth]);
   const { master: audio, refresh: refreshAudio } = useAudioMaster(settings.customization.show_audio);
+  const { status: battery, refresh: refreshBattery } = useBattery(settings.customization.show_battery);
+
+  // Each modal does its own authoritative read on open — a one-shot that
+  // bypasses these subscriptions' 2 s collapse window (so the modal can't be
+  // seeded stale) — which leaves the parent with only one direction to cover:
+  // push the chip back in sync when a modal *closes*. Refreshing on open as
+  // well would just duplicate the modal's own fetch, and for WiFi that
+  // duplicate is a real `netsh` spawn.
+  useEffect(() => {
+    if (!wifiOpen) refreshWifi();
+  }, [wifiOpen, refreshWifi]);
+  useEffect(() => {
+    if (!bluetoothOpen) refreshBluetooth();
+  }, [bluetoothOpen, refreshBluetooth]);
   useEffect(() => {
     if (!audioOpen) refreshAudio();
   }, [audioOpen, refreshAudio]);
-  const { status: battery, refresh: refreshBattery } = useBattery(settings.customization.show_battery);
   useEffect(() => {
     if (!batteryOpen) refreshBattery();
   }, [batteryOpen, refreshBattery]);

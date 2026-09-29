@@ -143,13 +143,12 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
   const [error, setError] = useState<string | null>(null);
 
   // Local copy of the radio state so the toggle reflects a just-performed
-  // change immediately. Seeded from the parent's shared subscription on
-  // open, but refreshed with a direct one-shot fetch (bypassing that
-  // subscription's `useDebouncedRead` 2s collapse window) after every
-  // toggle here — mirrors WifiModal's `liveSsid`. Without this, toggling
-  // shortly after open (well within 2s of the open-triggered refresh)
-  // silently collapsed with the earlier read and the switch never
-  // visually updated, even though the radio itself did flip.
+  // change immediately. Seeded from the parent's shared subscription on open,
+  // then corrected by the modal's own one-shot read (below) and re-fetched
+  // directly after every toggle here — both bypass that subscription's
+  // `useDebouncedRead` 2s collapse window, so a read the chip just performed
+  // can't swallow this one and leave the switch stale. Mirrors WifiModal's
+  // `liveSsid`.
   const [liveOn, setLiveOn] = useState<boolean | null>(radioOn ?? null);
   useEffect(() => {
     if (open) setLiveOn(radioOn ?? null);
@@ -161,6 +160,18 @@ export function BluetoothModal({ open, onClose, radioOn, onRadioChanged }: Bluet
   async function refreshPaired() {
     setPaired(await fetchBluetoothPairedDevices());
   }
+
+  // Authoritative radio read on open. The `radioOn` seed comes from the
+  // chip's collapsed subscription (2 s window), so it can be stale; this
+  // one-shot bypasses that, and writes only on success so a failed read can't
+  // blank the seed. A flip here is what re-runs the scan effect below (on→off
+  // clears the list, off→on scans).
+  useEffect(() => {
+    if (!open) return;
+    void fetchBluetoothRadioStatus().then((s) => {
+      if (s) setLiveOn(s.on);
+    });
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
