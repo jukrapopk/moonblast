@@ -320,6 +320,28 @@ export default function App() {
     invoke<boolean>("is_fullscreen").then(setFullscreen).catch(() => {});
   }, []);
 
+  // The window rim (rendered below) belongs to a *floating* window. Flush
+  // against the screen's usable area — maximized, fullscreen, Immersive — it
+  // would read as a line around the screen edge rather than a silhouette, so
+  // it hides. `fullscreen` covers the app's own paths; the size check catches
+  // maximize from any source (Win+Up, double-click, drag-to-top) off the plain
+  // DOM `resize` event — no IPC, nothing per frame.
+  const [flush, setFlush] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const s = window.screen;
+      setFlush(
+        s.availWidth > 0 &&
+          s.availHeight > 0 &&
+          window.innerWidth >= s.availWidth - 1 &&
+          window.innerHeight >= s.availHeight - 1,
+      );
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   async function toggleFullscreen() {
     try {
       const next = await invoke<boolean>("toggle_fullscreen");
@@ -512,6 +534,16 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+      {/* Window rim — the replacement for the OS shadow we keep off: 1px of
+       *  window chrome so the frameless window reads against the desktop.
+       *  Hidden when the window is flush with the screen (see `flush` above).
+       *  Mouse-only by nature (pointer-events-none), so no spatial-nav impact. */}
+      {!fullscreen && !flush && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 z-[80] border border-(--color-window-frame)"
+        />
+      )}
       {/* Single global context menu — all views share it. */}
       <ContextMenuHost />
       <DisplaySettingsModal
