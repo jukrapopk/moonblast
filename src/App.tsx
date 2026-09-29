@@ -269,7 +269,7 @@ export default function App() {
   const setOverlayEnabled = useSettingsField("overlay", "enabled");
   const setOverlayShowTime = useSettingsField("overlay", "show_time");
   const setOverlayShowBattery = useSettingsField("overlay", "show_battery");
-  const setOverlayShowBatteryUsage = useSettingsField("overlay", "show_battery_usage");
+  const setOverlayPowerDraw = useSettingsField("overlay", "power_draw");
   const setOverlayScale = useSettingsField("overlay", "scale");
   const setOverlayOpacity = useSettingsField("overlay", "opacity");
   const setOverlayAutohide = useSettingsField("overlay", "autohide");
@@ -481,7 +481,7 @@ export default function App() {
                 overlayEnabled={settings.overlay.enabled}
                 overlayShowTime={settings.overlay.show_time}
                 overlayShowBattery={settings.overlay.show_battery}
-                overlayShowBatteryUsage={settings.overlay.show_battery_usage}
+                overlayPowerDraw={settings.overlay.power_draw}
                 overlayScale={settings.overlay.scale}
                 overlayOpacity={settings.overlay.opacity}
                 overlayAutohide={settings.overlay.autohide}
@@ -489,7 +489,7 @@ export default function App() {
                 onToggleOverlayEnabled={setOverlayEnabled}
                 onToggleOverlayShowTime={setOverlayShowTime}
                 onToggleOverlayShowBattery={setOverlayShowBattery}
-                onToggleOverlayShowBatteryUsage={setOverlayShowBatteryUsage}
+                onSetOverlayPowerDraw={setOverlayPowerDraw}
                 onSetOverlayScale={setOverlayScale}
                 onSetOverlayOpacity={setOverlayOpacity}
                 onSetOverlayAutohide={setOverlayAutohide}

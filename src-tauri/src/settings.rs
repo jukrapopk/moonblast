@@ -32,8 +32,10 @@ pub struct Overlay {
     pub enabled: bool,
     pub show_time: bool,
     pub show_battery: bool,
-    /// Power draw in watts. Only meaningful on battery hardware.
-    pub show_battery_usage: bool,
+    /// Extra power readout beside the percent: `"off"` | `"wattage"`
+    /// (instantaneous draw, in W) | `"time_left"` (estimated runtime / time
+    /// to full). Only meaningful on battery hardware.
+    pub power_draw: String,
     /// Notch scale, `0.5`–`2.0` (1.0 = design size). Drives the CSS scale in
     /// the frontend *and* the overlay window's height, so a larger notch
     /// isn't clipped.
@@ -55,7 +57,7 @@ impl Default for Overlay {
             enabled: false,
             show_time: true,
             show_battery: true,
-            show_battery_usage: false,
+            power_draw: "off".to_string(),
             scale: 1.0,
             opacity: 1.0,
             autohide: "off".to_string(),

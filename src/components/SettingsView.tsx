@@ -972,7 +972,7 @@ export function SettingsView({
   overlayEnabled,
   overlayShowTime,
   overlayShowBattery,
-  overlayShowBatteryUsage,
+  overlayPowerDraw,
   overlayScale,
   overlayOpacity,
   overlayAutohide,
@@ -980,7 +980,7 @@ export function SettingsView({
   onToggleOverlayEnabled,
   onToggleOverlayShowTime,
   onToggleOverlayShowBattery,
-  onToggleOverlayShowBatteryUsage,
+  onSetOverlayPowerDraw,
   onSetOverlayScale,
   onSetOverlayOpacity,
   onSetOverlayAutohide,
@@ -1025,7 +1025,7 @@ export function SettingsView({
   overlayEnabled: boolean;
   overlayShowTime: boolean;
   overlayShowBattery: boolean;
-  overlayShowBatteryUsage: boolean;
+  overlayPowerDraw: string;
   overlayScale: number;
   overlayOpacity: number;
   overlayAutohide: string;
@@ -1033,7 +1033,7 @@ export function SettingsView({
   onToggleOverlayEnabled: (v: boolean) => void;
   onToggleOverlayShowTime: (v: boolean) => void;
   onToggleOverlayShowBattery: (v: boolean) => void;
-  onToggleOverlayShowBatteryUsage: (v: boolean) => void;
+  onSetOverlayPowerDraw: (v: string) => void;
   onSetOverlayScale: (v: number) => void;
   onSetOverlayOpacity: (v: number) => void;
   onSetOverlayAutohide: (v: string) => void;
@@ -1225,11 +1225,17 @@ export function SettingsView({
             </Row>
           )}
           {hasBattery === true && (
-            <Row label="Show power draw">
-              <Toggle
-                checked={overlayShowBatteryUsage}
-                onChange={onToggleOverlayShowBatteryUsage}
+            <Row label="Power draw" description="Extra readout beside the battery percent.">
+              <Segmented
+                variant="value"
                 disabled={!overlayEnabled}
+                options={[
+                  { id: "off", label: "Off" },
+                  { id: "wattage", label: "Wattage" },
+                  { id: "time_left", label: "Time Left" },
+                ]}
+                value={overlayPowerDraw}
+                onChange={onSetOverlayPowerDraw}
               />
             </Row>
           )}

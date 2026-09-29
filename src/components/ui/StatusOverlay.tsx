@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import { useSettings } from "../../settings/SettingsContext";
 import { useTime, formatClock } from "../../hooks/useTime";
 import { useBattery, useBatteryPower } from "../../hooks/useBattery";
+import { formatDuration } from "./formatDuration";
 
 /**
  * Contents of the `overlay` window — the thin always-on-top status notch.
@@ -14,11 +15,15 @@ import { useBattery, useBatteryPower } from "../../hooks/useBattery";
  */
 export function StatusOverlay() {
   const { settings } = useSettings();
-  const { enabled, show_time, show_battery, show_battery_usage, scale, opacity, position } =
+  const { enabled, show_time, show_battery, power_draw, scale, opacity, position } =
     settings.overlay;
   const now = useTime();
-  const { status: battery } = useBattery(enabled && show_battery);
-  const watts = useBatteryPower(enabled && show_battery_usage);
+  // "Time Left" reads the same battery status the percent uses; "Wattage"
+  // needs the power-draw read. Only the selected mode's read is armed so an
+  // idle notch doesn't poll for data it isn't showing.
+  const wantsTimeLeft = power_draw === "time_left";
+  const { status: battery } = useBattery(enabled && (show_battery || wantsTimeLeft));
+  const watts = useBatteryPower(enabled && power_draw === "wattage");
 
   if (!enabled) return null;
 
@@ -48,10 +53,20 @@ export function StatusOverlay() {
       </span>,
     );
   }
-  if (show_battery_usage && watts != null) {
+  if (power_draw === "wattage" && watts != null) {
     parts.push(
       <span key="watts" className="tabular-nums">
         {Math.abs(watts).toFixed(1)} W
+      </span>,
+    );
+  }
+  // Win32 only estimates runtime off-wall (`BatteryLifeTime` returns -1 on
+  // AC), so the part is simply omitted when there's no estimate rather than
+  // showing a permanent "Calculating…" in the notch.
+  if (wantsTimeLeft && battery && battery.timeRemainingSec && battery.timeRemainingSec > 0) {
+    parts.push(
+      <span key="time-left" className="tabular-nums">
+        {formatDuration(battery.timeRemainingSec, "short")}
       </span>,
     );
   }
