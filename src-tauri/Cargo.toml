@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "1.3.2"
+version = "1.3.3"
 description = "A lightweight Windows Fullscreen Mode / Big Picture-style launcher centered around Moonlight streaming."
 authors = ["Jukrapop K <jukrapopk@gmail.com>"]
 license = "MIT"
