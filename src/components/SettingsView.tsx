@@ -15,6 +15,7 @@ import { Toggle } from "./ui/Toggle";
 import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import { useVisibleInterval } from "../hooks/useVisibleInterval";
 import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
@@ -53,14 +54,10 @@ function TailscaleRow() {
       }
     }
 
-    useEffect(() => {
-      refresh();
-      // Poll while the Settings page is mounted (it unmounts on navigation, so
-      // the timer stops when you leave). Keeps the status live without any cost
-      // on other pages.
-      const id = setInterval(refresh, 3000);
-      return () => clearInterval(id);
-    }, []);
+    // Poll while the Settings page is mounted (it unmounts on navigation, so
+    // the timer stops when you leave) and only while the window is visible —
+    // `useVisibleInterval` also reads once up front, so no separate mount read.
+    useVisibleInterval(refresh, 3000);
 
     async function toggle(up: boolean) {
       setBusy(true);

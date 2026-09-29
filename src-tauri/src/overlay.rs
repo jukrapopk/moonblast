@@ -21,10 +21,11 @@
 //! hook: Windows stops delivering low-level hooks while a Chromium-family
 //! window (i.e. our own WebView2, or a browser) is focused (see
 //! `mediakeys.rs`), and the cursor position is a global, focus-independent
-//! read. The poll is adaptive — fast while the cursor is on or approaching the
-//! notch, backed off otherwise — and the monitor geometry is cached, so a
-//! cursor away from the top edge costs a couple of bare `GetCursorPos` calls a
-//! second rather than a Tauri monitor lookup on every fixed tick.
+//! read. The poll is adaptive — fast only while the notch is still *hidden*
+//! and the cursor is on or approaching it, backed off otherwise (far away, or
+//! already showing) — and the monitor geometry is cached, so the steady state
+//! costs a couple of bare `GetCursorPos` calls a second rather than a Tauri
+//! monitor lookup on every fixed tick.
 //!
 //! Window creation must **not** run on the main thread (Tauri deadlocks there
 //! on Windows — see `WebviewWindowBuilder::build` docs), so callers spawn a
@@ -125,6 +126,21 @@ fn position_code(value: &str) -> u8 {
     }
 }
 
+/// Record the placement the next `apply` / `position` should use.
+///
+/// Called **synchronously** from the IPC command, before its worker thread is
+/// spawned: `APPLY_LOCK` serializes the workers but does not order them, so a
+/// burst of changes (the Scale slider fires per input event) could otherwise
+/// leave the window sized for a stale scale. Storing up front means whichever
+/// worker runs last re-places the window from the newest `POSITION` /
+/// `SCALE_BITS`. On-screen alignment is pure CSS inside the monitor-wide
+/// window, so a position change never moves the window — one clean DOM move
+/// instead of a window jump.
+pub fn record(position: &str, scale: f64) {
+    POSITION.store(position_code(position), Ordering::SeqCst);
+    SCALE_BITS.store(scale.clamp(MIN_SCALE, MAX_SCALE).to_bits(), Ordering::SeqCst);
+}
+
 /// Monotonic milliseconds since the first call. `Instant` can't live in a
 /// `static` directly, so anchor it in a `OnceLock`.
 fn now_ms() -> u64 {
@@ -163,16 +179,12 @@ pub fn ensure_window(app: &AppHandle) {
 /// Show/hide the overlay and (dis)arm the autohide watcher.
 ///
 /// `autohide_ms == 0` keeps the notch permanently visible; a non-zero value
-/// hands visibility to the cursor watcher (starting hidden). `position` is
-/// `"left"` | `"center"` | `"right"`. Must run off the main thread (see module
-/// docs); callers spawn a thread.
-pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64, position: &str, scale: f64) {
+/// hands visibility to the cursor watcher (starting hidden). Placement comes
+/// from the atomics `record` sets, so a `position` / `scale` change doesn't
+/// have to reach this function at all. Must run off the main thread (see
+/// module docs); callers spawn a thread.
+pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64) {
     let _guard = APPLY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    // Recorded for the autohide hotspot. On-screen alignment is pure CSS
-    // inside the monitor-wide window, so a position change never moves the
-    // window — one clean DOM move instead of a window jump.
-    POSITION.store(position_code(position), Ordering::SeqCst);
-    SCALE_BITS.store(scale.clamp(MIN_SCALE, MAX_SCALE).to_bits(), Ordering::SeqCst);
     if !enabled {
         stop_watcher();
         destroy(app);

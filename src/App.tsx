@@ -278,14 +278,22 @@ export default function App() {
   // Create / show / hide the always-on-top status overlay window and
   // (dis)arm its autohide watcher. Fires once settings hydrate and again on
   // every toggle; Rust owns the window lifecycle (see overlay.rs).
+  //
+  // Debounced: the Scale slider fires per input event, and each fire would
+  // otherwise spawn a thread and resize the window. The CSS scale previews
+  // live regardless; only the window height lags, and 120 ms behind is
+  // imperceptible.
   useEffect(() => {
     if (!ready) return;
-    void invoke("apply_overlay", {
-      enabled: settings.overlay.enabled,
-      autohide: settings.overlay.autohide,
-      position: settings.overlay.position,
-      scale: settings.overlay.scale,
-    }).catch(() => {});
+    const id = setTimeout(() => {
+      void invoke("apply_overlay", {
+        enabled: settings.overlay.enabled,
+        autohide: settings.overlay.autohide,
+        position: settings.overlay.position,
+        scale: settings.overlay.scale,
+      }).catch(() => {});
+    }, 120);
+    return () => clearTimeout(id);
   }, [
     ready,
     settings.overlay.enabled,

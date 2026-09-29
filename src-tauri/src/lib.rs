@@ -2589,7 +2589,12 @@ fn battery_power() -> Option<f64> {
 #[tauri::command]
 fn apply_overlay(app: AppHandle, enabled: bool, autohide: String, position: String, scale: f64) {
     let ms = overlay::autohide_ms(&autohide);
-    std::thread::spawn(move || overlay::apply(&app, enabled, ms, &position, scale));
+    // Record placement synchronously: the worker threads below are serialized
+    // by the overlay's apply lock but not *ordered*, so a burst of changes (the
+    // Scale slider fires per input event) could otherwise leave the window
+    // sized for a stale scale.
+    overlay::record(&position, scale);
+    std::thread::spawn(move || overlay::apply(&app, enabled, ms));
 }
 
 /// Current WiFi connection for the chip in the TopBar. Returns `None` when
@@ -3139,10 +3144,9 @@ pub fn run() {
             };
             if want_overlay {
                 let ms = overlay::autohide_ms(&overlay_autohide);
+                overlay::record(&overlay_position, overlay_scale);
                 let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    overlay::apply(&handle, true, ms, &overlay_position, overlay_scale)
-                });
+                std::thread::spawn(move || overlay::apply(&handle, true, ms));
             }
             Ok(())
         })

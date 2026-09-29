@@ -14,26 +14,35 @@ export function useTime(now: () => Date = () => new Date()): Date {
   const nowRef = useRef(now);
   nowRef.current = now;
   // Tick only while the window is visible: a hidden window's clock isn't on
-  // screen, and Chromium throttles hidden timers regardless. Coming back to
-  // visible snaps the value to now instead of waiting out the interval.
+  // screen, and Chromium throttles hidden timers regardless. The mount value is
+  // already fresh, so only a hidden→visible transition snaps it to now
+  // (`visibilitychange` fires on real transitions only) — no redundant render
+  // on mount.
   useEffect(() => {
-    let id: ReturnType<typeof setInterval> | null = null;
     const tick = () => setT(nowRef.current());
-    const sync = () => {
-      const visible = document.visibilityState === "visible";
-      if (visible && id === null) {
-        tick();
-        id = setInterval(tick, 30_000);
-      } else if (!visible && id !== null) {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (id === null) id = setInterval(tick, 30_000);
+    };
+    const stop = () => {
+      if (id !== null) {
         clearInterval(id);
         id = null;
       }
     };
-    sync();
-    document.addEventListener("visibilitychange", sync);
+    if (document.visibilityState === "visible") start();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        tick();
+        start();
+      } else {
+        stop();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      if (id !== null) clearInterval(id);
-      document.removeEventListener("visibilitychange", sync);
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
   return t;
