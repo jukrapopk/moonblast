@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { useSettings } from "../../settings/SettingsContext";
+import { useSettings, type Settings } from "../../settings/SettingsContext";
 import { useTime, formatClock } from "../../hooks/useTime";
 import { useBattery, useBatteryPower } from "../../hooks/useBattery";
 import { formatDuration } from "./formatDuration";
@@ -15,17 +15,25 @@ import { formatDuration } from "./formatDuration";
  */
 export function StatusOverlay() {
   const { settings } = useSettings();
-  const { enabled, show_time, show_battery, power_draw, scale, opacity, position } =
-    settings.overlay;
+  // Bail out *before* the readout hooks are reached: while the overlay is off
+  // there is no clock interval to run and no battery / power IPC to arm. Rust
+  // destroys the window on disable too, so this is the belt to that
+  // suspenders — it also covers the sub-second teardown window and any future
+  // "hide instead of destroy" keep-alive.
+  if (!settings.overlay.enabled) return null;
+  return <Notch overlay={settings.overlay} />;
+}
+
+/** The mounted notch — only ever rendered while the overlay is on. */
+function Notch({ overlay }: { overlay: Settings["overlay"] }) {
+  const { show_time, show_battery, power_draw, scale, opacity, position } = overlay;
   const now = useTime();
   // "Time Left" reads the same battery status the percent uses; "Wattage"
   // needs the power-draw read. Only the selected mode's read is armed so an
   // idle notch doesn't poll for data it isn't showing.
   const wantsTimeLeft = power_draw === "time_left";
-  const { status: battery } = useBattery(enabled && (show_battery || wantsTimeLeft));
-  const watts = useBatteryPower(enabled && power_draw === "wattage");
-
-  if (!enabled) return null;
+  const { status: battery } = useBattery(show_battery || wantsTimeLeft);
+  const watts = useBatteryPower(power_draw === "wattage");
 
   // The window spans the top edge of the monitor; the card aligns to the
   // chosen side inside it. Scaling around the matching corner keeps the notch
