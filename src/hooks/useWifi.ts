@@ -15,7 +15,16 @@ export interface WifiConnection {
    *  shows a WifiX icon. Absent (`null` fetch result) means no
    *  adapter, and the chip stays hidden. */
   radioOn: boolean;
+  /** Windows' own internet verdict for the connection, scoped to the WLAN
+   *  profile while associated. `internet` is the only "everything works"
+   *  value; `constrained` is usually a captive portal (but can be any
+   *  header-rewriting middlebox), and `local` / `none` mean no internet.
+   *  `null` when it couldn't be read — treated as "unknown", not as offline. */
+  connectivity: Connectivity | null;
 }
+
+/** `Windows.Networking.Connectivity.NetworkConnectivityLevel`, camelCased. */
+export type Connectivity = "internet" | "constrained" | "local" | "none";
 
 export interface WifiNetwork {
   ssid: string;
@@ -104,13 +113,24 @@ export function useWifiScan(): {
 }
 
 /**
- * Connect to a network by SSID. Resolves on success; rejects with the
- * netsh error message (e.g. "no wireless network profile" for secured
- * networks the user has never connected to — the UI should fall back
- * to opening Windows WiFi settings in that case).
+ * Join a network Windows already has a profile for. Rejects with netsh's
+ * message ("There is no profile … assigned to the specified interface") for
+ * anything the OS has never connected to — the modal routes those to the
+ * password form or `wifiConnectOpen` instead.
  */
 export async function wifiConnect(ssid: string): Promise<void> {
   await invoke("wifi_connect", { ssid });
+}
+
+/**
+ * First-time join of an open (no-auth) network: registers a profile for it
+ * (`connectMode=manual`, so Windows never associates with it on its own) and
+ * then connects. `auth` is the scan's raw auth string, used only to tell OWE
+ * apart from plain open. If the join fails the Rust side removes the profile
+ * again, so the row falls back to its real state instead of reading "Saved".
+ */
+export async function wifiConnectOpen(ssid: string, auth: string | null): Promise<void> {
+  await invoke("wifi_connect_open", { ssid, auth });
 }
 
 /**
@@ -141,4 +161,42 @@ export async function wifiForget(ssid: string): Promise<void> {
  *  toggle uses). Can't override a physical hardware kill switch. */
 export async function wifiSetRadio(on: boolean): Promise<void> {
   await invoke("wifi_set_radio", { on });
+}
+
+/** Outcome of the captive-portal probe (mirrors `net::PortalState`). */
+export type PortalState = "internet" | "portal" | "offline" | "unknown";
+
+export interface PortalStatus {
+  state: PortalState;
+  /** Sign-in URL — the portal's redirect target, or the probe URL itself (the
+   *  portal intercepts that host, so it lands on the sign-in page anyway).
+   *  `null` when there is nothing to sign into. */
+  portalUrl: string | null;
+  /** Endpoint that was probed, for display / diagnostics. */
+  probeUrl: string;
+}
+
+/**
+ * One-shot captive-portal probe: an HTTP GET against the same endpoint
+ * Windows' own NCSI uses, returning the sign-in URL when something on the
+ * network intercepts the answer. Bounded to ~4 s Rust-side, and only worth
+ * calling while the modal is open *and* the connection already looks offline
+ * (see `WifiModal`) — a healthy network never pays for it.
+ */
+export async function fetchPortalStatus(): Promise<PortalStatus | null> {
+  try {
+    return await invoke<PortalStatus>("wifi_portal_status");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open the portal sign-in page in the user's default browser. The URL comes
+ * from a redirect header on the local network, so the Rust side scheme-checks
+ * it (http/https only) and bounds the launch — under Auto Immersive Mode a
+ * packaged browser's shell activation can otherwise hang forever.
+ */
+export async function wifiOpenPortal(url: string): Promise<void> {
+  await invoke("wifi_open_portal", { url });
 }

@@ -67,6 +67,11 @@ function Status({
   // Critical flash at ≤5% on battery (the OS-driven warning band). Below the
   // static `danger` red threshold so the chip never doubles up.
   const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
+  // Associated, but Windows says there's no internet — usually a captive
+  // portal waiting for a sign-in. `connectivity === null` means the verdict
+  // couldn't be read at all, which mustn't be dressed up as a problem.
+  const wifiOffline =
+    !!wifi && wifi.connected && wifi.connectivity !== null && wifi.connectivity !== "internet";
   return (
     <div className="flex items-center gap-1">
       {showDisplay && (
@@ -79,9 +84,16 @@ function Status({
       )}
       {showWifi && wifi && (
         <TopBarButton
-          label={wifi.radioOn ? "Wi-Fi" : "Wi-Fi off"}
+          label={
+            wifiOffline
+              ? "Wi-Fi · No internet — sign in required"
+              : wifi.radioOn
+                ? "Wi-Fi"
+                : "Wi-Fi off"
+          }
           icon={<WifiIcon signal={wifi.signal} radioOn={wifi.radioOn} size={24} />}
           onClick={onWifiClick}
+          danger={wifiOffline}
         />
       )}
       {showBluetooth && bluetooth?.supported && (

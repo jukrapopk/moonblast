@@ -13,8 +13,11 @@
 //! `netsh wlan ...` — the reliable read path:
 //! - `netsh wlan show interfaces`     → current connection (chip)
 //! - `netsh wlan show networks`       → visible networks (modal scan)
-//! - `netsh wlan connect name=...`    → join a network with a saved profile
-//!   or an open network
+//! - `netsh wlan connect name=...`    → join a network Windows has a profile
+//!   for (which is every network the user has connected to before)
+//! - `netsh wlan add profile ...`     → register one first: the only way to
+//!   join a network for the first time (`connect_with_password` for secured
+//!   ones, `connect_open` for open / OWE ones)
 //! - `netsh wlan disconnect`          → leave the current network
 //!
 //! No UWP manifest, no permissions grant needed. Returns `None` from the
@@ -56,6 +59,12 @@ pub struct WifiConnection {
     /// can open the picker / OS settings). `None` (no `WifiConnection`
     /// at all) means no adapter — the chip stays hidden.
     pub radio_on: bool,
+    /// Windows' own internet-reachability verdict for the active connection
+    /// (`None` when it couldn't be read). `Internet` is the only "everything
+    /// works" value; `Constrained` is *usually* a captive portal but can be
+    /// any header-rewriting middlebox, and `Local` / `None` mean no internet.
+    /// Drives the chip's "no internet" warning and the modal's sign-in banner.
+    pub connectivity: Option<crate::net::Connectivity>,
 }
 
 #[derive(serde::Serialize)]
@@ -401,7 +410,19 @@ fn netsh_known_ssids(deadline: Option<Instant>) -> std::collections::HashSet<Str
 /// which always works. Cost is ~200ms per call; reads happen on window
 /// focus / modal open, so the overhead is negligible.
 pub fn current() -> Option<WifiConnection> {
-    netsh_current_connection()
+    let mut conn = netsh_current_connection()?;
+    // Windows' own internet verdict (WinRT `NetworkConnectivityLevel`), scoped
+    // to the WLAN profile while associated: the system-*preferred* profile can
+    // be a docked Ethernet cable, which would otherwise mask a captive portal
+    // on the Wi-Fi side (and report the Wi-Fi as broken when the cable is).
+    conn.connectivity = crate::net::connectivity(
+        if conn.connected && !conn.ssid.is_empty() {
+            Some(conn.ssid.as_str())
+        } else {
+            None
+        },
+    );
+    Some(conn)
 }
 
 /// Decode the raw bytes from `netsh` into a UTF-8 String. Detects UTF-16LE
@@ -636,18 +657,20 @@ fn netsh_current_connection_deadline(deadline: Option<Instant>) -> Option<WifiCo
         secured,
         connected,
         radio_on: radio_on_bool,
+        // Filled in by `current()` — reading Windows' connectivity verdict is a
+        // WinRT call, deliberately kept out of this pure netsh parser (and off
+        // any thread that hasn't set up an apartment).
+        connectivity: None,
     })
 }
 
-/// Connect to a WiFi network by SSID. Works for:
-///   - Open networks (no auth).
-///   - Networks with a saved Windows profile (the password was already
-///     entered the first time the user connected; `netsh wlan connect`
-///     just tells Windows to use it).
+/// Join a network Windows already has a profile for — i.e. any network the
+/// user (or this app) has connected to before.
 ///
-/// For a secured network WITHOUT a saved profile, this returns
-/// `Err("profile required")` — the UI should fall back to opening
-/// Windows WiFi settings so the user can enter the password there.
+/// `netsh wlan connect` joins a *profile* by name, not a network: an SSID
+/// without one fails with `There is no profile "X" assigned to the specified
+/// interface`. First-time joins therefore go through `connect_with_password`
+/// (secured) or `connect_open` (open / OWE), which register the profile first.
 pub fn connect(ssid: &str) -> Result<(), String> {
     if ssid.is_empty() {
         return Err("empty SSID".into());
@@ -724,15 +747,11 @@ pub fn forget(ssid: &str) -> Result<(), String> {
 }
 
 /// Connect to a secured network that needs a fresh password. We build a
-/// temporary profile XML, register it with `netsh wlan add profile`, then
+/// profile XML, register it with `netsh wlan add profile`, then
 /// `netsh wlan connect` to that profile. The profile sticks around after
 /// connect — that's the point: next time the user opens the picker, the
 /// SSID is in the "Saved" set.
-pub fn connect_with_password(
-    ssid: &str,
-    password: &str,
-    auth: &str,
-) -> Result<(), String> {
+pub fn connect_with_password(ssid: &str, password: &str, auth: &str) -> Result<(), String> {
     if ssid.is_empty() {
         return Err("empty SSID".into());
     }
@@ -741,9 +760,9 @@ pub fn connect_with_password(
     }
 
     // Map our auth-string to the profile XML's <authentication>. Only
-    // Personal / PSK networks take a single password. Anything else
-    // (Enterprise, OWE) needs a different flow that the user can
-    // complete in the Windows Wi-Fi settings.
+    // Personal / PSK networks take a single password here; OWE has no key at
+    // all and goes through `connect_open` instead. Enterprise (802.1X) needs
+    // credentials Moonblast doesn't collect.
     let auth_xml = match auth.to_ascii_lowercase().as_str() {
         "wpa2-personal" | "wpa2psk" => "WPA2PSK",
         "wpa3-personal" | "wpa3sae" => "WPA3SAE",
@@ -761,25 +780,92 @@ pub fn connect_with_password(
         "shared" => "WEP",
         _ => "AES",
     };
+    // A WEP "password" is the raw network key, not a passphrase: the schema
+    // requires keyType=networkKey whenever encryption is WEP (passPhrase would
+    // make the profile invalid). WPA/WPA3 and SAE keys are passphrases.
+    let key_type = if encryption == "WEP" { "networkKey" } else { "passPhrase" };
+    let xml = profile_xml(
+        ssid,
+        auth_xml,
+        encryption,
+        Some((key_type, password)),
+        "auto",
+    );
+    register_and_connect(ssid, &xml, false)
+}
 
-    // SSID hex encoding (each byte → two hex chars). Windows stores the
-    // SSID both in hex (canonical) and as the human-readable name.
+/// Connect to an open (no-auth) network Windows has no profile for.
+///
+/// `netsh wlan connect` joins a *profile* by name, and Windows only creates one
+/// on the first successful connect — so the very first join to an open network
+/// has to register it first, exactly like the password path does for secured
+/// ones. (`connect` above is the path for everything Windows already knows.)
+///
+/// `auth` is the raw string from the scan. Only `OWE` needs a distinct pair:
+/// opportunistic wireless encryption has no key to prompt for, but it isn't
+/// plain `open` either. Everything else that reaches this function is a plain
+/// open network (the scan maps "Open" to `None`).
+///
+/// `connectionMode` is deliberately `manual`:
+///   - the profile still persists, so later connects are a single
+///     `netsh wlan connect` and the picker shows the row as "Saved";
+///   - but Wlansvc never associates on its own. That distinction only matters
+///     for open networks: a WPA/WPA3 handshake proves the AP knows the key,
+///     whereas an open SSID is not an identity — so `auto` would let any device
+///     broadcasting the same name silently capture the machine (and this
+///     launcher may be the session's shell, booting with no UI at all).
+pub fn connect_open(ssid: &str, auth: Option<&str>) -> Result<(), String> {
+    if ssid.is_empty() {
+        return Err("empty SSID".into());
+    }
+    let owe = auth.is_some_and(|a| a.eq_ignore_ascii_case("owe"));
+    let (auth_xml, encryption) = if owe { ("OWE", "AES") } else { ("open", "none") };
+    let xml = profile_xml(ssid, auth_xml, encryption, None, "manual");
+    // Registered speculatively from a scan: if the join fails (the AP turned
+    // out to be secured, or the OWE/transition-mode pair didn't match) the
+    // profile must not be left behind — otherwise the row would read "Saved"
+    // and the real fix (the password prompt) would never appear again.
+    register_and_connect(ssid, &xml, true)
+}
+
+/// Escape XML special characters in passwords and SSIDs (user / OEM supplied).
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// Build a WLAN profile XML. `key` is `Some((keyType, keyMaterial))` for
+/// WEP/PSK/SAE networks and `None` for open / OWE ones — `sharedKey` is
+/// optional in the schema and only needed when a key is actually required.
+fn profile_xml(
+    ssid: &str,
+    auth_xml: &str,
+    encryption: &str,
+    key: Option<(&str, &str)>,
+    connection_mode: &str,
+) -> String {
+    // SSID hex encoding (each byte → two hex chars). Windows stores the SSID
+    // both in hex (canonical) and as the human-readable name.
     let mut ssid_hex = String::with_capacity(ssid.len() * 2);
     for b in ssid.as_bytes() {
-        ssid_hex.push_str(&format!("{:02X}", b));
+        ssid_hex.push_str(&format!("{b:02X}"));
     }
-
-    // Escape XML special chars in the password and the human-readable SSID.
-    // (Hex form is safe — it's only hex digits.)
-    fn xml_escape(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&apos;")
-    }
-
-    let xml = format!(
+    let shared_key = match key {
+        Some((key_type, material)) => format!(
+            r#"            <sharedKey>
+                <keyType>{key_type}</keyType>
+                <protected>false</protected>
+                <keyMaterial>{}</keyMaterial>
+            </sharedKey>
+"#,
+            xml_escape(material)
+        ),
+        None => String::new(),
+    };
+    format!(
         r#"<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
     <name>{name}</name>
@@ -790,7 +876,7 @@ pub fn connect_with_password(
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
-    <connectionMode>auto</connectionMode>
+    <connectionMode>{mode}</connectionMode>
     <MSM>
         <security>
             <authEncryption>
@@ -798,32 +884,43 @@ pub fn connect_with_password(
                 <encryption>{enc}</encryption>
                 <useOneX>false</useOneX>
             </authEncryption>
-            <sharedKey>
-                <keyType>passPhrase</keyType>
-                <protected>false</protected>
-                <keyMaterial>{pw}</keyMaterial>
-            </sharedKey>
-        </security>
+{shared_key}        </security>
     </MSM>
 </WLANProfile>
 "#,
         name = xml_escape(ssid),
         hex = ssid_hex,
+        mode = connection_mode,
         auth = auth_xml,
         enc = encryption,
-        pw = xml_escape(password),
-    );
+        shared_key = shared_key,
+    )
+}
 
-    // Write the profile to a temp file. Use a unique suffix so
-    // concurrent calls don't collide.
+/// Write a generated profile to a temp file, register it, and connect.
+///
+/// `cleanup_on_failure` deletes the profile again when the connect doesn't
+/// succeed — used by `connect_open`, whose profile is created speculatively
+/// from a scan (see there). `connect_with_password` keeps it instead: Windows
+/// behaves that way too, so a mistyped key can be corrected against the saved
+/// profile rather than the user having to forget and restart.
+fn register_and_connect(
+    ssid: &str,
+    profile_xml: &str,
+    cleanup_on_failure: bool,
+) -> Result<(), String> {
+    // Unique suffix so concurrent calls can't collide on the temp file.
     let path = std::env::temp_dir()
         .join(format!("moonblast-wifi-{}.xml", rand_suffix()));
-    if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+    if let Err(e) = std::fs::write(&path, profile_xml.as_bytes()) {
         return Err(format!("could not write profile xml: {e}"));
     }
 
     // Register the profile. netsh expects `filename=`; quoting the
-    // path handles spaces.
+    // path handles spaces. The docs say an unspecified `user=` applies the
+    // profile to all users — which is what makes the SSID read back as
+    // "Saved" in the next scan (`netsh wlan show profiles` lists it as
+    // "All User Profile", the label our `known` parse keys on).
     let add = netsh(&[
         "wlan",
         "add",
@@ -839,13 +936,16 @@ pub fn connect_with_password(
         ));
     }
 
-    // Now actually connect. The profile is now discoverable by name.
+    // Now actually connect. The profile is discoverable by name.
     let connect =
         netsh(&["wlan", "connect", &format!("name={ssid}")])
             .ok_or_else(|| "could not launch netsh".to_string())?;
     let _ = std::fs::remove_file(&path);
     if connect.status.success() {
         return Ok(());
+    }
+    if cleanup_on_failure {
+        let _ = forget(ssid);
     }
     // netsh reported failure. The most common case is wrong password,
     // which it surfaces as a generic "Connection request was not
@@ -870,5 +970,45 @@ fn rand_suffix() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("{:016x}", nanos & 0xFFFFFFFFFFFFFFFF)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_profile_omits_shared_key_and_is_manual() {
+        let xml = profile_xml("Test Net", "open", "none", None, "manual");
+        println!("--- open ---\n{xml}");
+        assert!(!xml.contains("sharedKey"), "open profiles carry no key block");
+        assert!(xml.contains("<authentication>open</authentication>"));
+        assert!(xml.contains("<encryption>none</encryption>"));
+        assert!(xml.contains("<connectionMode>manual</connectionMode>"));
+    }
+
+    #[test]
+    fn key_type_follows_the_schema() {
+        let psk = profile_xml(
+            "Test Net",
+            "WPA2PSK",
+            "AES",
+            Some(("passPhrase", "pw&<x>")),
+            "auto",
+        );
+        println!("--- wpa2psk ---\n{psk}");
+        assert!(psk.contains("<keyType>passPhrase</keyType>"));
+        assert!(psk.contains("<keyMaterial>pw&amp;&lt;x&gt;</keyMaterial>"));
+        assert!(psk.contains("<connectionMode>auto</connectionMode>"));
+        let wep = profile_xml(
+            "Test Net",
+            "shared",
+            "WEP",
+            Some(("networkKey", "abcde")),
+            "auto",
+        );
+        println!("--- wep ---\n{wep}");
+        // Schema: encryption WEP requires keyType networkKey.
+        assert!(wep.contains("<keyType>networkKey</keyType>"));
+    }
 }
 

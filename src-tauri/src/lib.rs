@@ -15,6 +15,7 @@ mod cmd;
 mod display;
 mod hdr;
 mod logging;
+mod net;
 mod radio;
 
 /// Tracks live Moonlight stream child processes so we never spawn a duplicate
@@ -2600,9 +2601,17 @@ fn apply_overlay(app: AppHandle, enabled: bool, autohide: String, position: Stri
 /// Current WiFi connection for the chip in the TopBar. Returns `None` when
 /// the system has no WiFi adapter, so the UI can simply skip rendering the
 /// chip (same pattern as the battery command).
+///
+/// Async + `spawn_blocking`: the read shells out to netsh (~200ms) and asks
+/// WinRT for Windows' connectivity verdict. A sync command runs on Tauri's
+/// main thread, and WinRT needs an MTA apartment that must not be initialized
+/// there (`radio::ensure_winrt` sets it up on the worker instead).
 #[tauri::command]
-fn wifi_current() -> Option<wifi::WifiConnection> {
-    wifi::current()
+async fn wifi_current() -> Option<wifi::WifiConnection> {
+    tauri::async_runtime::spawn_blocking(wifi::current)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Visible network list. Called when the user opens the picker modal.
@@ -2630,12 +2639,23 @@ async fn wifi_scan() -> Vec<wifi::WifiNetwork> {
     .unwrap_or_default()
 }
 
-/// Connect to a WiFi network by SSID. Returns `Ok(())` on success, or an
-/// `Err` with a human-readable reason — the UI can surface this to the
-/// user (e.g. "profile required" for secured-no-saved-profile networks).
+/// Join a network Windows already has a profile for. `Err` carries netsh's
+/// human-readable reason; the UI routes networks without a profile to the
+/// password form (`wifi_connect_with_password`) or the open path
+/// (`wifi_connect_open`) instead.
 #[tauri::command]
 fn wifi_connect(ssid: String) -> Result<(), String> {
     wifi::connect(&ssid)
+}
+
+/// Connect to an open (no-auth) network that has no saved profile yet — the
+/// one first-time join that can't go through `wifi_connect`, because Windows
+/// has no profile to name. Registers one (open / `none`, `manual` connection
+/// mode — see `wifi::connect_open`) and connects. `auth` is the raw scan
+/// string, used only to tell OWE apart from plain open.
+#[tauri::command]
+fn wifi_connect_open(ssid: String, auth: Option<String>) -> Result<(), String> {
+    wifi::connect_open(&ssid, auth.as_deref())
 }
 
 /// Connect to a secured WiFi network using a password. Builds a profile
@@ -2670,6 +2690,47 @@ async fn wifi_set_radio(on: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || wifi::set_radio(on))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Captive-portal status for the Wi-Fi modal.
+///
+/// Probes the same endpoint Windows' own NCSI uses — read from the registry,
+/// so private / enterprise probe servers work — and returns the sign-in URL
+/// when something intercepts the answer. Only called while the modal is open
+/// *and* the connection already looks offline (never on the chip's read path),
+/// and bounded to ~4s inside `net::probe_portal`.
+#[tauri::command]
+async fn wifi_portal_status() -> net::PortalStatus {
+    tauri::async_runtime::spawn_blocking(net::probe_portal)
+        .await
+        .unwrap_or(net::PortalStatus {
+            state: net::PortalState::Unknown,
+            portal_url: None,
+            probe_url: String::new(),
+        })
+}
+
+/// Open the captive-portal sign-in page in the user's default browser.
+///
+/// The URL arrives from a redirect header on the local network, so it is
+/// scheme-checked first (`net::is_http_url`) — `ShellExecuteW` must never see a
+/// `file:` or protocol-handler target. Bounded like `launch_app`: under Auto
+/// Immersive Mode (no Explorer) a packaged browser's shell activation can hang
+/// forever, and a toast beats a spinner that never resolves.
+#[tauri::command]
+async fn wifi_open_portal(url: String) -> Result<(), String> {
+    if !net::is_http_url(&url) {
+        return Err("refusing to open a non-http(s) URL".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        launch_with_timeout(
+            move || shell_open(&url),
+            std::time::Duration::from_secs(5),
+            "wifi_open_portal",
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Bluetooth radio on/off state for the TopBar chip. `supported: false`
@@ -3179,10 +3240,13 @@ pub fn run() {
             wifi_current,
             wifi_scan,
             wifi_connect,
+            wifi_connect_open,
             wifi_connect_with_password,
             wifi_disconnect,
             wifi_forget,
             wifi_set_radio,
+            wifi_portal_status,
+            wifi_open_portal,
             bluetooth_radio_status,
             bluetooth_set_radio,
             bluetooth_paired_devices,

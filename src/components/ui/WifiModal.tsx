@@ -11,20 +11,27 @@ import {
   CaretRight,
   Eye,
   EyeSlash,
+  WarningOctagon,
 } from "@phosphor-icons/react";
 import { Spinner } from "./Spinner";
 import { WifiIcon } from "./WifiIcon";
 import { LoadingChip } from "./LoadingChip";
 import {
+  fetchPortalStatus,
   fetchWifiCurrent,
   useWifiScan,
   wifiConnect,
+  wifiConnectOpen,
   wifiConnectWithPassword,
   wifiDisconnect,
   wifiForget,
+  wifiOpenPortal,
   wifiSetRadio,
+  type Connectivity,
+  type PortalStatus,
   type WifiNetwork,
 } from "../../hooks/useWifi";
+import { useFocusRefresh } from "../../hooks/useFocusRefresh";
 import { useContextMenu } from "./ContextMenu";
 
 /**
@@ -190,7 +197,7 @@ function NetworkRow({
 }: {
   net: WifiNetwork;
   currentSsid: string | null;
-  onConnect: (ssid: string) => void;
+  onConnect: (net: WifiNetwork) => void;
   /** Click on a secured network with no saved profile — show the
    *  in-app password prompt instead of opening Windows settings. */
   onNeedsPassword: (net: WifiNetwork) => void;
@@ -245,7 +252,10 @@ function NetworkRow({
       {!busy && !isCurrent && needsSignIn && (
         <Lock size={13} weight="bold" className="shrink-0 text-(--color-muted)" />
       )}
-      {!busy && !isCurrent && !needsSignIn && net.known && (
+      {/* Any row that acts on click shows the caret — including a network
+          Windows has never seen (first-time open join). Only the "needs
+          sign-in" rows use the lock instead. */}
+      {!busy && !isCurrent && !needsSignIn && (
         <CaretRight size={13} weight="bold" className="shrink-0 text-(--color-muted)" />
       )}
       {isCurrent && busy?.kind !== "disconnect" && (
@@ -288,7 +298,7 @@ function NetworkRow({
       type="button"
       onClick={() => {
         if (needsSignIn) onNeedsPassword(net);
-        else onConnect(net.ssid);
+        else onConnect(net);
       }}
       onContextMenu={(e) => onMenu(e, net)}
       data-context-menu
@@ -333,6 +343,19 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   useEffect(() => {
     if (open) setLiveSsid(currentSsid);
   }, [open, currentSsid]);
+  // Windows' internet verdict + the captive-portal probe result. Both are
+  // modal-local: the TopBar chip shows its warning from the cheap level alone
+  // (`wifi.connectivity`), and the probe only runs while this modal is open
+  // *and* the connection already looks offline (see `recheck` below).
+  const [connectivity, setConnectivity] = useState<Connectivity | null>(null);
+  const [portal, setPortal] = useState<PortalStatus | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
+  // "Connected but not online" — the banner condition. The probe is the
+  // authority once it has landed (a direct measurement, and the only thing that
+  // can name the sign-in URL); Windows' level is the gate that decides whether
+  // the probe runs at all.
+  const online = portal ? portal.state === "internet" : connectivity === "internet";
+  const noInternet = liveSsid !== null && !online;
   // When set, the modal shows the password-entry form for this network
   // instead of the list. Cleared on submit-success / back / modal close.
   const [passwordTarget, _setPasswordTarget] = useState<WifiNetwork | null>(null);
@@ -361,6 +384,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     if (!open) {
       setBusy(null);
       setRadioBusy(false);
+      setPortalBusy(false);
     }
   }, [open]);
 
@@ -396,6 +420,9 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   useEffect(() => {
     if (!open) return;
     setError(null);
+    // Fresh open → re-derive the portal status from scratch; the previous
+    // connection's verdict (and URL) is meaningless for this one.
+    setPortal(null);
     // Authoritative read of the live connection on open. The seed props come
     // from the TopBar chip's `useWifi` subscription, which collapses reads
     // inside a 2s window — so opening the modal shortly after a chip read can
@@ -408,6 +435,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       if (cancelled || !c) return;
       setLiveRadioOn(c.radioOn);
       setLiveSsid(c.ssid || null);
+      setConnectivity(c.connectivity);
     });
     return () => {
       cancelled = true;
@@ -489,16 +517,33 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     await scan();
     const c = await fetchWifiCurrent();
     setLiveSsid(c?.ssid ?? null);
+    setConnectivity(c?.connectivity ?? null);
+    // Any portal verdict we had belongs to the previous connection.
+    setPortal(null);
   }
 
-  async function handleConnect(ssid: string) {
-    await runAction(ssid, "connect", async () => {
-      await wifiConnect(ssid);
+  // Probe once right after a successful join. Windows needs a moment to
+  // re-classify a fresh association (NCSI re-probes on association), so the
+  // level alone can still read `internet` for a few seconds on a portal
+  // network — and "did a portal eat this network?" is exactly the question the
+  // user is staring at. Cost is one bounded request, only on connect.
+  async function probeAfterConnect() {
+    setPortal(await fetchPortalStatus());
+  }
+
+  async function handleConnect(net: WifiNetwork) {
+    await runAction(net.ssid, "connect", async () => {
+      // A network Windows already knows joins by profile name. A first-time
+      // open network has no profile yet, so that call can never work — it has
+      // to be registered first (see `wifiConnectOpen`).
+      if (net.known) await wifiConnect(net.ssid);
+      else await wifiConnectOpen(net.ssid, net.auth);
       // The connect command may take a few seconds to actually take
       // effect; poll the OS a few times to wait for the state to land
       // before refreshing the modal.
-      await waitForState(ssid);
+      await waitForState(net.ssid);
       await refreshAfter();
+      await probeAfterConnect();
     });
   }
 
@@ -534,7 +579,52 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // the form lets the user correct the password.
       setPasswordTarget(null);
       await refreshAfter();
+      await probeAfterConnect();
     });
+  }
+
+  // Re-read both layers: Windows' level plus the NCSI-shaped probe. This is
+  // the modal's "did the sign-in work?" check — `useFocusRefresh` fires it when
+  // the banner appears and again whenever the window regains focus (i.e. the
+  // moment the user comes back from the browser), and the button below can call
+  // it directly. `enabled` is the banner condition, so while the connection
+  // looks healthy this attaches no listeners and makes no requests.
+  const recheck = useCallback(async () => {
+    setPortalBusy(true);
+    try {
+      const c = await fetchWifiCurrent();
+      if (c) {
+        setConnectivity(c.connectivity);
+        setLiveSsid(c.ssid || null);
+      }
+      setPortal(await fetchPortalStatus());
+    } finally {
+      setPortalBusy(false);
+    }
+  }, []);
+  useFocusRefresh(() => void recheck(), [recheck], open && noInternet);
+
+  // Banner action. If the probe hasn't produced a URL yet (still running, or it
+  // failed), run it now and open whatever comes back.
+  async function openPortal() {
+    setPortalBusy(true);
+    try {
+      let url = portal?.portalUrl ?? null;
+      if (!url) {
+        const s = await fetchPortalStatus();
+        setPortal(s);
+        url = s?.portalUrl ?? null;
+      }
+      if (!url) {
+        setError("Couldn't reach the sign-in page — check the connection and try again.");
+        return;
+      }
+      await wifiOpenPortal(url);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPortalBusy(false);
+    }
   }
 
   // Right-click menu per row — same actions as left-click, plus
@@ -556,7 +646,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
             disabled: busy !== null,
             // Secured with no saved profile → password form first.
             onClick: () =>
-              needsSignIn ? setPasswordTarget(net) : void handleConnect(net.ssid),
+              needsSignIn ? setPasswordTarget(net) : void handleConnect(net),
           },
       ...(net.known
         ? [
@@ -623,6 +713,45 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
         <EmptyMessage>Turn Wi-Fi on to see networks</EmptyMessage>
       ) : (
         <>
+          {noInternet && (
+            <div className="mb-3 rounded-xl border border-(--color-danger)/30 bg-(--color-danger)/10 px-3 py-2.5">
+              <div className="flex items-start gap-2.5">
+                <WarningOctagon
+                  size={16}
+                  weight="bold"
+                  className="mt-0.5 shrink-0 text-(--color-danger)"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-(--color-danger)">
+                    {portal?.state === "portal" ? "Sign in to this network" : "No internet access"}
+                  </div>
+                  <div className="mt-0.5 text-xs text-(--color-muted)">
+                    {portal?.state === "portal"
+                      ? `${liveSsid} is connected but needs a sign-in before it can reach the internet.`
+                      : `Connected to ${liveSsid}, but this network can't reach the internet.`}
+                  </div>
+                  {/* The sign-in target, so the user can see where the button
+                      is sending them (the URL comes off the local network). */}
+                  {portal?.portalUrl && (
+                    <div className="mt-1 truncate font-mono text-[11px] text-(--color-muted)">
+                      {portal.portalUrl}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  size="md"
+                  variant="outline"
+                  onClick={() => void openPortal()}
+                  disabled={portalBusy}
+                  className="shrink-0"
+                  icon={<Spinner size={12} spinning={portalBusy} />}
+                >
+                  Sign in
+                </Button>
+              </div>
+            </div>
+          )}
+
           {error && <ErrorBanner>{error}</ErrorBanner>}
 
           <div className="max-h-72 space-y-1 overflow-y-auto p-1.5">

@@ -50,6 +50,9 @@ windows = { version = "0.61", features = [
     "Devices_Radios",
     "Foundation",
     "Foundation_Collections",
+    # `net.rs`: Windows' connectivity verdict (NetworkConnectivityLevel) and the
+    # WLAN connection profile lookup behind the captive-portal warning.
+    "Networking_Connectivity",
 ] }
 
 
