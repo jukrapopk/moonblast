@@ -17,9 +17,12 @@
 //! hidden and a watcher thread reveals it while the cursor is inside the
 //! hotspot at the top edge (which tracks the chosen left / center / right
 //! position), hiding it again once the pointer has been away for the timeout.
-//! The watcher polls `GetCursorPos` instead of installing a `WH_MOUSE_LL`
-//! hook: Windows stops delivering low-level hooks while a Chromium-family
-//! window (i.e. our own WebView2, or a browser) is focused (see
+//! Reveal / conceal are animated by the frontend: `EVENT_VISIBLE` drives a CSS
+//! slide, and the native hide is deferred by `CONCEAL_MS` (`hide_at` in the
+//! watcher) so it lands behind the animation instead of yanking the card away
+//! mid-slide. The watcher polls `GetCursorPos` instead of installing a
+//! `WH_MOUSE_LL` hook: Windows stops delivering low-level hooks while a
+//! Chromium-family window (i.e. our own WebView2, or a browser) is focused (see
 //! `mediakeys.rs`), and the cursor position is a global, focus-independent
 //! read. The poll is adaptive — fast only while the notch is still *hidden*
 //! and the cursor is on or approaching it, backed off otherwise (far away, or
@@ -35,7 +38,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
 use crate::moonblast_log;
 
@@ -82,6 +85,17 @@ const METRICS_REFRESH_MS: u64 = 2_000;
 /// the monitor, tracking the notch's left / center / right position.
 const HOTSPOT_W: f64 = 420.0;
 const HOTSPOT_H: f64 = 90.0;
+
+/// Long enough for the frontend's slide-away animation, plus slack. The notch
+/// is told to conceal this long before the window actually hides, so the native
+/// hide lands behind a finished animation instead of yanking the card out from
+/// under it. Must stay ≥ the `data-concealed` transition in `styles.css`.
+const CONCEAL_MS: u64 = 200;
+
+/// Emitted with the notch's revealed state (`true` = card down / on screen) so
+/// the frontend can play the slide. `false` goes out *before* the window hides
+/// (see `CONCEAL_MS`); `true` after it is shown.
+const EVENT_VISIBLE: &str = "overlay-visible";
 
 /// Current autohide timeout (0 = off). Read by the watcher each tick so a
 /// timeout change is picked up without restarting it.
@@ -187,6 +201,7 @@ pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64) {
     let _guard = APPLY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !enabled {
         stop_watcher();
+        conceal_and_wait(app);
         destroy(app);
         return;
     }
@@ -198,13 +213,18 @@ pub fn apply(app: &AppHandle, enabled: bool, autohide_ms: u64) {
     if autohide_ms == 0 {
         stop_watcher();
         show(app);
+        // `show` only emits on a hidden→visible transition, but stopping the
+        // watcher abandons any conceal that was mid-slide (the window never
+        // hid), so make sure the card is told to come back down.
+        let _ = app.emit(EVENT_VISIBLE, true);
         return;
     }
     AUTOHIDE_MS.store(autohide_ms, Ordering::SeqCst);
     if WATCHER_ACTIVE.load(Ordering::SeqCst) {
         return; // already watching; the timeout above was just refreshed
     }
-    hide(app); // start hidden until the cursor comes near
+    conceal_and_wait(app); // slide away before going hidden
+    hide(app);
     start_watcher(app.clone());
 }
 
@@ -238,6 +258,21 @@ fn show(app: &AppHandle) {
         // Re-assert topmost in case another topmost window grabbed z-order.
         let _ = win.set_always_on_top(true);
     }
+    // Slide the card down. Fired after `show()` so the page is already visible
+    // and the animation actually renders.
+    let _ = app.emit(EVENT_VISIBLE, true);
+}
+
+/// Slide the card away and wait out the animation, so a caller that is about to
+/// hide / destroy the window doesn't clip the slide in half. No-op when the
+/// notch is already hidden. Blocking — the watcher uses a deadline instead, so
+/// it can still cancel a conceal when the cursor comes back.
+fn conceal_and_wait(app: &AppHandle) {
+    if !VISIBLE.load(Ordering::SeqCst) {
+        return;
+    }
+    let _ = app.emit(EVENT_VISIBLE, false);
+    std::thread::sleep(Duration::from_millis(CONCEAL_MS));
 }
 
 /// Re-place the (monitor-wide) window if it's currently shown. Position
@@ -271,6 +306,10 @@ fn start_watcher(app: AppHandle) {
         let mut last_inside = now_ms();
         let mut monitor = MonitorGeom::read(&app);
         let mut monitor_at = now_ms();
+        // Non-zero while a conceal is mid-animation: the window hides when this
+        // deadline passes, unless the cursor comes back first (which cancels it
+        // and slides the card down again).
+        let mut hide_at = 0u64;
         while WATCHER_GEN.load(Ordering::SeqCst) == gen {
             // Re-read the display geometry only on the slow cadence; `POSITION`
             // is read inside `probe`, so left / center / right stays instant.
@@ -281,6 +320,11 @@ fn start_watcher(app: AppHandle) {
             let probe = monitor.map_or(Probe::Far, |m| m.probe());
             if probe == Probe::Inside {
                 last_inside = now_ms();
+                if hide_at != 0 {
+                    // The cursor beat the slide away — bring the card back down.
+                    hide_at = 0;
+                    let _ = app.emit(EVENT_VISIBLE, true);
+                }
                 // Re-check: a concurrent `stop_watcher` (autohide turned off)
                 // must not be undone by a late `show`.
                 if WATCHER_GEN.load(Ordering::SeqCst) == gen {
@@ -290,19 +334,30 @@ fn start_watcher(app: AppHandle) {
                 let timeout = AUTOHIDE_MS.load(Ordering::SeqCst);
                 // `stop_watcher` zeroes the timeout, so a stopped watcher
                 // can't sneak a hide in after the caller has shown the notch.
-                if timeout > 0 && now_ms().saturating_sub(last_inside) >= timeout {
+                let away = now_ms().saturating_sub(last_inside);
+                if timeout > 0
+                    && hide_at == 0
+                    && VISIBLE.load(Ordering::SeqCst)
+                    && away >= timeout.saturating_sub(CONCEAL_MS)
+                {
+                    // Slide the card away first; the window hides below, once
+                    // the animation has had `CONCEAL_MS`.
+                    let _ = app.emit(EVENT_VISIBLE, false);
+                    hide_at = now_ms() + CONCEAL_MS;
+                }
+                if hide_at != 0 && now_ms() >= hide_at {
+                    hide_at = 0;
                     hide(&app);
                 }
             }
-            // Poll fast only while the notch is hidden and the cursor is
-            // closing in on it — the reveal has to feel instant. Once it's up
-            // there's nothing left to catch (the 3 s / 10 s timeout absorbs
-            // the coarser leave detection) and far away there's nothing to
-            // see, so both back off.
-            let wait = if VISIBLE.load(Ordering::SeqCst) || probe == Probe::Far {
-                AUTOHIDE_POLL_IDLE_MS
-            } else {
+            // Poll fast while a decision is pending — the cursor closing in on
+            // a hidden notch, or a conceal the cursor could still cancel.
+            // Otherwise back off; the 3 s / 10 s timeout absorbs the coarser
+            // leave detection.
+            let wait = if hide_at != 0 || (!VISIBLE.load(Ordering::SeqCst) && probe != Probe::Far) {
                 AUTOHIDE_POLL_MS
+            } else {
+                AUTOHIDE_POLL_IDLE_MS
             };
             std::thread::sleep(Duration::from_millis(wait));
         }

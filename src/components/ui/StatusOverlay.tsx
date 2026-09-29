@@ -1,4 +1,5 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useSettings, type Settings } from "../../settings/SettingsContext";
 import { useTime, formatClock } from "../../hooks/useTime";
 import { useBattery, useBatteryPower } from "../../hooks/useBattery";
@@ -34,6 +35,26 @@ function Notch({ overlay }: { overlay: Settings["overlay"] }) {
   const wantsTimeLeft = power_draw === "time_left";
   const { status: battery } = useBattery(show_battery || wantsTimeLeft);
   const watts = useBatteryPower(power_draw === "wattage");
+
+  // Slide the card down to reveal and up to conceal. Rust emits
+  // `overlay-visible` *before* hiding the window (see `CONCEAL_MS`) so the
+  // slide-up can play out; a native show also flips the document visible,
+  // which covers the first reveal. Starting concealed means the first paint is
+  // the top of the animation rather than a pop — and it masks the
+  // create → show → paint race.
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") setRevealed(true);
+    };
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    const unlisten = listen<boolean>("overlay-visible", (e) => setRevealed(e.payload));
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      void unlisten.then((f) => f());
+    };
+  }, []);
 
   // The window spans the top edge of the monitor; the card aligns to the
   // chosen side inside it. Scaling around the matching corner keeps the notch
@@ -83,19 +104,21 @@ function Notch({ overlay }: { overlay: Settings["overlay"] }) {
     <div className={`flex h-full w-full items-start ${justify}`}>
       {parts.length > 0 && (
         <div
-          className="notch flex items-center gap-2 rounded-b-lg border-x border-b border-(--color-border) bg-(--color-surface-2) px-2 pt-[3.25px] pb-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg"
-          style={{
-            transform: `scale(${clampedScale})`,
-            transformOrigin: origin,
-            opacity: clampedOpacity,
-          }}
+          className="notch-motion"
+          data-concealed={revealed ? "false" : "true"}
+          style={{ "--notch-scale": clampedScale, transformOrigin: origin } as CSSProperties}
         >
-          {parts.map((part, i) => (
-            <Fragment key={i}>
-              {i > 0 && <span className="text-(--color-muted)">·</span>}
-              {part}
-            </Fragment>
-          ))}
+          <div
+            className="notch flex items-center gap-2 rounded-b-lg border-x border-b border-(--color-border) bg-(--color-surface-2) px-2 pt-[3.25px] pb-1 text-[12px] leading-none font-medium text-(--color-text) shadow-lg"
+            style={{ opacity: clampedOpacity }}
+          >
+            {parts.map((part, i) => (
+              <Fragment key={i}>
+                {i > 0 && <span className="text-(--color-muted)">·</span>}
+                {part}
+              </Fragment>
+            ))}
+          </div>
         </div>
       )}
     </div>
