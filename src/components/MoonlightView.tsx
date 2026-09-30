@@ -17,6 +17,7 @@ import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { useForegroundInterval } from "../hooks/useForegroundInterval";
+import { useMounted } from "../hooks/useMounted";
 import { Spinner } from "./ui/Spinner";
 
 interface Host {
@@ -457,6 +458,7 @@ function AppsModal({
   // host has no apps configured, or the CLI exited cleanly with nothing on
   // stdout) leaves the modal stuck on "Loading apps" forever.
   const [loading, setLoading] = useState(false);
+  const isMounted = useMounted();
 
   useEffect(() => {
     if (!open || !host) return;
@@ -487,23 +489,22 @@ function AppsModal({
   }, [open, host?.address, host?.name]);
 
   // Re-fetch the current host's apps without closing + reopening the modal.
-  // The `alive` guard handles a click-during-fetch race (rapid Retry clicks):
-  // stale resolutions won't clobber the in-flight response.
+  // `isMounted` fences the resolution so a click-during-fetch race (rapid
+  // Retry clicks, or the modal unmounting) can't clobber state after close.
   const retry = () => {
     if (!host) return;
     setApps([]);
     setError(null);
     setLoading(true);
-    let alive = true;
     invoke<string[]>("moonlight_list_apps", { host: host.address })
       .then((list) => {
-        if (alive) {
+        if (isMounted()) {
           setApps(list);
           setLoading(false);
         }
       })
       .catch((err) => {
-        if (alive) {
+        if (isMounted()) {
           setError(String(err));
           setLoading(false);
         }
@@ -560,6 +561,9 @@ function AppsModal({
 export function MoonlightView() {
   const { settings, update } = useSettings();
   const machines = settings.machines;
+  // This view unmounts on navigation — guard async continuations (scan
+  // probes etc.) so they don't write state after the page is gone.
+  const isMounted = useMounted();
   const [sub, setSub] = useState<"machines" | "settings">("machines");
   const [addOpen, setAddOpen] = useState(false);
   const [appsHost, setAppsHost] = useState<Host | null>(null);
@@ -646,6 +650,8 @@ export function MoonlightView() {
         invoke<DiscoveredHost[]>("discover_hosts").catch(() => [] as DiscoveredHost[]),
         invoke<PairedHost[]>("moonlight_paired_hosts").catch(() => [] as PairedHost[]),
       ]);
+      // The view may have unmounted while the browse/probe was in flight.
+      if (!isMounted()) return;
       setDiscovered(list);
       setPairedHosts(paired);
       // Build the unified set from the FRESH lists (not the stale ref) so
@@ -666,13 +672,14 @@ export function MoonlightView() {
           return [addr, p] as const;
         }),
       );
+      if (!isMounted()) return;
       setProbes(Object.fromEntries(entries));
     } catch {
       // ignore
     } finally {
-      setScanning(false);
+      if (isMounted()) setScanning(false);
     }
-  }, []);
+  }, [isMounted]);
 
   // `useFocusRefresh` already runs once on mount and re-runs on
   // window.focus / visibilitychange→visible. Guarded here so only the

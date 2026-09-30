@@ -14,7 +14,15 @@ export function TitleBar({
   const ctx = useContextMenu();
 
   useEffect(() => {
-    invoke<boolean>("is_maximized").then(setMaximized).catch(() => {});
+    let alive = true;
+    invoke<boolean>("is_maximized")
+      .then((v) => {
+        if (alive) setMaximized(v);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, []);
 
   async function minimize() {

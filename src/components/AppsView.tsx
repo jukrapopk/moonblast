@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useMounted } from "../hooks/useMounted";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { MagnifyingGlass, Plus, FolderOpen, Image, ArrowClockwise, PencilSimple, ClipboardText, CheckFat, DotsSixVertical } from "@phosphor-icons/react";
@@ -303,16 +304,23 @@ function AddAppModal({
 }) {
   const [installed, setInstalled] = useState<AppEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const isMounted = useMounted();
 
   useEffect(() => {
     if (!open) return;
     setInstalled([]);
     setLoading(true);
     invoke<AppEntry[]>("discover_apps")
-      .then(setInstalled)
-      .catch(() => setInstalled([]))
-      .finally(() => setLoading(false));
-  }, [open]);
+      .then((list) => {
+        if (isMounted()) setInstalled(list);
+      })
+      .catch(() => {
+        if (isMounted()) setInstalled([]);
+      })
+      .finally(() => {
+        if (isMounted()) setLoading(false);
+      });
+  }, [open, isMounted]);
 
   function pick(a: { name: string; path: string; source?: string; kind: string }) {
     onAdd({ name: a.name, path: a.path, source: a.source ?? "", kind: a.kind });
@@ -403,6 +411,7 @@ function SteamGridModal({
   const [selected, setSelected] = useState<SgTitle | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useMounted();
 
   useEffect(() => {
     if (app) {
@@ -426,16 +435,20 @@ function SteamGridModal({
       if (idMatch) {
         const id = Number(t);
         setSelected({ id, name: `Game #${id}` });
-        setIcons(await invoke<SgIcon[]>("steamgrid_icons", { gameId: id }));
+        const icons = await invoke<SgIcon[]>("steamgrid_icons", { gameId: id });
+        if (isMounted()) setIcons(icons);
       } else {
-        setTitles(await invoke<SgTitle[]>("steamgrid_search", { query: t }));
+        const titles = await invoke<SgTitle[]>("steamgrid_search", { query: t });
+        if (isMounted()) setTitles(titles);
       }
     } catch (e) {
-      setError(String(e));
-      setTitles([]);
-      setIcons([]);
+      if (isMounted()) {
+        setError(String(e));
+        setTitles([]);
+        setIcons([]);
+      }
     } finally {
-      setBusy(false);
+      if (isMounted()) setBusy(false);
     }
   }
 
@@ -444,12 +457,15 @@ function SteamGridModal({
     setBusy(true);
     setError(null);
     try {
-      setIcons(await invoke<SgIcon[]>("steamgrid_icons", { gameId: t.id }));
+      const icons = await invoke<SgIcon[]>("steamgrid_icons", { gameId: t.id });
+      if (isMounted()) setIcons(icons);
     } catch (e) {
-      setError(String(e));
-      setIcons([]);
+      if (isMounted()) {
+        setError(String(e));
+        setIcons([]);
+      }
     } finally {
-      setBusy(false);
+      if (isMounted()) setBusy(false);
     }
   }
 
@@ -588,6 +604,9 @@ function RenameModal({
 export function AppsView() {
   const { settings, update } = useSettings();
   const shortcuts = settings.app_shortcuts;
+  // This view unmounts on navigation — fence async writes / menu opens that
+  // resolve after the page is gone.
+  const isMounted = useMounted();
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [bust, setBust] = useState(0);
@@ -700,12 +719,12 @@ export function AppsView() {
   }
   async function applyClipboardIcon(a: Shortcut) {
     const local = await invoke<string | null>("clipboard_icon_import").catch((e) => {
-      setToast(`Clipboard: ${e}`);
+      if (isMounted()) setToast(`Clipboard: ${e}`);
       return null;
     });
     if (local) {
       setCustomIcon(a.path, local);
-      setToast("Icon copied from clipboard");
+      if (isMounted()) setToast("Icon copied from clipboard");
     }
   }
   // Clipboard is probed before the menu opens so the action is grayed out when
@@ -715,6 +734,9 @@ export function AppsView() {
     e.preventDefault();
     e.stopPropagation();
     const hint = await invoke<string>("clipboard_icon_hint").catch(() => "none");
+    // The view can navigate away during the probe; don't pop the shared
+    // menu over the page that replaced it.
+    if (!isMounted()) return;
     ctx.open(e, [
       {
         icon: <PencilSimple size={14} weight="bold" />,
@@ -776,7 +798,7 @@ export function AppsView() {
       // previous `// ignore launch errors` made launches look frozen when
       // they were just silently failing. `String(e)` matches the rest of
       // the codebase's IPC-error extraction.
-      setToast(String(e));
+      if (isMounted()) setToast(String(e));
     }
   }
 

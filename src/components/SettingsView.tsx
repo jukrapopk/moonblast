@@ -16,6 +16,7 @@ import { LoadingChip } from "./ui/LoadingChip";
 import { Segmented } from "./ui/Segmented";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { useForegroundInterval } from "../hooks/useForegroundInterval";
+import { useMounted } from "../hooks/useMounted";
 import { ACCENT_PRESETS, presetSwatch } from "../settings/ThemeProvider";
 
 type TailscaleStatus =
@@ -44,13 +45,15 @@ interface Monitor {
 function TailscaleRow() {
     const [status, setStatus] = useState<TailscaleStatus | null>(null);
     const [busy, setBusy] = useState(false);
+    // The Settings page unmounts on navigation — fence the async writes.
+    const isMounted = useMounted();
 
     async function refresh() {
       try {
         const info = await invoke<{ status: TailscaleStatus }>("tailscale_status");
-        setStatus(info.status);
+        if (isMounted()) setStatus(info.status);
       } catch {
-        setStatus("not-found");
+        if (isMounted()) setStatus("not-found");
       }
     }
 
@@ -68,7 +71,7 @@ function TailscaleRow() {
         // keep current status; refresh below reflects reality
       }
       await refresh();
-      setBusy(false);
+      if (isMounted()) setBusy(false);
     }
 
     if (status === null) {
@@ -1046,6 +1049,8 @@ export function SettingsView({
   onSetOverlayAutohide: (v: string) => void;
   onSetOverlayPosition: (v: string) => void;
 }) {
+  // The Settings page unmounts on navigation — fence post-await writes.
+  const isMounted = useMounted();
   const [sgStatus, setSgStatus] = useState<"checking" | "valid" | "invalid" | "error" | null>(null);
   // Battery hardware presence — one-shot read on mount. `undefined`
   // while checking; the toggle stays disabled until we know.
@@ -1091,9 +1096,9 @@ export function SettingsView({
     setSgStatus("checking");
     try {
       const s = await invoke<string>("check_steamgrid_key", { key: steamgridKey });
-      setSgStatus(s === "valid" ? "valid" : s === "invalid" ? "invalid" : "error");
+      if (isMounted()) setSgStatus(s === "valid" ? "valid" : s === "invalid" ? "invalid" : "error");
     } catch {
-      setSgStatus("error");
+      if (isMounted()) setSgStatus("error");
     }
   }
   return (

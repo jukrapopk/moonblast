@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import { useMounted } from "../hooks/useMounted";
 import { isForeground } from "../hooks/foreground";
 import type { HdrStatus } from "./SettingsView";
 import { Prompt } from "./ui/Prompt";
@@ -66,9 +67,16 @@ export function MoonlightSettings() {
   }
 
   const [detected, setDetected] = useState<ClientDisplay | null>(null);
+  // Guard the async continuations: this view unmounts when you leave the
+  // Moonlight → Settings sub-tab.
+  const isMounted = useMounted();
   useEffect(() => {
-    invoke<ClientDisplay>("client_display").then(setDetected).catch(() => { });
-  }, []);
+    invoke<ClientDisplay>("client_display")
+      .then((d) => {
+        if (isMounted()) setDetected(d);
+      })
+      .catch(() => {});
+  }, [isMounted]);
 
   // Live read of the OS-level display HDR state. Used to mirror the
   // global HDR state onto the disabled HDR toggle when
@@ -87,11 +95,12 @@ export function MoonlightSettings() {
   const [globalHdr, setGlobalHdr] = useState<HdrStatus | null>(null);
   const refreshGlobalHdr = useCallback(async () => {
     try {
-      setGlobalHdr(await invoke<HdrStatus>("hdr_status"));
+      const s = await invoke<HdrStatus>("hdr_status");
+      if (isMounted()) setGlobalHdr(s);
     } catch {
       // Leave the previous value alone — same shape as useAudioMaster.
     }
-  }, []);
+  }, [isMounted]);
   useEffect(() => {
     let alive = true;
     const unlisten = listen<HdrStatus>("hdr-changed", () => {
