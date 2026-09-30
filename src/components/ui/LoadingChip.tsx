@@ -1,4 +1,5 @@
 import { ArrowsClockwise } from "@phosphor-icons/react";
+import { useForeground } from "../../hooks/foreground";
 
 interface LoadingChipProps {
   /** Label shown next to the spinner. Defaults to "Loading". */
@@ -28,6 +29,8 @@ export function LoadingChip({
   variant = "default",
   className = "",
 }: LoadingChipProps) {
+  // Same rule as `Spinner` — the spin pauses while backgrounded.
+  const foreground = useForeground();
   const base =
     "inline-flex h-9 items-center justify-center gap-1.5 text-xs text-(--color-muted) ";
   const frame =
@@ -36,7 +39,7 @@ export function LoadingChip({
       : "min-w-[120px] rounded-full border border-(--color-border) bg-(--color-surface-2) px-3 ";
   return (
     <span className={base + frame + className}>
-      <ArrowsClockwise size={12} weight="bold" className="animate-spin" />
+      <ArrowsClockwise size={12} weight="bold" className={foreground ? "animate-spin" : ""} />
       <span>{label}</span>
     </span>
   );

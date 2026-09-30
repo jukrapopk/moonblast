@@ -1,4 +1,5 @@
 import { ArrowsClockwise } from "@phosphor-icons/react";
+import { useForeground } from "../../hooks/foreground";
 
 interface SpinnerProps {
   size?: number;
@@ -13,13 +14,18 @@ interface SpinnerProps {
  * "working…" indicator. Defaults match the most common size (14px)
  * and class (animate-spin); call sites that need a different size or
  * conditional spinning pass `size` / `spinning`.
+ *
+ * The spin is suspended while the window is backgrounded (the shared
+ * `foreground.ts` condition) — a continuous animation has no audience
+ * behind a game / stream, and it resumes on return.
  */
 export function Spinner({ size = 14, className = "", spinning = true }: SpinnerProps) {
+  const foreground = useForeground();
   return (
     <ArrowsClockwise
       size={size}
       weight="bold"
-      className={`${spinning ? "animate-spin" : ""} ${className}`.trim()}
+      className={`${spinning && foreground ? "animate-spin" : ""} ${className}`.trim()}
     />
   );
 }

@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { useForeground } from "../../hooks/foreground";
 
 type Tone = "accent" | "muted";
 
@@ -26,6 +27,12 @@ export function StatusPill({
   size = "sm",
   children,
 }: StatusPillProps) {
+  // The pulse is a steady-state CSS animation — it runs for the whole
+  // duration of a stream ("Streaming") or a probe ("Checking"). Pause it
+  // while the window is backgrounded: nobody sees it, and it resumes on
+  // return.
+  const foreground = useForeground();
+  const animated = pulse && foreground;
   const padding = size === "md" ? "px-2.5 py-1" : "px-2 py-0.5";
   return (
     <span
@@ -33,7 +40,7 @@ export function StatusPill({
     >
       <span
         className={`h-1.5 w-1.5 rounded-full bg-current ${
-          pulse ? "animate-pulse" : tone === "muted" ? "opacity-40" : ""
+          animated ? "animate-pulse" : !pulse && tone === "muted" ? "opacity-40" : ""
         }`}
       />
       {children}
