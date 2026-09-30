@@ -39,14 +39,21 @@ import { useContextMenu } from "./ContextMenu";
  * settle to the expected value. The wlan service can take a few
  * seconds to actually apply connect/disconnect, and reading it
  * before that gives a stale view.
+ *
+ * `isOpen` is checked before every read (and after every await) so the
+ * poll abandons the moment the modal is dismissed — the modal component
+ * stays mounted at the App root, so nothing else would stop it.
  */
 async function waitForState(
   expected: string | null,
+  isOpen: () => boolean,
   timeoutMs = 5000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (!isOpen()) return;
     const c = await fetchWifiCurrent();
+    if (!isOpen()) return;
     if (expected === null ? c === null : c?.ssid === expected) return;
     await new Promise((r) => setTimeout(r, 300));
   }
@@ -314,6 +321,12 @@ function NetworkRow({
 
 export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProps) {
   const { networks, loading, scan, clear } = useWifiScan();
+  // Latest `open`, readable from async continuations. An action's
+  // post-connect poll / rescan must stop the instant the modal is dismissed;
+  // the component stays mounted at the App root, so `open` is the only
+  // signal that this scope is gone.
+  const openRef = useRef(open);
+  openRef.current = open;
   // Per-row in-flight state (the row that the user is currently acting
   // on). `null` when nothing is happening.
   const [busy, setBusy] = useState<{ ssid: string; kind: "connect" | "disconnect" | "forget" } | null>(null);
@@ -515,7 +528,11 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   // action (connect / disconnect / forget / connect-with-password).
   async function refreshAfter() {
     await scan();
+    // The modal may have been dismissed while the scan was in flight — don't
+    // keep reading/writing for a scope that's gone.
+    if (!openRef.current) return;
     const c = await fetchWifiCurrent();
+    if (!openRef.current) return;
     setLiveSsid(c?.ssid ?? null);
     setConnectivity(c?.connectivity ?? null);
     // Any portal verdict we had belongs to the previous connection.
@@ -541,8 +558,10 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // The connect command may take a few seconds to actually take
       // effect; poll the OS a few times to wait for the state to land
       // before refreshing the modal.
-      await waitForState(net.ssid);
+      await waitForState(net.ssid, () => openRef.current);
+      if (!openRef.current) return;
       await refreshAfter();
+      if (!openRef.current) return;
       await probeAfterConnect();
     });
   }
@@ -552,7 +571,8 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       await wifiDisconnect();
       // The disconnect command may also be async on the wlan service;
       // poll briefly so the modal reflects the real state.
-      await waitForState(null);
+      await waitForState(null, () => openRef.current);
+      if (!openRef.current) return;
       await refreshAfter();
     });
   }
@@ -563,6 +583,7 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       // Profile deletion is synchronous — skip the state-poll, just
       // re-read the list so the `known` flag (and the connection, if
       // it was current) update.
+      if (!openRef.current) return;
       await refreshAfter();
     });
   }
@@ -573,12 +594,14 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
   ) {
     await runAction(net.ssid, "connect", async () => {
       await wifiConnectWithPassword(net.ssid, password, net.auth ?? "");
-      await waitForState(net.ssid);
+      await waitForState(net.ssid, () => openRef.current);
+      if (!openRef.current) return;
       // Dismiss the password form on success; the list is back.
       // `runAction` captures failures into the error slot — staying on
       // the form lets the user correct the password.
       setPasswordTarget(null);
       await refreshAfter();
+      if (!openRef.current) return;
       await probeAfterConnect();
     });
   }
