@@ -138,23 +138,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to OS theme + accent changes for the "Auto" options.
   useEffect(() => {
-    let unlistenTheme: (() => void) | null = null;
-    let unlistenAccent: (() => void) | null = null;
-    listen<string>("windows-theme-changed", (e) => {
+    // `listen` is async — it resolves to the unlisten fn. Calling `.then` in
+    // the cleanup (rather than assigning the resolved fn to a local) means an
+    // effect that tears down before the promise settles still unlistens;
+    // assigning first would drop the handle and leak. Same shape as
+    // `App.tsx` / `SettingsContext` / `useBluetooth`.
+    const unlistenTheme = listen<string>("windows-theme-changed", (e) => {
       windowsModeRef.current = e.payload === "light" ? "light" : "dark";
       apply(settingsRef.current, windowsModeRef.current, windowsAccentRef.current);
-    }).then((u) => {
-      unlistenTheme = u;
     });
-    listen<string>("windows-accent-changed", (e) => {
+    const unlistenAccent = listen<string>("windows-accent-changed", (e) => {
       windowsAccentRef.current = e.payload;
       apply(settingsRef.current, windowsModeRef.current, windowsAccentRef.current);
-    }).then((u) => {
-      unlistenAccent = u;
     });
     return () => {
-      unlistenTheme?.();
-      unlistenAccent?.();
+      void unlistenTheme.then((f) => f());
+      void unlistenAccent.then((f) => f());
     };
   }, []);
 
