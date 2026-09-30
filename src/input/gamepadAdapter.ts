@@ -26,7 +26,11 @@
  *   Right stick                 → vertical / horizontal scroll (synthetic wheel event)
  *
  * Edge-detected buttons, so an idle controller never repeats. rAF
- * pauses naturally on `document.hidden` — no manual tick scheduling.
+ * pauses naturally on `document.hidden`, and the loop is additionally
+ * suspended on `window.blur` / resumed on `window.focus`: while another
+ * app is in the foreground (a game, a Moonlight stream) the synthetic
+ * keys would land on an unfocused document anyway, so the launcher may
+ * as well not burn 60fps reading a controller it can't use.
  *
  * What's deliberately out of scope
  * --------------------------------
@@ -424,6 +428,9 @@ function dispatch(prev: State, next: State, now: number): State {
 let rafId: number | null = null;
 let prev: State = empty();
 let active = false;
+// Whether this window currently owns OS focus. The loop only runs while
+// focused — see the blur/focus wiring in `installGamepadAdapter`.
+let focused = true;
 
 export function installGamepadAdapter(): () => void {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -448,7 +455,7 @@ export function installGamepadAdapter(): () => void {
     sendKey(k);
   });
   function start() {
-    if (active || typeof requestAnimationFrame === "undefined") return;
+    if (active || !focused || typeof requestAnimationFrame === "undefined") return;
     const pads = navigator.getGamepads?.() ?? [];
     const hasAny = Array.from(pads).some((p) => !!p);
     if (!hasAny) {
@@ -481,10 +488,27 @@ export function installGamepadAdapter(): () => void {
   // stops it. Without this an idle desktop pays no rAF cost.
   window.addEventListener("gamepadconnected", start);
   window.addEventListener("gamepaddisconnected", stop);
+  // Suspend / resume with window focus. The synthetic keys the loop emits
+  // target the focused element, so while another app is in the foreground
+  // they'd be discarded — and `start`'s `focused` guard means a hot-plug
+  // landing while unfocused stays parked until focus returns.
+  focused = document.hasFocus();
+  const onFocus = () => {
+    focused = true;
+    start();
+  };
+  const onBlur = () => {
+    focused = false;
+    stop();
+  };
+  window.addEventListener("focus", onFocus);
+  window.addEventListener("blur", onBlur);
   start();
   return () => {
     window.removeEventListener("gamepadconnected", start);
     window.removeEventListener("gamepaddisconnected", stop);
+    window.removeEventListener("focus", onFocus);
+    window.removeEventListener("blur", onBlur);
     stop();
     // Defense-in-depth: tear down the auto-fire subsystem so no
     // stranded hold can keep the rAF loop running after the adapter
