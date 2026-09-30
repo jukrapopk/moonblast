@@ -113,7 +113,7 @@ export function TitleBar({
           tabIndex={-1}
           onClick={minimize}
           aria-label="Minimize"
-          className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text)"
+          className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text) focus:outline-none focus-visible:outline-none"
         >
           <Minus size={15} weight="bold" />
         </button>
@@ -121,7 +121,7 @@ export function TitleBar({
           tabIndex={-1}
           onClick={toggleMaximize}
           aria-label={maximized ? "Restore" : "Maximize"}
-          className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text)"
+          className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-surface-2) hover:text-(--color-text) focus:outline-none focus-visible:outline-none"
         >
           {maximized ? <Copy size={14} weight="bold" /> : <Square size={14} weight="bold" />}
         </button>
@@ -129,7 +129,7 @@ export function TitleBar({
           tabIndex={-1}
           onClick={close}
           aria-label="Close"
-          className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-danger) hover:text-white"
+          className="flex w-12 items-center justify-center text-(--color-muted) transition-colors hover:bg-(--color-danger) hover:text-white focus:outline-none focus-visible:outline-none"
         >
           <X size={16} weight="bold" />
         </button>
