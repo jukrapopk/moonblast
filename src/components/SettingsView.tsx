@@ -171,7 +171,6 @@ function ResolutionPicker({
   current,
   loading = false,
   onApply,
-  onPendingChange,
   onResolved,
   deviceName,
 }: {
@@ -185,9 +184,6 @@ function ResolutionPicker({
    *  resolution or refresh rate. The picker no longer has its own
    *  "Apply" button; the keep/revert modal handles confirmation. */
   onApply: (width: number, height: number, refreshRate: number) => Promise<void>;
-  /** Notified whenever a pending change becomes live or resolves — the
-   *  parent uses this to revert on Settings unmount. */
-  onPendingChange?: (hasPending: boolean) => void;
   /** Notified when the OS display state changes (apply success, keep,
    *  revert, auto-revert) so the parent can re-read the current mode and
    *  refresh the dropdown selection. */
@@ -210,6 +206,27 @@ function ResolutionPicker({
     { width: number; height: number; refresh: number } | null
   >(null);
   const [countdown, setCountdown] = useState(10);
+  // The applied-but-unconfirmed change is scoped to this picker: when the
+  // picker leaves the screen (the Display modal closes) the keep/revert UI
+  // goes with it, so *its* unmount is what reverts. `pendingRef` is read by
+  // the unmount net (a ref is current at cleanup time), `deviceNameRef`
+  // carries the latest target, and `aliveRef` lets an `apply_display_mode`
+  // that resolves after the picker is gone revert itself instead of writing
+  // state to a dead component.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const deviceNameRef = useRef(deviceName);
+  deviceNameRef.current = deviceName;
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (pendingRef.current) {
+        invoke("revert_display_mode", { deviceName: deviceNameRef.current }).catch(() => {});
+      }
+    };
+  }, []);
   useEffect(() => {
     if (current) {
       setWidth(current.width);
@@ -221,26 +238,22 @@ function ResolutionPicker({
   // hasn't clicked Keep or Revert.
   useEffect(() => {
     if (!pending) return;
-    onPendingChange?.(true);
     setCountdown(10);
     const id = setInterval(() => {
       setCountdown((s) => (s > 0 ? s - 1 : 0));
     }, 1000);
     return () => clearInterval(id);
-  }, [pending, onPendingChange]);
+  }, [pending]);
   // Auto-revert when countdown hits 0.
   useEffect(() => {
     if (pending && countdown === 0) {
+      pendingRef.current = null; // the auto-revert IS the resolution
       invoke("revert_display_mode", { deviceName })
         .catch(() => {})
         .finally(() => onResolved?.());
       setPending(null);
     }
-  }, [countdown, pending, onResolved]);
-  // Notify parent when pending resolves (Keep / Revert / auto-revert).
-  useEffect(() => {
-    if (pending === null) onPendingChange?.(false);
-  }, [pending, onPendingChange]);
+  }, [countdown, pending, deviceName, onResolved]);
   const supportedList: { width: number; height: number; refreshRates: number[] }[] = Array.isArray(
     modes,
   )
@@ -264,20 +277,31 @@ function ResolutionPicker({
     setRefresh(refresh);
     onApply(width, height, refresh)
       .then(() => {
+        // The picker can leave the screen while the mode change is in
+        // flight (the Display modal closed right after the pick). There is
+        // no confirmation UI any more, so revert rather than strand an
+        // unconfirmed mode.
+        if (!aliveRef.current) {
+          invoke("revert_display_mode", { deviceName: deviceNameRef.current }).catch(() => {});
+          return;
+        }
         onResolved?.();
         setPending({ width, height, refresh });
       })
       .catch(() => {
         // apply failed — onApply already invoked refreshDisplay itself
-        setPending(null);
+        if (aliveRef.current) setPending(null);
       });
   }
   async function keep() {
+    // Confirmed — the unmount net must not revert this.
+    pendingRef.current = null;
     await invoke("keep_display_mode", { deviceName });
     onResolved?.();
     setPending(null);
   }
   async function revert() {
+    pendingRef.current = null;
     await invoke("revert_display_mode", { deviceName });
     onResolved?.();
     setPending(null);
@@ -408,8 +432,7 @@ export function DisplaySettingsModal({
       ? null
       : (monitors ?? []).find((m) => m.deviceName === selectedDeviceName) ?? null;
   // Stable ref so async refresh callbacks can read the live selection
-  // without re-binding effects on every change. Shared by refreshHdr,
-  // refreshDisplay, and the unmount-cleanup revert path.
+  // without re-binding effects on every change.
   const selectedMonitorRef = useRef(selectedMonitor);
   selectedMonitorRef.current = selectedMonitor;
 
@@ -452,7 +475,6 @@ export function DisplaySettingsModal({
   const [currentMode, setCurrentMode] = useState<
     { width: number; height: number; refreshRate: number } | null | undefined
   >(undefined);
-  const [hasPending, setHasPending] = useState(false);
 
   async function refreshDisplay() {
     const m = selectedMonitorRef.current;
@@ -500,19 +522,6 @@ export function DisplaySettingsModal({
     refreshDisplay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDeviceName]);
-
-  // Revert any pending change when the modal unmounts so a forgotten
-  // confirmation modal can't leave the display stuck on a new mode.
-  const hasPendingRef = useRef(hasPending);
-  hasPendingRef.current = hasPending;
-  useEffect(() => {
-    return () => {
-      if (hasPendingRef.current) {
-        const m = selectedMonitorRef.current;
-        invoke("revert_display_mode", { deviceName: m?.deviceName ?? null }).catch(() => {});
-      }
-    };
-  }, []);
 
   async function toggleHdr(enabled: boolean) {
     try {
@@ -588,7 +597,6 @@ export function DisplaySettingsModal({
         modes={displayModes}
         current={currentMode}
         loading={displayModes === undefined}
-        onPendingChange={setHasPending}
         onResolved={refreshDisplay}
         deviceName={selectedMonitor?.deviceName ?? null}
         onApply={async (width, height, refreshRate) => {
