@@ -136,17 +136,16 @@ export function Modal({
       focusInitial(panel);
     }
 
-    // The panel is rendered by AnimatePresence; on rapid close -> reopen
-    // the old panel's motion.div unmounts at the end of its exit animation
-    // and the new one mounts in parallel. Watch the DOM directly so we
-    // don't have to coordinate with React's commit timing. The
-    // `[data-modal-panel]` attribute below identifies OUR panel.
+    // The overlay (and its panel) is portaled to `document.body` as a
+    // direct child, so `childList` on body — without `subtree` — is enough to
+    // catch its mount, and keeps the observer off every mutation in the rest
+    // of the document (a Select panel, a list update, a chip re-render) while
+    // the modal is open. `applyInitialFocus` reads the live panel through the
+    // ref, so it doesn't need the mutation record itself.
     const observer = new MutationObserver(() => {
-      // First match wins — the observer fires whenever a new matching
-      // node attaches, including AnimatePresence's initial mount.
       applyInitialFocus();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true });
 
     // Also catch the case where the panel already mounted before our
     // effect ran (very fast open of a previously-rendered Modal). A
