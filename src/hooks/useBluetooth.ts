@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useDebouncedRead } from "./useDebouncedRead";
+import { isForeground } from "./foreground";
 
 export interface BluetoothRadioStatus {
   /** False when the machine has no Bluetooth radio — the chip stays hidden. */
@@ -52,9 +53,10 @@ export function useBluetooth(enabled = true): {
     if (!enabled) return;
     // The push event IS the signal that state changed — bypass the
     // 2 s collapse window so a recent focus/visible-triggered read
-    // doesn't swallow this notification.
+    // doesn't swallow this notification. Ignored while backgrounded; the
+    // foreground refresh re-reads the radio on the way back in anyway.
     const unlisten = listen("bluetooth-radio-changed", () => {
-      void read(true);
+      if (isForeground()) void read(true);
     });
     return () => {
       void unlisten.then((f) => f());

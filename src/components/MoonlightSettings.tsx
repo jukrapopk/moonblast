@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
+import { isForeground } from "../hooks/foreground";
 import type { HdrStatus } from "./SettingsView";
 import { Prompt } from "./ui/Prompt";
 import { Row } from "./ui/Row";
@@ -94,7 +95,7 @@ export function MoonlightSettings() {
   useEffect(() => {
     let alive = true;
     const unlisten = listen<HdrStatus>("hdr-changed", () => {
-      if (alive) void refreshGlobalHdr();
+      if (alive && isForeground()) void refreshGlobalHdr();
     });
     return () => {
       alive = false;

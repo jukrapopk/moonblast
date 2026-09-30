@@ -5,6 +5,7 @@ import { type AudioMaster } from "../hooks/useAudio";
 import { type BatteryStatus } from "../hooks/useBattery";
 import { type BluetoothRadioStatus } from "../hooks/useBluetooth";
 import { formatClock, formatDate, useTime } from "../hooks/useTime";
+import { useForeground } from "../hooks/foreground";
 import { type WifiConnection } from "../hooks/useWifi";
 import { BatteryIcon } from "./ui/BatteryIcon";
 import { BluetoothIcon } from "./ui/BluetoothIcon";
@@ -65,8 +66,12 @@ function Status({
       : `On battery · ${battery.percent >= 0 ? `${battery.percent}%` : "—"} · ${formatDuration(battery.timeRemainingSec, "short")} left`
     : "Battery";
   // Critical flash at ≤5% on battery (the OS-driven warning band). Below the
-  // static `danger` red threshold so the chip never doubles up.
+  // static `danger` red threshold so the chip never doubles up. Paused while
+  // the window is backgrounded — an infinite opacity loop has no audience
+  // behind a game / stream, and `foreground` re-arms it on return.
+  const foreground = useForeground();
   const critical = !!battery && !battery.charging && battery.percent >= 0 && battery.percent <= 5;
+  const flashing = critical && foreground;
   // Associated, but Windows says there's no internet — usually a captive
   // portal waiting for a sign-in. A missing verdict (`null` / `undefined`)
   // means we don't know, which mustn't be dressed up as a problem.
@@ -106,8 +111,8 @@ function Status({
       )}
       {showBattery && battery && (
         <motion.div
-          animate={critical ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
-          transition={critical ? { repeat: Infinity, duration: 1.4, ease: "easeInOut" } : { duration: 0 }}
+          animate={flashing ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
+          transition={flashing ? { repeat: Infinity, duration: 1.4, ease: "easeInOut" } : { duration: 0 }}
         >
           <TopBarButton
             label={batteryLabel}

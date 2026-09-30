@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isForeground, subscribeForeground } from "./foreground";
 
 /**
  * Live wall-clock time, refreshed every 30s. Returns a `Date` so callers can
@@ -6,18 +7,18 @@ import { useEffect, useRef, useState } from "react";
  * keeping the wakeup rate negligible.
  *
  * `now` is held in a ref so callers that pass an inline arrow don't churn
- * the interval on every render — the interval is visibility-gated and reads
+ * the interval on every render — the interval is foreground-gated and reads
  * the latest `now()` at each tick.
  */
 export function useTime(now: () => Date = () => new Date()): Date {
   const [t, setT] = useState<Date>(now);
   const nowRef = useRef(now);
   nowRef.current = now;
-  // Tick only while the window is visible: a hidden window's clock isn't on
-  // screen, and Chromium throttles hidden timers regardless. The mount value is
-  // already fresh, so only a hidden→visible transition snaps it to now
-  // (`visibilitychange` fires on real transitions only) — no redundant render
-  // on mount.
+  // Tick only while the window is in the foreground: an unfocused window's
+  // clock isn't being looked at, and a hidden one is throttled by Chromium
+  // anyway. The mount value is already fresh, so only a transition into the
+  // foreground snaps it to now (`focus` / `visibilitychange` fire on real
+  // transitions only) — no redundant render on mount.
   useEffect(() => {
     const tick = () => setT(nowRef.current());
     let id: ReturnType<typeof setInterval> | null = null;
@@ -30,19 +31,19 @@ export function useTime(now: () => Date = () => new Date()): Date {
         id = null;
       }
     };
-    if (document.visibilityState === "visible") start();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
+    const onForeground = () => {
+      if (isForeground()) {
         tick();
         start();
       } else {
         stop();
       }
     };
-    document.addEventListener("visibilitychange", onVisibility);
+    if (isForeground()) start();
+    const unsubscribe = subscribeForeground(onForeground);
     return () => {
       stop();
-      document.removeEventListener("visibilitychange", onVisibility);
+      unsubscribe();
     };
   }, []);
   return t;

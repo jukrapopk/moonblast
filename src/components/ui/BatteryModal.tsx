@@ -4,7 +4,7 @@ import { Modal } from "./Modal";
 import { SectionLabel } from "./SectionLabel";
 import { ErrorBanner } from "./ErrorBanner";
 import { formatDuration } from "./formatDuration";
-import { useVisibleInterval } from "../../hooks/useVisibleInterval";
+import { useForegroundInterval } from "../../hooks/useForegroundInterval";
 import type { BatteryStatus } from "../../hooks/useBattery";
 
 interface BatteryModalProps {
@@ -39,11 +39,11 @@ export function BatteryModal({ open, onClose }: BatteryModalProps) {
   }, [open]);
 
   // Read on open, then keep the percent / time-remaining ticking live while
-  // the modal is up. `useVisibleInterval` reads once up front and stops the
-  // 2s tick while the window is hidden, so a modal left open behind a
-  // minimized launcher / a stream issues no IPCs — the same rule every other
+  // the modal is up. `useForegroundInterval` reads once up front and stops the
+  // 2s tick whenever the window drops out of the foreground, so a modal left
+  // open behind a game / a stream issues no IPCs — the same rule every other
   // timer in the app follows. The TopBar chip keeps its own 5s cadence.
-  useVisibleInterval(read, 2_000, open);
+  useForegroundInterval(read, 2_000, open);
 
   const percent = status?.percent ?? -1;
   const charging = status?.charging ?? false;

@@ -8,6 +8,7 @@ import { Check } from "@phosphor-icons/react";
 import { Spinner } from "./Spinner";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyMessage } from "./EmptyMessage";
+import { isForeground } from "../../hooks/foreground";
 
 import {
   fetchAudioDevices,
@@ -90,6 +91,7 @@ export function AudioModal({ open, onClose, onChanged }: AudioModalProps) {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen("audio-changed", () => {
+      if (!isForeground()) return;
       if (Date.now() - localChangeAt.current < 500) return;
       void refresh();
     }).then((f) => {

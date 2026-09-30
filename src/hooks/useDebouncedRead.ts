@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useFocusRefresh } from "./useFocusRefresh";
+import { isForeground, subscribeForeground } from "./foreground";
 
 /**
  * Shared "event-driven + collapse" read pattern used by the polling-free
  * hooks (`useWifi`) and the slow-poll hooks (`useBattery`). Collapses
  * concurrent / back-to-back callers into one read so focus + visibility
  * firing on the same refocus doesn't issue parallel invokes; refreshes
- * on mount, on window focus, and on `visibilitychange → visible`.
+ * on mount, and on every transition into the foreground.
  *
  * The caller owns the state; this hook returns a `read` function that
  * updates state via `setValue` and a `refresh` alias bound to the same
  * read. The 2 s collapse window matches `useWifi`'s original behavior.
  *
- * The poll is **visibility-gated**: it only runs while the window is
- * visible, so a hidden surface (the notch under autohide, a minimized
- * launcher) issues no reads at all — `useFocusRefresh` re-reads when the
- * window comes back, so the value is fresh on return.
+ * Both the poll and `read` itself are **foreground-gated** (see
+ * `foreground.ts`): while the window is backgrounded no read is issued at
+ * all, and `useFocusRefresh` re-reads the moment it comes back, so the
+ * value is fresh on return rather than stale.
  */
 export function useDebouncedRead<T>(
   command: string,
@@ -44,7 +45,10 @@ export function useDebouncedRead<T>(
   const lastReadAt = useRef(0);
 
   const read = useCallback(async (force = false) => {
-    if (!enabled) return;
+    // A backgrounded window issues no reads at all — a hidden *or
+    // merely unfocused* launcher has nothing to update. `useFocusRefresh`
+    // below re-reads on the way back in.
+    if (!enabled || !isForeground()) return;
     // Collapse *non-forced* concurrent callers: a focus event and a
     // visibilitychange event firing on the same refocus share one IPC.
     // But a forced call (Rust push event, direct user action) MUST
@@ -79,33 +83,32 @@ export function useDebouncedRead<T>(
     }
   }, [command, collapseMs, setValue, enabled]);
 
-  // Poll only while the window is actually visible. A hidden window — the
-  // overlay notch while autohide has it tucked away, a minimized launcher —
-  // gets Chromium's background timer throttling anyway; stopping outright
-  // makes an unseen chip free. `useFocusRefresh` above re-reads on
-  // `visibilitychange → visible`, so the value is fresh the moment the window
-  // comes back rather than waiting for the next tick.
+  // Poll only while the window is in the foreground. Chromium throttles the
+  // timers of a hidden window but not of a merely unfocused one, so an
+  // unfocused launcher would otherwise keep issuing IPCs; stopping outright
+  // makes a backgrounded chip free. `useFocusRefresh` below re-reads on the
+  // way back in, so the value is fresh the moment the window comes back
+  // rather than waiting for the next tick.
   useEffect(() => {
     if (!enabled || pollIntervalMs === undefined) return;
     let id: ReturnType<typeof setInterval> | null = null;
     const sync = () => {
-      const visible = document.visibilityState === "visible";
-      if (visible && id === null) {
+      if (isForeground() && id === null) {
         id = setInterval(() => void read(), pollIntervalMs);
-      } else if (!visible && id !== null) {
+      } else if (!isForeground() && id !== null) {
         clearInterval(id);
         id = null;
       }
     };
     sync();
-    document.addEventListener("visibilitychange", sync);
+    const unsubscribe = subscribeForeground(sync);
     return () => {
       if (id !== null) clearInterval(id);
-      document.removeEventListener("visibilitychange", sync);
+      unsubscribe();
     };
   }, [read, pollIntervalMs, enabled]);
 
-  // `enabled` also skips the focus/visibility registration below, so a
+  // `enabled` also skips the foreground-refresh registration below, so a
   // suspended chip (hidden in Customization) attaches no listeners at all —
   // not just "listeners that early-return".
   useFocusRefresh(() => void read(), [read], enabled);

@@ -16,7 +16,7 @@ import { useContextMenu } from "./ui/ContextMenu";
 import { Input } from "./ui/Input";
 import { useSettings } from "../settings/SettingsContext";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
-import { useVisibleInterval } from "../hooks/useVisibleInterval";
+import { useForegroundInterval } from "../hooks/useForegroundInterval";
 import { Spinner } from "./ui/Spinner";
 
 interface Host {
@@ -576,9 +576,9 @@ export function MoonlightView() {
   const [sessionBusy, setSessionBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
-  // Elapsed-session tick — kept off while the launcher is hidden (a
-  // backgrounded window doesn't need a per-second clock).
-  useVisibleInterval(() => setNow(Date.now()), 1000, !!session);
+  // Elapsed-session tick — kept off while the launcher is backgrounded (a
+  // window the user has left doesn't need a per-second clock).
+  useForegroundInterval(() => setNow(Date.now()), 1000, !!session);
 
   const elapsedLabel = session ? formatElapsed(session.startedAt, now) : "";
 

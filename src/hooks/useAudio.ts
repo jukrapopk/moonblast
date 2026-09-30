@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useFocusRefresh } from "./useFocusRefresh";
+import { isForeground } from "./foreground";
 
 export interface AudioDevice {
   id: string;
@@ -65,6 +66,10 @@ export function useAudioMaster(enabled = true): {
   // bursts into one re-read per 250 ms of stillness; the trailing
   // refresh fires after the burst so the chip shows the final value
   // (e.g. the user releases the key at volume 73).
+  //
+  // Ignored entirely while the window is backgrounded — a chip nobody is
+  // looking at (a game / a stream in front) issues no IPC; the foreground
+  // refresh below re-reads the master on the way back in.
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
@@ -77,7 +82,7 @@ export function useAudioMaster(enabled = true): {
       }, 250);
     };
     const unlisten = listen("audio-changed", () => {
-      if (alive) schedule();
+      if (alive && isForeground()) schedule();
     });
     return () => {
       alive = false;
