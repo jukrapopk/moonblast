@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDebouncedRead } from "./useDebouncedRead";
+import { isForeground } from "./foreground";
 
 export interface WifiConnection {
   /** Connected SSID. Empty when not connected. */
@@ -41,6 +42,116 @@ export interface WifiNetwork {
   gen: number | null;
 }
 
+/** How long a "connected but no internet" verdict must settle before the chip
+ *  is allowed to act on it. `NetworkConnectivityLevel` is NCSI's cached hint,
+ *  and NCSI classifies a fresh association *asynchronously*: a read taken in
+ *  that window reports `LocalAccess` / `ConstrainedInternetAccess` on a
+ *  perfectly good network. The chip is event-driven (mount / focus / explicit
+ *  refresh), so without a hold-back a single lagging sample would pin the
+ *  warning on until the next focus. */
+const CONNECTIVITY_SETTLE_MS = 4000;
+
+/** `NetworkConnectivityLevel` values that mean "connected, but not online". */
+function isNoInternet(c: Connectivity): boolean {
+  return c === "constrained" || c === "local" || c === "none";
+}
+
+/**
+ * Confirm Windows' "no internet" verdict before the chip acts on it.
+ *
+ * The level is only a hint, so a non-`internet` verdict is held back for
+ * `CONNECTIVITY_SETTLE_MS` and then re-checked: a fresh level read first (a
+ * recovered level clears the suspicion for free), and if that is still bad, the
+ * same active probe the Wi-Fi modal uses. The probe is the authority — if the
+ * NCSI endpoint answered correctly the level was simply lagging, so the chip
+ * stays normal; otherwise (a portal, a genuine outage, or active probing being
+ * disabled) the warning stands. Healthy networks never probe, because the cheap
+ * level gates it, and a probe is only ever issued on the idle→suspect
+ * transition, so a persistent condition can't turn this into a poll.
+ */
+function useConfirmedOffline(raw: WifiConnection | null | undefined): boolean {
+  const [offline, setOffline] = useState(false);
+  // One-shot state machine, keyed by SSID so a connection change restarts it.
+  const phase = useRef<
+    | { kind: "idle" }
+    | { kind: "suspect"; ssid: string }
+    | { kind: "confirming"; ssid: string }
+    | { kind: "offline"; ssid: string }
+  >({ kind: "idle" });
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = useCallback(() => {
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  }, []);
+
+  const confirm = useCallback(async (ssid: string) => {
+    phase.current = { kind: "confirming", ssid };
+    const stale = () => phase.current.kind !== "confirming" || phase.current.ssid !== ssid;
+    // Network I/O is foreground-only, like every other read. If we've slipped
+    // into the background, bail — the focus refresh starts a fresh suspicion
+    // on return.
+    if (!isForeground()) {
+      phase.current = { kind: "idle" };
+      return;
+    }
+    // Fresh cheap read first: a recovered level (or a changed connection)
+    // clears the suspicion without paying for a probe.
+    const c = await fetchWifiCurrent();
+    if (stale()) return;
+    if (
+      !c ||
+      !c.connected ||
+      c.ssid !== ssid ||
+      c.connectivity === null ||
+      c.connectivity === "internet"
+    ) {
+      phase.current = { kind: "idle" };
+      setOffline(false);
+      return;
+    }
+    // The level is still bad — ask the active probe, the authority.
+    const s = await fetchPortalStatus();
+    if (stale()) return;
+    if (s?.state === "internet") {
+      phase.current = { kind: "idle" };
+      setOffline(false);
+    } else {
+      phase.current = { kind: "offline", ssid };
+      setOffline(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const c = raw;
+    const suspect = !!c && c.connected && c.connectivity !== null && isNoInternet(c.connectivity);
+    if (!suspect) {
+      clearTimer();
+      phase.current = { kind: "idle" };
+      setOffline(false);
+      return;
+    }
+    const ssid = c!.ssid;
+    const ph = phase.current;
+    // Already tracking this connection — the timer / probe owns the verdict.
+    if (ph.kind !== "idle" && ph.ssid === ssid) return;
+    // New suspicion: hold the verdict back until it settles.
+    clearTimer();
+    phase.current = { kind: "suspect", ssid };
+    setOffline(false);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      void confirm(ssid);
+    }, CONNECTIVITY_SETTLE_MS);
+  }, [raw, clearTimer, confirm]);
+
+  // Cancel any pending confirmation on unmount.
+  useEffect(() => clearTimer, [clearTimer]);
+
+  return offline;
+}
+
 /**
  * Event-driven WiFi state for the TopBar chip: the wlan service doesn't
  * change state on its own, so we just read on:
@@ -55,6 +166,12 @@ export interface WifiNetwork {
  * service doesn't change state that fast, and the previous read's
  * `current` is still fresh.
  *
+ * `connectivity` is Windows' hint, so a non-`internet` value is only surfaced
+ * once `useConfirmedOffline` has confirmed it (see there). Until then it is
+ * presented as `null` (unknown), which the chip never warns about — otherwise
+ * a lagging sample on a healthy network would flash the "sign in required"
+ * state.
+ *
  * `enabled` (default `true`) suspends mount/focus reads entirely — pass
  * `false` when the WiFi chip is hidden via Customization. `WifiModal`
  * does its own independent fetch/scan on open, so hiding the chip never
@@ -64,8 +181,16 @@ export function useWifi(enabled = true): {
   current: WifiConnection | null | undefined;
   refresh: () => void;
 } {
-  const [current, setCurrent] = useState<WifiConnection | null | undefined>(undefined);
-  const read = useDebouncedRead<WifiConnection | null>("wifi_current", setCurrent, { enabled });
+  const [raw, setRaw] = useState<WifiConnection | null | undefined>(undefined);
+  const read = useDebouncedRead<WifiConnection | null>("wifi_current", setRaw, { enabled });
+  const offline = useConfirmedOffline(raw);
+  // Present the raw verdict only once it's confirmed; while a non-`internet`
+  // level is still settling, expose it as `null` (unknown) so the chip's
+  // `connectivity !== "internet"` warning can't fire on a transient.
+  const current = useMemo(() => {
+    if (!raw || raw.connectivity === null || raw.connectivity === "internet") return raw;
+    return offline ? raw : { ...raw, connectivity: null };
+  }, [raw, offline]);
   return { current, refresh: read };
 }
 

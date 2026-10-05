@@ -357,18 +357,28 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     if (open) setLiveSsid(currentSsid);
   }, [open, currentSsid]);
   // Windows' internet verdict + the captive-portal probe result. Both are
-  // modal-local: the TopBar chip shows its warning from the cheap level alone
-  // (`wifi.connectivity`), and the probe only runs while this modal is open
-  // *and* the connection already looks offline (see `recheck` below).
+  // modal-local: the probe is the authority behind the banner (see `offline`),
+  // and the TopBar chip runs the same level→probe confirmation in `useWifi`.
   const [connectivity, setConnectivity] = useState<Connectivity | null>(null);
   const [portal, setPortal] = useState<PortalStatus | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
-  // "Connected but not online" — the banner condition. The probe is the
-  // authority once it has landed (a direct measurement, and the only thing that
-  // can name the sign-in URL); Windows' level is the gate that decides whether
-  // the probe runs at all.
-  const online = portal ? portal.state === "internet" : connectivity === "internet";
-  const noInternet = liveSsid !== null && !online;
+  // "Connected but not online" — the banner condition.
+  //
+  // The banner reports the *probe's* verdict, not the raw level. Windows' level
+  // is a hint that lags a fresh association, and letting a lagging sample raise
+  // the warning is exactly the false "sign in" flash we're avoiding; only a
+  // probe that actually saw something wrong (a portal, or no answer at all)
+  // warns. A `null` level is unknown and must never be a problem.
+  //
+  // `unknown` (active probing is off) is not a verdict, so it defers to the
+  // level. A probe that couldn't run leaves `portal` null — `needsProbe` below
+  // then arms a re-probe rather than warning.
+  const levelBad = connectivity !== null && connectivity !== "internet";
+  const offline =
+    portal?.state === "portal" ||
+    portal?.state === "offline" ||
+    (portal?.state === "unknown" && levelBad);
+  const noInternet = liveSsid !== null && offline;
   // When set, the modal shows the password-entry form for this network
   // instead of the list. Cleared on submit-success / back / modal close.
   const [passwordTarget, _setPasswordTarget] = useState<WifiNetwork | null>(null);
@@ -434,8 +444,11 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     if (!open) return;
     setError(null);
     // Fresh open → re-derive the portal status from scratch; the previous
-    // connection's verdict (and URL) is meaningless for this one.
+    // connection's verdict (and URL) is meaningless for this one. Same for
+    // Windows' level: clearing it to `null` (unknown) means the banner can't
+    // flash a stale verdict before the authoritative read below lands.
     setPortal(null);
+    setConnectivity(null);
     // Authoritative read of the live connection on open. The seed props come
     // from the TopBar chip's `useWifi` subscription, which collapses reads
     // inside a 2s window — so opening the modal shortly after a chip read can
@@ -539,15 +552,6 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
     setPortal(null);
   }
 
-  // Probe once right after a successful join. Windows needs a moment to
-  // re-classify a fresh association (NCSI re-probes on association), so the
-  // level alone can still read `internet` for a few seconds on a portal
-  // network — and "did a portal eat this network?" is exactly the question the
-  // user is staring at. Cost is one bounded request, only on connect.
-  async function probeAfterConnect() {
-    setPortal(await fetchPortalStatus());
-  }
-
   async function handleConnect(net: WifiNetwork) {
     await runAction(net.ssid, "connect", async () => {
       // A network Windows already knows joins by profile name. A first-time
@@ -562,7 +566,12 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       if (!openRef.current) return;
       await refreshAfter();
       if (!openRef.current) return;
-      await probeAfterConnect();
+      // Probe even when the level reads `internet`: NCSI re-classifies a fresh
+      // association asynchronously, so a portal can hide behind an `internet`
+      // level for a few seconds — and "did a portal eat this network?" is
+      // exactly the question the user is staring at. `recheck` is serialized,
+      // so the level-gated auto-probe can't double it.
+      await recheck();
     });
   }
 
@@ -602,17 +611,23 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       setPasswordTarget(null);
       await refreshAfter();
       if (!openRef.current) return;
-      await probeAfterConnect();
+      // Same unconditional post-connect probe as `handleConnect` (see there).
+      await recheck();
     });
   }
 
+  // Serializes overlapping probes — the focus refresh, the auto-probe below and
+  // the post-connect call can all land in the same tick.
+  const recheckBusy = useRef(false);
   // Re-read both layers: Windows' level plus the NCSI-shaped probe. This is
   // the modal's "did the sign-in work?" check — `useFocusRefresh` fires it when
-  // the banner appears and again whenever the window regains focus (i.e. the
-  // moment the user comes back from the browser), and the button below can call
-  // it directly. `enabled` is the banner condition, so while the connection
-  // looks healthy this attaches no listeners and makes no requests.
+  // the cheap level looks bad with no verdict yet (the first probe on open),
+  // when the banner appears, and again whenever the window regains focus (i.e.
+  // the moment the user comes back from the browser). The button below and the
+  // post-connect path can also call it directly.
   const recheck = useCallback(async () => {
+    if (recheckBusy.current) return;
+    recheckBusy.current = true;
     setPortalBusy(true);
     try {
       const c = await fetchWifiCurrent();
@@ -622,10 +637,17 @@ export function WifiModal({ open, onClose, currentSsid, radioOn }: WifiModalProp
       }
       setPortal(await fetchPortalStatus());
     } finally {
+      recheckBusy.current = false;
       setPortalBusy(false);
     }
   }, []);
-  useFocusRefresh(() => void recheck(), [recheck], open && noInternet);
+  // The banner reports the probe verdict, so probe whenever the cheap level
+  // looks bad and there's no verdict for it yet (`needsProbe`), and stay
+  // subscribed while the warning is up so a browser sign-in is noticed the
+  // moment the window regains focus. A healthy connection attaches no
+  // listeners and makes no requests.
+  const needsProbe = liveSsid !== null && levelBad && portal === null;
+  useFocusRefresh(() => void recheck(), [recheck], open && (noInternet || needsProbe));
 
   // Banner action. If the probe hasn't produced a URL yet (still running, or it
   // failed), run it now and open whatever comes back.
